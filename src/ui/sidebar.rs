@@ -542,21 +542,26 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
     Rect::new(area.x, body_y, body_width, body_height)
 }
 
-fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<ResolvedToken>> {
+fn resolved_agent_rows(
+    app: &AppState,
+    entry: &AgentPanelEntry,
+    agent_index: usize,
+) -> Vec<Vec<ResolvedToken>> {
     let label = entry
         .state_labels
         .get(agent_panel_status_key(entry.state, entry.seen))
         .map(String::as_str)
         .unwrap_or_else(|| state_label(entry.state, entry.seen));
-    tokens::agent_rows(&app.sidebar_agents, entry, label)
+    tokens::agent_rows(&app.sidebar_agents, entry, label, agent_index)
 }
 
 pub(crate) fn agent_entry_height_in_body(
     app: &AppState,
+    agent_index: usize,
     entry: &AgentPanelEntry,
     body_height: u16,
 ) -> u16 {
-    (resolved_agent_rows(app, entry)
+    (resolved_agent_rows(app, entry, agent_index)
         .len()
         .max(1)
         .min(u16::MAX as usize) as u16)
@@ -581,7 +586,7 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
     let mut visible = 0usize;
     let entries = agent_panel_entries(app);
     for (index, entry) in entries.iter().enumerate().skip(scroll) {
-        let height = agent_entry_height_in_body(app, entry, body.height);
+        let height = agent_entry_height_in_body(app, index, entry, body.height);
         if used_rows.saturating_add(height) > body.height {
             break;
         }
@@ -601,7 +606,7 @@ fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
         let gap = agent_entry_gap(app, index, entries.len());
-        let needed = agent_entry_height_in_body(app, entry, body.height).saturating_add(gap);
+        let needed = agent_entry_height_in_body(app, index, entry, body.height).saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
         }
@@ -1023,6 +1028,7 @@ fn resolved_token_spans(
         .iter()
         .map(|token| match &token.kind {
             ResolvedTokenKind::StateIcon => display_width(state_icon.0),
+            ResolvedTokenKind::AgentIndex(idx) => display_width(&(idx + 1).to_string()),
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
@@ -1143,6 +1149,12 @@ fn resolved_token_spans(
                 spans.push(Span::styled(
                     truncate_end(text, budgets[index]),
                     apply_token_style(workspace_style, token.style),
+                ));
+            }
+            ResolvedTokenKind::AgentIndex(idx) => {
+                spans.push(Span::styled(
+                    (idx + 1).to_string(),
+                    apply_token_style(secondary_style, token.style),
                 ));
             }
             ResolvedTokenKind::Tab(text)
@@ -1494,7 +1506,7 @@ fn render_agent_detail(
     let body_bottom = body.y + body.height;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
         let label_color = state_label_color(detail.state, detail.seen, p);
-        let rows = resolved_agent_rows(app, detail);
+        let rows = resolved_agent_rows(app, detail, index);
         let height = (rows.len().max(1) as u16).min(body.height);
         if row_y.saturating_add(height) > body_bottom {
             break;
@@ -2154,7 +2166,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         let entry = agent_panel_entries(&app).pop().unwrap();
         assert_eq!(
-            agent_entry_height_in_body(&app, &entry, agent_panel_body_rect(panel, false).height),
+            agent_entry_height_in_body(&app, 0, &entry, agent_panel_body_rect(panel, false).height),
             agent_panel_body_rect(panel, false).height
         );
     }

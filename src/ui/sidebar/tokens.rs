@@ -18,6 +18,7 @@ pub(super) enum ResolvedTokenKind {
     Tab(String),
     Pane(String),
     Agent(String),
+    AgentIndex(usize),
     TerminalTitle(String),
     Branch(String),
     GitStatus { ahead: usize, behind: usize },
@@ -39,6 +40,7 @@ pub(super) fn agent_rows(
     config: &AgentsSidebarConfig,
     entry: &AgentPanelEntry,
     state_text: &str,
+    agent_index: usize,
 ) -> Vec<Vec<ResolvedToken>> {
     config
         .rows_for_agent(entry.agent)
@@ -55,6 +57,9 @@ pub(super) fn agent_rows(
                         }
                         AgentSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(entry.primary_label.clone()))
+                        }
+                        AgentSidebarToken::AgentIndex => {
+                            Some(ResolvedTokenKind::AgentIndex(agent_index))
                         }
                         AgentSidebarToken::Tab => {
                             entry.primary_tab_label.clone().map(ResolvedTokenKind::Tab)
@@ -193,7 +198,7 @@ mod tests {
             ..Default::default()
         };
 
-        let rows = agent_rows(&config, &entry, "working");
+        let rows = agent_rows(&config, &entry, "working", 0);
 
         assert_eq!(rows.len(), 2);
         assert_eq!(
@@ -223,7 +228,7 @@ mod tests {
         };
 
         assert_eq!(
-            agent_rows(&config, &entry, "deep in the mines"),
+            agent_rows(&config, &entry, "deep in the mines", 0),
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::StateText("deep in the mines".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("reviewing auth".into())),
@@ -249,7 +254,7 @@ mod tests {
         };
 
         assert_eq!(
-            agent_rows(&config, &entry, "working"),
+            agent_rows(&config, &entry, "working", 0),
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("⠋ raw title".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("raw title".into())),
@@ -271,7 +276,7 @@ mod tests {
         pi.agent_label = Some("renamed pi".into());
 
         assert_eq!(
-            agent_rows(&config, &pi, "working"),
+            agent_rows(&config, &pi, "working", 0),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
                 "renamed pi".into()
             ))]]
@@ -279,7 +284,7 @@ mod tests {
 
         pi.agent = None;
         assert_eq!(
-            agent_rows(&config, &pi, "working"),
+            agent_rows(&config, &pi, "working", 0),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
                 "repo".into()
             ))]]
