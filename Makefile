@@ -1,6 +1,20 @@
+ifeq ($(OS),Windows_NT)
+ZIG ?= zig
+else
 ZIG ?= /opt/homebrew/opt/zig@0.15/bin/zig
+endif
 
-.PHONY: build install check test clean
+.PHONY: setup build install check test clean
+
+setup:
+ifeq ($(OS),Windows_NT)
+	winget install zig.zig --version 0.15.2 --accept-source-agreements --accept-package-agreements
+	rustup set default-host x86_64-pc-windows-msvc
+	rustup toolchain install 1.96.1-x86_64-pc-windows-msvc
+	rustup default 1.96.1-x86_64-pc-windows-msvc
+else
+	rustup toolchain install 1.96.1
+endif
 
 build:
 	ZIG=$(ZIG) cargo build --release
