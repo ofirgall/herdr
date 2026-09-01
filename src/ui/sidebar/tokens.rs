@@ -147,7 +147,7 @@ pub(super) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'
     {
         " "
     } else {
-        " · "
+        " "
     }
 }
 
