@@ -4,7 +4,7 @@ else
 ZIG ?= /opt/homebrew/opt/zig@0.15/bin/zig
 endif
 
-.PHONY: setup build install check test clean
+.PHONY: setup build install run check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -21,6 +21,9 @@ build:
 
 install:
 	ZIG=$(ZIG) cargo install --locked --path .
+
+run:
+	env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH ZIG=$(ZIG) cargo run -- $(ARGS)
 
 check:
 	ZIG=$(ZIG) cargo fmt --check
