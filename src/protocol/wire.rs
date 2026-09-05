@@ -486,6 +486,9 @@ pub struct CellData {
     pub skip: bool,
     /// Index into `FrameData::hyperlinks` for this cell's OSC 8 target, if any.
     pub hyperlink: Option<u32>,
+    /// Underline color as a packed u32, if the cell specifies one distinct
+    /// from its foreground color.
+    pub underline_color: Option<u32>,
 }
 
 impl CellData {
@@ -497,6 +500,10 @@ impl CellData {
             modifier: modifier_to_u16(cell.modifier),
             skip: cell.skip,
             hyperlink: None,
+            underline_color: match cell.underline_color {
+                ratatui::style::Color::Reset => None,
+                color => Some(color_to_u32(color)),
+            },
         }
     }
 }
@@ -1414,6 +1421,7 @@ mod tests {
                     modifier: Modifier::BOLD.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "i".into(),
@@ -1422,6 +1430,7 @@ mod tests {
                     modifier: Modifier::ITALIC.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "!".into(),
@@ -1430,6 +1439,7 @@ mod tests {
                     modifier: (Modifier::BOLD | Modifier::UNDERLINED).bits(),
                     skip: false,
                     hyperlink: Some(0),
+                    underline_color: Some(color_to_u32(Color::Rgb(255, 0, 0))),
                 },
                 CellData {
                     symbol: " ".into(),
@@ -1438,6 +1448,7 @@ mod tests {
                     modifier: Modifier::empty().bits(),
                     skip: true,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "→".into(), // multi-byte grapheme
@@ -1446,6 +1457,7 @@ mod tests {
                     modifier: Modifier::REVERSED.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "🦀".into(), // emoji, wide grapheme cluster
@@ -1454,6 +1466,7 @@ mod tests {
                     modifier: Modifier::empty().bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
             ],
             width: 3,
@@ -1686,6 +1699,7 @@ mod tests {
                 modifier: ((i % 16) as u16),
                 skip: i % 100 == 0,
                 hyperlink: None,
+                underline_color: None,
             })
             .collect();
 
@@ -2036,6 +2050,7 @@ mod tests {
                     modifier: 0,
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 };
                 5
             ], // 5 cells but 3×2 = 6 expected
@@ -2102,6 +2117,14 @@ mod tests {
 
         let c = Color::Rgb(255, 255, 255);
         assert_eq!(u32_to_color(color_to_u32(c)), c);
+    }
+
+    #[test]
+    fn underline_color_rgb_roundtrips_through_color_to_u32() {
+        let color = ratatui::style::Color::Rgb(255, 0, 0);
+        let packed = color_to_u32(color);
+        let restored = u32_to_color(packed);
+        assert_eq!(restored, color);
     }
 
     // ---- Modifier conversion ----

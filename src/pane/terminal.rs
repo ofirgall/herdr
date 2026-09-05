@@ -2933,6 +2933,7 @@ fn cell_data_from_style(symbol: String, style: Style) -> CellData {
         modifier: crate::protocol::modifier_to_u16(style.add_modifier),
         skip: false,
         hyperlink: None,
+        underline_color: style.underline_color.map(crate::protocol::color_to_u32),
     }
 }
 
