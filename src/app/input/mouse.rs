@@ -927,11 +927,17 @@ impl AppState {
                 }
             }
 
-            MouseEventKind::Up(MouseButton::Middle) | MouseEventKind::Drag(MouseButton::Middle)
+            MouseEventKind::Down(MouseButton::Middle)
+            | MouseEventKind::Up(MouseButton::Middle)
+            | MouseEventKind::Drag(MouseButton::Middle)
                 if !in_sidebar =>
             {
                 if let Some(info) = self.pane_mouse_target(mouse.column, mouse.row).cloned() {
-                    let _ = self.forward_pane_mouse_button(terminal_runtimes, &info, mouse);
+                    if self.forward_pane_mouse_button(terminal_runtimes, &info, mouse) {
+                        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Middle)) {
+                            return self.mouse_pane_focus_action(info.id);
+                        }
+                    }
                 }
             }
 
@@ -4774,5 +4780,62 @@ mod tests {
         };
 
         assert_eq!(wheel_routing(input_state), WheelRouting::HostScroll);
+    }
+
+    #[tokio::test]
+    async fn middle_click_down_forwarded_to_pane() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        // Splitting moves focus to the new pane, leaving `pane_id` unfocused
+        // so a middle click on it is expected to produce a focus action.
+        ws.test_split(Direction::Vertical);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+
+        let info = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == pane_id)
+            .expect("pane info")
+            .clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                4,
+            );
+        app.state.insert_test_runtime(pane_id, runtime);
+
+        let col = info.inner_rect.x + 1;
+        let row = info.inner_rect.y + 1;
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
+            mouse(MouseEventKind::Down(MouseButton::Middle), col, row),
+        );
+
+        assert!(
+            input_rx.try_recv().is_ok(),
+            "expected middle-click down bytes to be forwarded to the pane"
+        );
+
+        match action {
+            Some(MouseAction::FocusPane {
+                ws_idx,
+                pane_id: focused_pane_id,
+            }) => {
+                assert_eq!(ws_idx, 0);
+                assert_eq!(focused_pane_id, pane_id);
+            }
+            _ => panic!("expected middle-click down to return a FocusPane action"),
+        }
     }
 }
