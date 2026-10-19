@@ -19,7 +19,7 @@ RUN_ENV := env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_CONFIG_
 DEV_CONFIG_FILE ?= $(firstword $(wildcard $(STABLE_CONFIG_DIR)/config-dev.generated.toml) $(STABLE_CONFIG_DIR)/config.toml)
 RUN_SHARED := $(RUN_ENV) HERDR_CONFIG_PATH="$(DEV_CONFIG_FILE)" cargo run --
 
-.PHONY: setup build install run run-restart run-clean-config share-plugins check test clean
+.PHONY: setup build install run run-restart run-dev-plugins run-clean-config share-plugins check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -46,6 +46,11 @@ run: share-plugins
 run-restart:
 	-$(RUN_SHARED) server stop
 	@$(MAKE) --no-print-directory run
+
+# `make run` with a dev-only plugins.json: plugin checkouts stay shared, but the
+# registry is left alone, so dev can point a plugin at a local checkout.
+run-dev-plugins:
+	@$(MAKE) --no-print-directory run SHARED_PLUGIN_ENTRIES="plugins .plugins.lock"
 
 # Debug build with default config and no plugins, in its own config/state dirs and
 # server. Panes inherit the XDG overrides. Reset by deleting $(CLEAN_RUN_DIR).
