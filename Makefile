@@ -1,10 +1,21 @@
 ifeq ($(OS),Windows_NT)
 ZIG ?= zig
+CONFIG_ROOT ?= $(or $(XDG_CONFIG_HOME),$(APPDATA))
 else
 ZIG ?= /opt/homebrew/opt/zig@0.16/bin/zig
+CONFIG_ROOT ?= $(or $(XDG_CONFIG_HOME),$(HOME)/.config)
 endif
 
-.PHONY: setup build install run check test clean
+# Debug builds keep their config, plugins, and server sockets in herdr-dev, so a
+# debug server runs alongside the installed one.
+STABLE_CONFIG_DIR ?= $(CONFIG_ROOT)/herdr
+DEV_CONFIG_DIR ?= $(CONFIG_ROOT)/herdr-dev
+# Kept short: server socket paths must fit in sockaddr_un (104 bytes on macOS).
+CLEAN_RUN_DIR ?= $(CONFIG_ROOT)/herdr-clean-run
+SHARED_PLUGIN_ENTRIES := plugins plugins.json .plugins.lock
+RUN_ENV := env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_CONFIG_PATH ZIG=$(ZIG)
+
+.PHONY: setup build install run run-clean-config share-plugins check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -22,8 +33,38 @@ build:
 install:
 	ZIG=$(ZIG) cargo install --locked --path .
 
-run:
-	env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH ZIG=$(ZIG) cargo run -- $(ARGS)
+# Debug build using the installed config and plugins.
+run: share-plugins
+	$(RUN_ENV) HERDR_CONFIG_PATH="$(STABLE_CONFIG_DIR)/config.toml" cargo run -- $(ARGS)
+
+# Debug build with default config and no plugins, in its own config/state dirs and
+# server. Panes inherit the XDG overrides. Reset by deleting $(CLEAN_RUN_DIR).
+run-clean-config:
+	$(RUN_ENV) XDG_CONFIG_HOME="$(CLEAN_RUN_DIR)/config" XDG_STATE_HOME="$(CLEAN_RUN_DIR)/state" cargo run -- $(ARGS)
+
+# Link the dev plugin registry, checkouts, and registry lock to the installed ones.
+# Existing dev entries are moved aside once. Takes effect when the dev server starts.
+share-plugins:
+	@mkdir -p "$(DEV_CONFIG_DIR)"
+	@linked=; \
+	for entry in $(SHARED_PLUGIN_ENTRIES); do \
+		link="$(DEV_CONFIG_DIR)/$$entry"; \
+		[ -L "$$link" ] && continue; \
+		if [ -e "$$link" ]; then \
+			if [ -e "$$link.dev-backup" ]; then \
+				echo "$$link and $$link.dev-backup both exist; remove one to share plugins" >&2; \
+				exit 1; \
+			fi; \
+			mv "$$link" "$$link.dev-backup"; \
+		fi; \
+		MSYS=winsymlinks:nativestrict ln -s "$(STABLE_CONFIG_DIR)/$$entry" "$$link" || exit 1; \
+		linked=1; \
+	done; \
+	if [ -n "$$linked" ] && [ -S "$(DEV_CONFIG_DIR)/herdr.sock" ]; then \
+		echo "Plugins are now shared, but a running dev server still uses its old config and plugins." >&2; \
+		echo "Restart it: make run ARGS=\"server stop\" && make run" >&2; \
+		exit 1; \
+	fi
 
 check:
 	ZIG=$(ZIG) cargo fmt --check
