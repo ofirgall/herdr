@@ -29,7 +29,7 @@ try {
 
 if ($null -eq $payload) { Exit-Hook }
 $event = if ($payload.hook_event_name -is [string]) { $payload.hook_event_name } else { $payload.hookEventName }
-if (-not [string]::IsNullOrWhiteSpace($event) -and $event -ne "sessionStart") { Exit-Hook }
+if (-not [string]::IsNullOrWhiteSpace($event) -and $event -notin @("sessionStart", "beforeSubmitPrompt", "stop")) { Exit-Hook }
 
 $sessionId = $null
 foreach ($name in @("session_id", "sessionId", "conversation_id", "conversationId")) {

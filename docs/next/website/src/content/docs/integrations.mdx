@@ -281,11 +281,11 @@ Install the Cursor Agent CLI hook:
 herdr integration install cursor
 ```
 
-The hook reports session identity through Cursor's `sessionStart` hook while Cursor Agent CLI runs inside a Herdr pane. Cursor state comes from Herdr's screen manifest detection.
+The hook reports session identity through Cursor's `sessionStart`, `beforeSubmitPrompt`, and `stop` hooks while Cursor Agent CLI runs inside a Herdr pane, so a session Herdr missed at startup is picked up on the next prompt. Cursor state comes from Herdr's screen manifest detection.
 
-Herdr uses `~/.cursor` by default, or `CURSOR_CONFIG_DIR` when set. The Cursor config directory must already exist. Install writes `herdr-agent-state.sh` (`herdr-agent-state.ps1` on Windows) and adds a Herdr `sessionStart` entry to `hooks.json`. Uninstall removes the matching hook entry and deletes the hook script.
+Herdr uses `~/.cursor` by default, or `CURSOR_CONFIG_DIR` when set. The Cursor config directory must already exist. Install writes `herdr-agent-state.sh` (`herdr-agent-state.ps1` on Windows) and adds Herdr `sessionStart`, `beforeSubmitPrompt`, and `stop` entries to `hooks.json`. Uninstall removes the matching hook entries and deletes the hook script.
 
-After Cursor emits a session start event, Herdr can use the reported session id to resume the pane with `cursor-agent --resume <id>`. The `cursor-agent` command must be on `PATH` when Herdr restores the pane; Herdr does not launch the generic `agent` command.
+After Cursor reports a session, Herdr can use the reported session id to resume the pane with `cursor-agent --resume <id>`. The `cursor-agent` command must be on `PATH` when Herdr restores the pane; Herdr does not launch the generic `agent` command.
 
 ## MastraCode
 

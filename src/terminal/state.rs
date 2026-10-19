@@ -1413,6 +1413,9 @@ impl TerminalState {
                     Some("startup" | "clear" | "resume" | "compact" | "branch")
                 )
                 | ("herdr:antigravity_cli", "agy", None)
+                // Cursor reports the open chat on every prompt, so a new id
+                // means the user switched chats with /resume or /new.
+                | ("herdr:cursor", "cursor", None)
         )
     }
 
@@ -4982,6 +4985,37 @@ mod tests {
                 .as_ref()
                 .map(|session| session.session_ref.value.as_str()),
             Some("grok-new")
+        );
+    }
+
+    #[test]
+    fn cursor_session_ref_replaces_existing_session_ref() {
+        let mut terminal = test_terminal();
+        terminal
+            .set_agent_session_ref(
+                "herdr:cursor".into(),
+                "cursor".into(),
+                crate::agent_resume::AgentSessionRef::id("cursor-old"),
+                Some(20),
+            )
+            .expect("initial session should be accepted");
+
+        let mutation = terminal
+            .set_agent_session_ref(
+                "herdr:cursor".into(),
+                "cursor".into(),
+                crate::agent_resume::AgentSessionRef::id("cursor-resumed"),
+                Some(21),
+            )
+            .expect("a resumed chat should replace the cursor session");
+
+        assert!(mutation.session_ref_changed);
+        assert_eq!(
+            terminal
+                .persisted_agent_session
+                .as_ref()
+                .map(|session| session.session_ref.value.as_str()),
+            Some("cursor-resumed")
         );
     }
 

@@ -255,6 +255,7 @@ const CURSOR_HOOK_ASSET: &str = if cfg!(windows) {
     include_str!("assets/cursor/herdr-agent-state.sh")
 };
 const CURSOR_INTEGRATION_VERSION: u32 = 2;
+const CURSOR_SESSION_HOOK_EVENTS: [&str; 3] = ["sessionStart", "beforeSubmitPrompt", "stop"];
 #[cfg(windows)]
 const ANTIGRAVITY_CLI_HOOK_INSTALL_NAME: &str = "herdr-agent-state.ps1";
 #[cfg(not(windows))]

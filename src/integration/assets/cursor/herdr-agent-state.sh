@@ -29,7 +29,7 @@ def first_text(*names):
     return None
 
 event = first_text("hook_event_name", "hookEventName")
-if event not in (None, "sessionStart"):
+if event not in (None, "sessionStart", "beforeSubmitPrompt", "stop"):
     raise SystemExit(0)
 
 session_id = first_text("session_id", "sessionId", "conversation_id", "conversationId")

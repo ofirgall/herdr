@@ -4283,20 +4283,25 @@ fn install_cursor_writes_hook_and_updates_hooks_json() {
     let hooks_file: Value =
         serde_json::from_str(&fs::read_to_string(cursor_dir.join("hooks.json")).unwrap()).unwrap();
     let hooks = hooks_file.get("hooks").and_then(Value::as_object).unwrap();
-    let session_start = hooks.get("sessionStart").and_then(Value::as_array).unwrap();
-    assert_eq!(session_start.len(), 1);
-    assert_eq!(
-        session_start[0].get("command").and_then(Value::as_str),
-        Some(hook_command(&installed.hook_path, Some("session")).as_str())
-    );
-    assert!(hooks.get("beforeSubmitPrompt").is_none());
+    let session_command = hook_command(&installed.hook_path, Some("session"));
+    for event in ["sessionStart", "beforeSubmitPrompt"] {
+        let entries = hooks.get(event).and_then(Value::as_array).unwrap();
+        assert_eq!(entries.len(), 1, "{event}");
+        assert_eq!(
+            entries[0].get("command").and_then(Value::as_str),
+            Some(session_command.as_str()),
+            "{event}"
+        );
+    }
     assert!(hooks.get("beforeShellExecution").is_none());
-    let stop = hooks.get("stop").and_then(Value::as_array).unwrap();
-    assert_eq!(stop.len(), 1);
-    assert_eq!(
-        stop[0].get("command").and_then(Value::as_str),
-        Some("echo keep-me")
-    );
+    let stop: Vec<_> = hooks
+        .get("stop")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry.get("command").and_then(Value::as_str))
+        .collect();
+    assert_eq!(stop, ["echo keep-me", session_command.as_str()]);
 
     std::env::remove_var(CURSOR_CONFIG_DIR_ENV_VAR);
     let _ = fs::remove_dir_all(base);
@@ -4316,8 +4321,10 @@ fn install_cursor_is_idempotent_for_hook_entries() {
     let hooks_file: Value =
         serde_json::from_str(&fs::read_to_string(cursor_dir.join("hooks.json")).unwrap()).unwrap();
     let hooks = hooks_file.get("hooks").and_then(Value::as_object).unwrap();
-    let session_start = hooks.get("sessionStart").and_then(Value::as_array).unwrap();
-    assert_eq!(session_start.len(), 1);
+    for event in ["sessionStart", "beforeSubmitPrompt", "stop"] {
+        let entries = hooks.get(event).and_then(Value::as_array).unwrap();
+        assert_eq!(entries.len(), 1, "{event}");
+    }
 
     std::env::remove_var(CURSOR_CONFIG_DIR_ENV_VAR);
     let _ = fs::remove_dir_all(base);
@@ -4334,7 +4341,10 @@ fn uninstall_cursor_removes_herdr_hooks_and_preserves_others() {
     install_cursor().unwrap();
     let mut hooks_file: Value =
         serde_json::from_str(&fs::read_to_string(cursor_dir.join("hooks.json")).unwrap()).unwrap();
-    hooks_file["hooks"]["beforeSubmitPrompt"] = json!([{ "command": "echo user-defined" }]);
+    hooks_file["hooks"]["beforeSubmitPrompt"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "command": "echo user-defined" }));
     fs::write(
         cursor_dir.join("hooks.json"),
         serde_json::to_string_pretty(&hooks_file).unwrap(),
@@ -4350,7 +4360,15 @@ fn uninstall_cursor_removes_herdr_hooks_and_preserves_others() {
         serde_json::from_str(&fs::read_to_string(cursor_dir.join("hooks.json")).unwrap()).unwrap();
     let hooks = hooks_file.get("hooks").and_then(Value::as_object).unwrap();
     assert!(!hooks.contains_key("sessionStart"));
-    assert!(hooks.contains_key("beforeSubmitPrompt"));
+    assert!(!hooks.contains_key("stop"));
+    let before_submit = hooks
+        .get("beforeSubmitPrompt")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(
+        before_submit,
+        &vec![json!({ "command": "echo user-defined" })]
+    );
 
     std::env::remove_var(CURSOR_CONFIG_DIR_ENV_VAR);
     let _ = fs::remove_dir_all(base);
