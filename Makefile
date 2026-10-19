@@ -14,8 +14,9 @@ DEV_CONFIG_DIR ?= $(CONFIG_ROOT)/herdr-dev
 CLEAN_RUN_DIR ?= $(CONFIG_ROOT)/herdr-clean-run
 SHARED_PLUGIN_ENTRIES := plugins plugins.json .plugins.lock
 RUN_ENV := env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_CONFIG_PATH ZIG=$(ZIG)
+RUN_SHARED := $(RUN_ENV) HERDR_CONFIG_PATH="$(STABLE_CONFIG_DIR)/config.toml" cargo run --
 
-.PHONY: setup build install run run-clean-config share-plugins check test clean
+.PHONY: setup build install run run-restart run-clean-config share-plugins check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -35,7 +36,13 @@ install:
 
 # Debug build using the installed config and plugins.
 run: share-plugins
-	$(RUN_ENV) HERDR_CONFIG_PATH="$(STABLE_CONFIG_DIR)/config.toml" cargo run -- $(ARGS)
+	$(RUN_SHARED) $(ARGS)
+
+# Rebuild, stop the running dev server (if any), and start `make run` again.
+# The build finishes before the old server stops.
+run-restart:
+	-$(RUN_SHARED) server stop
+	@$(MAKE) --no-print-directory run
 
 # Debug build with default config and no plugins, in its own config/state dirs and
 # server. Panes inherit the XDG overrides. Reset by deleting $(CLEAN_RUN_DIR).
@@ -62,7 +69,7 @@ share-plugins:
 	done; \
 	if [ -n "$$linked" ] && [ -S "$(DEV_CONFIG_DIR)/herdr.sock" ]; then \
 		echo "Plugins are now shared, but a running dev server still uses its old config and plugins." >&2; \
-		echo "Restart it: make run ARGS=\"server stop\" && make run" >&2; \
+		echo "Restart it: make run-restart" >&2; \
 		exit 1; \
 	fi
 
