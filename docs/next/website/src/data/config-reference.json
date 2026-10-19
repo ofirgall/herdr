@@ -1061,6 +1061,36 @@
           ]
         },
         {
+          "key": "ui.status_icons.blocked",
+          "type": "string",
+          "default": "unset",
+          "description": "Override the agent status glyph for the blocked state. Unset or empty keeps the status_indicators glyph."
+        },
+        {
+          "key": "ui.status_icons.working",
+          "type": "string",
+          "default": "unset",
+          "description": "Override the agent status glyph for the working state. Unset or empty keeps the status_indicators glyph."
+        },
+        {
+          "key": "ui.status_icons.done",
+          "type": "string",
+          "default": "unset",
+          "description": "Override the agent status glyph for the done state. Unset or empty keeps the status_indicators glyph."
+        },
+        {
+          "key": "ui.status_icons.idle",
+          "type": "string",
+          "default": "unset",
+          "description": "Override the agent status glyph for the idle state. Unset or empty keeps the status_indicators glyph."
+        },
+        {
+          "key": "ui.status_icons.unknown",
+          "type": "string",
+          "default": "unset",
+          "description": "Override the agent status glyph for the unknown state. Unset or empty keeps the status_indicators glyph."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

@@ -48,7 +48,9 @@ impl ClientShellState {
     fn selected_index_for_settings_section(&self, section: ClientSettingsSection) -> usize {
         match section {
             ClientSettingsSection::Theme => theme_index(&self.config.theme_name),
-            ClientSettingsSection::Indicators => indicator_index(self.config.status_indicators),
+            ClientSettingsSection::Indicators => {
+                indicator_index(self.config.status_indicators.style)
+            }
             ClientSettingsSection::Sound => usize::from(!self.config.sound_enabled),
             ClientSettingsSection::Toast => toast_index(self.config.toast_delivery),
             ClientSettingsSection::Integrations => 0,

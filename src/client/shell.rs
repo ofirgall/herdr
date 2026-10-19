@@ -175,7 +175,30 @@ fn pane_surface_topology_signature(surface: &PaneSurfaceFrame) -> u64 {
     hash
 }
 
-fn status_icon(
+/// The client's agent status glyph settings: a built-in style plus per-state overrides.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StatusIndicators {
+    pub(crate) style: crate::config::StatusIndicatorStyle,
+    pub(crate) icons: crate::config::StatusIconsConfig,
+}
+
+impl StatusIndicators {
+    pub(crate) fn from_config(config: &crate::config::Config) -> Self {
+        Self {
+            style: config.ui.status_indicators,
+            icons: config.ui.status_icons.clone(),
+        }
+    }
+}
+
+fn status_icon(status: crate::api::schema::AgentStatus, indicators: &StatusIndicators) -> &str {
+    indicators
+        .icons
+        .get(status)
+        .unwrap_or_else(|| style_status_icon(status, indicators.style))
+}
+
+fn style_status_icon(
     status: crate::api::schema::AgentStatus,
     style: crate::config::StatusIndicatorStyle,
 ) -> &'static str {
@@ -197,7 +220,7 @@ fn status_icon(
 }
 
 fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
-    status_icon(status, crate::config::StatusIndicatorStyle::Dots)
+    style_status_icon(status, crate::config::StatusIndicatorStyle::Dots)
 }
 
 fn status_priority(status: crate::api::schema::AgentStatus) -> u8 {

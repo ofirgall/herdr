@@ -262,3 +262,16 @@ mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
 mod startup_overlays;
+
+#[test]
+fn status_icon_overrides_replace_style_glyphs_per_state() {
+    let mut config = Config::default();
+    config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+    config.ui.status_icons.blocked = Some("!".into());
+    config.ui.status_icons.idle = Some(String::new());
+    let indicators = StatusIndicators::from_config(&config);
+
+    assert_eq!(status_icon(AgentStatus::Blocked, &indicators), "!");
+    assert_eq!(status_icon(AgentStatus::Working, &indicators), "◐");
+    assert_eq!(status_icon(AgentStatus::Idle, &indicators), "○");
+}

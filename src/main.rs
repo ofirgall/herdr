@@ -340,6 +340,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
+# Per-state glyph overrides; unset states keep the status_indicators glyph.
+# status_icons = { blocked = "!", working = "◐" }
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"

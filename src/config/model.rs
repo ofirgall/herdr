@@ -125,6 +125,38 @@ impl StatusIndicatorStyle {
     }
 }
 
+/// Per-state glyphs that replace the `status_indicators` style's glyph.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct StatusIconsConfig {
+    /// Glyph for blocked agents. Default: unset (the indicator style's glyph).
+    pub blocked: Option<String>,
+    /// Glyph for working agents. Default: unset (the indicator style's glyph).
+    pub working: Option<String>,
+    /// Glyph for agents that finished unseen work. Default: unset (the indicator style's glyph).
+    pub done: Option<String>,
+    /// Glyph for idle agents. Default: unset (the indicator style's glyph).
+    pub idle: Option<String>,
+    /// Glyph for panes with no detected agent state. Default: unset (the indicator style's glyph).
+    pub unknown: Option<String>,
+}
+
+impl StatusIconsConfig {
+    /// The configured glyph for `status`, ignoring empty values.
+    pub fn get(&self, status: crate::api::schema::AgentStatus) -> Option<&str> {
+        use crate::api::schema::AgentStatus;
+        match status {
+            AgentStatus::Blocked => &self.blocked,
+            AgentStatus::Working => &self.working,
+            AgentStatus::Done => &self.done,
+            AgentStatus::Idle => &self.idle,
+            AgentStatus::Unknown => &self.unknown,
+        }
+        .as_deref()
+        .filter(|glyph| !glyph.is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -998,6 +1030,8 @@ pub struct UiConfig {
     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
     /// Agent status indicator style. Saved values are "dots" or "symbols". Default: "dots".
     pub status_indicators: StatusIndicatorStyle,
+    /// Per-state glyphs that override the `status_indicators` style.
+    pub status_icons: StatusIconsConfig,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     /// Accent color for highlights, borders, and navigation UI.
@@ -1226,6 +1260,7 @@ impl Default for UiConfig {
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
+            status_icons: StatusIconsConfig::default(),
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
             toast: ToastConfig::default(),
@@ -1490,6 +1525,29 @@ status_indicators = "symbols"
         )
         .unwrap();
         assert_eq!(config.ui.status_indicators, StatusIndicatorStyle::Symbols);
+    }
+
+    #[test]
+    fn status_icons_override_individual_states() {
+        use crate::api::schema::AgentStatus;
+        assert_eq!(
+            Config::default().ui.status_icons,
+            StatusIconsConfig::default()
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+[ui.status_icons]
+working = "W"
+done = ""
+"#,
+        )
+        .unwrap();
+        let icons = &config.ui.status_icons;
+        assert_eq!(icons.get(AgentStatus::Working), Some("W"));
+        // Empty and missing glyphs fall back to the indicator style.
+        assert_eq!(icons.get(AgentStatus::Done), None);
+        assert_eq!(icons.get(AgentStatus::Blocked), None);
     }
 
     #[test]

@@ -124,7 +124,7 @@ impl ClientShellConfig {
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
-            status_indicators: config.ui.status_indicators,
+            status_indicators: super::StatusIndicators::from_config(config),
             sound_enabled: config.ui.sound.enabled,
             toast_delivery: config.ui.toast.delivery,
             toast_delay_seconds: config.ui.toast.delay_seconds,
@@ -351,7 +351,7 @@ impl ClientShellConfig {
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
-                self.status_indicators = ui.status_indicators;
+                self.status_indicators = super::StatusIndicators::from_config(config);
                 self.sound_enabled = ui.sound.enabled;
                 self.toast_delivery = ui.toast.delivery;
                 self.toast_delay_seconds = ui.toast.delay_seconds;
@@ -496,7 +496,7 @@ mod tests {
             crate::config::AgentPanelSortConfig::Priority
         );
         assert_eq!(
-            shell.status_indicators,
+            shell.status_indicators.style,
             crate::config::StatusIndicatorStyle::Symbols
         );
         assert_eq!(shell.agents.row_gap, 2);

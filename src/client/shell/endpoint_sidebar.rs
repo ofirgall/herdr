@@ -177,7 +177,7 @@ pub(super) fn render_collapsed(
                 rect.x.saturating_add(number_width),
                 rect.y,
                 rect.width.saturating_sub(number_width),
-                status_icon(workspace.agent_status, config.status_indicators),
+                status_icon(workspace.agent_status, &config.status_indicators),
                 Style::default()
                     .fg(if stale {
                         palette.overlay0
@@ -472,7 +472,7 @@ pub(super) fn render_expanded(
                     buffer,
                     nested,
                     status,
-                    config.status_indicators,
+                    &config.status_indicators,
                     entry,
                     tokens,
                     endpoint_active && workspace.focused,

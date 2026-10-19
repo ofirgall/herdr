@@ -359,6 +359,15 @@ status_indicators = "symbols"
 
 The symbols are static, so this option does not enable spinner animation.
 
+To replace individual glyphs, set any of `blocked`, `working`, `done`, `idle`, and `unknown` under `[ui.status_icons]`. Unset or empty states keep the glyph from `status_indicators`. Use single-cell characters so sidebar columns stay aligned:
+
+```toml
+[ui.status_icons]
+blocked = "!"
+working = "◐"
+done = "✓"
+```
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:
