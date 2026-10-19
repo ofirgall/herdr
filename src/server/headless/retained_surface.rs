@@ -536,7 +536,8 @@ impl HeadlessServer {
                 protocol::MAX_FRAME_SIZE
             };
             let mut serialized =
-                match Self::frame_server_message_with_max(prepared.message(), max_frame_size) {
+                match Self::frame_server_message_with_max(&prepared.wire_message(), max_frame_size)
+                {
                     Ok(serialized) => serialized,
                     Err(error) => {
                         warn!(
@@ -624,6 +625,7 @@ mod tests {
             modifier: 0,
             skip: false,
             hyperlink: None,
+            underline_color: None,
         }
     }
 

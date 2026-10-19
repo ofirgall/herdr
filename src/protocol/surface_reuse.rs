@@ -86,18 +86,76 @@ pub(crate) struct Decoder {
     baseline: Option<CellBaseline>,
     surface_delta: bool,
     surface_scroll: bool,
+    surface_underline: bool,
 }
 
 impl Decoder {
-    pub(crate) fn new(surface_delta: bool, surface_scroll: bool) -> Self {
+    pub(crate) fn new(surface_delta: bool, surface_scroll: bool, surface_underline: bool) -> Self {
         Self {
             baseline: None,
             surface_delta,
             surface_scroll,
+            surface_underline,
         }
     }
 
     pub(crate) fn decode(&mut self, message: ServerMessage) -> Result<ServerMessage, String> {
+        use super::surface_underline;
+        let (inner, colors) = match message {
+            ServerMessage::EndpointControl { kind, data }
+                if kind == surface_underline::MESSAGE_KIND =>
+            {
+                if !self.surface_underline {
+                    return Err("surface underline was not negotiated".into());
+                }
+                surface_underline::unwrap(&data)?
+            }
+            message => return self.decode_cells(message),
+        };
+        let mut message = self.decode_cells(inner)?;
+        match &mut message {
+            ServerMessage::PaneSurface(surface) => {
+                surface_underline::apply_to_surface(surface, &colors)?;
+            }
+            ServerMessage::PaneSurfacePatch(patch) => {
+                surface_underline::apply_to_patch(patch, &colors)?;
+            }
+            _ => return Err("surface underline must wrap a surface update".into()),
+        }
+        self.retain_underline_colors(&message);
+        Ok(message)
+    }
+
+    /// Later reuse, delta, and scroll updates copy cells from the baseline, so it
+    /// must hold the colors applied after the canonical decode.
+    fn retain_underline_colors(&mut self, message: &ServerMessage) {
+        let Some(base) = &mut self.baseline else {
+            return;
+        };
+        match message {
+            ServerMessage::PaneSurface(surface)
+                if base.surface_revision == surface.surface_revision =>
+            {
+                base.cells.clone_from(&surface.frame.cells);
+                if self.surface_delta {
+                    base.popup = popup_baseline(surface);
+                }
+            }
+            ServerMessage::PaneSurfacePatch(patch)
+                if base.surface_revision == patch.surface_revision =>
+            {
+                for row in &patch.rows {
+                    let start = usize::from(row.y) * usize::from(base.width) + usize::from(row.x);
+                    if let Some(cells) = base.cells.get_mut(start..start + row.cells.len()) {
+                        cells.clone_from_slice(&row.cells);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn decode_cells(&mut self, message: ServerMessage) -> Result<ServerMessage, String> {
         let message = match message {
             ServerMessage::EndpointControl { kind, data }
                 if kind == super::surface_delta::MESSAGE_KIND =>

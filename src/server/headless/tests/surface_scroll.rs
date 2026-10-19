@@ -30,7 +30,7 @@ async fn surface_scroll_sends_scrolling_output_as_a_shift_and_new_rows() {
         .render_state
         .enable_surface_scroll(true);
     server.render_and_stream();
-    let mut decoder = protocol::surface_reuse::Decoder::new(false, true);
+    let mut decoder = protocol::surface_reuse::Decoder::new(false, true, false);
     let ServerMessage::PaneSurface(mut shell) = decoder
         .decode(read_server_message(
             render_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -85,5 +85,59 @@ async fn surface_scroll_is_not_sent_to_a_peer_that_did_not_negotiate_it() {
     assert!(server.render_retained_pane_surface_and_stream(&HashSet::from([pane_id])));
     let message = read_server_message(render_rx.recv_timeout(Duration::from_secs(1)).unwrap());
     assert!(matches!(message, ServerMessage::PaneSurfacePatch(_)));
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn surface_scroll_carries_negotiated_underline_colors() {
+    fn underlined_lines(range: std::ops::Range<usize>) -> Vec<u8> {
+        range
+            .map(|n| format!("step {n:>3}: \x1b[4:3;58:2::255:0:0mwarning_{n}\x1b[0m ok\r\n"))
+            .collect::<String>()
+            .into_bytes()
+    }
+    let (mut server, _control_rx, render_rx, pane_id) =
+        retained_test_server_with_control(&underlined_lines(0..40));
+    let render_state = &mut server
+        .clients
+        .get_mut(&1)
+        .expect("scroll client")
+        .render_state;
+    render_state.enable_surface_scroll(true);
+    render_state.enable_surface_underline(true);
+    server.render_and_stream();
+    let mut decoder = protocol::surface_reuse::Decoder::new(false, true, true);
+    let ServerMessage::PaneSurface(mut shell) = decoder
+        .decode(read_server_message(
+            render_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ))
+        .expect("initial surface")
+    else {
+        panic!("expected the initial pane surface");
+    };
+    assert!(shell
+        .frame
+        .cells
+        .iter()
+        .any(|cell| cell.underline_color == Some(0x02_FF_00_00)));
+
+    write_shared_test_pane(&mut server, pane_id, &underlined_lines(40..42));
+    assert!(server.render_retained_pane_surface_and_stream(&HashSet::from([pane_id])));
+    let message = read_server_message(render_rx.recv_timeout(Duration::from_secs(1)).unwrap());
+    assert!(matches!(
+        &message,
+        ServerMessage::EndpointControl { kind, .. } if kind == protocol::surface_underline::MESSAGE_KIND
+    ));
+    let ServerMessage::PaneSurfacePatch(patch) = decoder.decode(message).expect("scroll decode")
+    else {
+        panic!("expected an expanded pane patch");
+    };
+    apply_rows(&mut shell.frame, &patch.rows);
+    let committed = server.clients[&1]
+        .render_state
+        .last_pane_surface()
+        .expect("committed surface");
+    assert_eq!(shell.frame.cells, committed.frame.cells);
+    assert!(frame_text(&shell.frame).contains("warning_41"));
     shutdown_test_runtimes(&mut server);
 }

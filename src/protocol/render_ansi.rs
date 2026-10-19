@@ -412,6 +412,26 @@ fn color_to_sgr_bg(val: u32) -> String {
     }
 }
 
+/// Converts a packed u32 color to an SGR 58 (underline color) fragment.
+///
+/// Returns a string like `58:5:171` (indexed) or `58:2::255:128:64` (RGB)
+/// or `59` (reset), without the leading `\x1b[` or trailing `m`.
+fn underline_color_to_sgr(val: u32) -> String {
+    match val >> 24 {
+        0x01 => format!("58:5:{}", val & 0xFF), // Indexed
+        0x02 => {
+            let r = (val >> 16) & 0xFF;
+            let g = (val >> 8) & 0xFF;
+            let b = val & 0xFF;
+            format!("58:2::{r}:{g}:{b}")
+        }
+        _ => match val & 0xFF {
+            n @ 0x01..=0x10 => format!("58:5:{}", n - 1), // Named → its palette index
+            _ => "59".to_owned(),                         // Reset or unknown
+        },
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Modifier → SGR
 // ---------------------------------------------------------------------------
@@ -470,7 +490,7 @@ fn modifier_to_sgr_parts(val: u16) -> Vec<&'static str> {
 }
 
 /// Builds a complete SGR escape sequence for a cell's style.
-fn build_sgr(fg: u32, bg: u32, modifier: u16) -> String {
+fn build_sgr(fg: u32, bg: u32, modifier: u16, underline_color: Option<u32>) -> String {
     let mut parts = vec!["0".to_owned()];
     parts.extend(
         modifier_to_sgr_parts(modifier)
@@ -479,6 +499,9 @@ fn build_sgr(fg: u32, bg: u32, modifier: u16) -> String {
     );
     parts.push(color_to_sgr_fg(fg));
     parts.push(color_to_sgr_bg(bg));
+    if let Some(val) = underline_color {
+        parts.push(underline_color_to_sgr(val));
+    }
     format!("\x1b[{}m", parts.join(";"))
 }
 
@@ -493,6 +516,7 @@ fn cells_equal(a: &CellData, b: &CellData) -> bool {
         && a.bg == b.bg
         && a.modifier == b.modifier
         && a.hyperlink == b.hyperlink
+        && a.underline_color == b.underline_color
     // Skip flag is only for ratatui internal use, not visual.
 }
 
@@ -975,7 +999,7 @@ fn write_cell(
 
     let style = (cell.fg, cell.bg, cell.modifier);
     if *last_style != Some(style) {
-        let sgr = build_sgr(cell.fg, cell.bg, cell.modifier);
+        let sgr = build_sgr(cell.fg, cell.bg, cell.modifier, cell.underline_color);
         if sgr != *last_sgr {
             let _ = writer.write_all(sgr.as_bytes());
             *last_sgr = sgr;
@@ -998,6 +1022,7 @@ fn cells_visually_equal(
         && cell.fg == prev_cell.fg
         && cell.bg == prev_cell.bg
         && cell.modifier == prev_cell.modifier
+        && cell.underline_color == prev_cell.underline_color
         && sanitized_cell_hyperlink_uri(sanitized_hyperlinks, cell)
             == sanitized_cell_hyperlink_uri(prev_sanitized_hyperlinks, prev_cell)
     // Skip flag is only for ratatui internal use, not visual.
@@ -1080,6 +1105,7 @@ mod tests {
             modifier,
             skip: false,
             hyperlink: None,
+            underline_color: None,
         }
     }
 
@@ -1156,7 +1182,7 @@ mod tests {
 
     #[test]
     fn build_sgr_produces_valid_sequence() {
-        let sgr = build_sgr(0x00_00_00_02, 0x00_00_00_01, 1); // fg=Red, bg=Black, bold
+        let sgr = build_sgr(0x00_00_00_02, 0x00_00_00_01, 1, None); // fg=Red, bg=Black, bold
         assert!(sgr.starts_with("\x1b["));
         assert!(sgr.ends_with("m"));
         assert!(sgr.contains("0")); // reset existing style first
@@ -1167,7 +1193,10 @@ mod tests {
 
     #[test]
     fn build_sgr_resets_previous_modifiers_when_cell_is_plain() {
-        assert_eq!(build_sgr(0x00_00_00_00, 0x00_00_00_00, 0), "\x1b[0;39;49m");
+        assert_eq!(
+            build_sgr(0x00_00_00_00, 0x00_00_00_00, 0, None),
+            "\x1b[0;39;49m"
+        );
     }
 
     #[test]
@@ -1197,9 +1226,65 @@ mod tests {
         );
 
         assert_eq!(
-            build_sgr(0x00_00_00_00, 0x00_00_00_00, modifier),
+            build_sgr(0x00_00_00_00, 0x00_00_00_00, modifier, None),
             "\x1b[0;4:3;39;49m"
         );
+    }
+
+    #[test]
+    fn underline_color_to_sgr_rgb() {
+        assert_eq!(underline_color_to_sgr(0x02_FF_00_00), "58:2::255:0:0");
+    }
+
+    #[test]
+    fn underline_color_to_sgr_indexed() {
+        assert_eq!(underline_color_to_sgr(0x01_00_00_AB), "58:5:171");
+    }
+
+    #[test]
+    fn underline_color_to_sgr_named_red() {
+        assert_eq!(underline_color_to_sgr(0x00_00_00_02), "58:5:1");
+    }
+
+    #[test]
+    fn underline_color_to_sgr_reset() {
+        assert_eq!(underline_color_to_sgr(0x00_00_00_00), "59");
+    }
+
+    #[test]
+    fn build_sgr_includes_underline_color_when_set() {
+        let modifier = crate::protocol::modifier_to_u16(
+            crate::protocol::modifier_with_underline_style(ratatui::style::Modifier::UNDERLINED, 3),
+        );
+        assert_eq!(
+            build_sgr(0x00_00_00_00, 0x00_00_00_00, modifier, Some(0x02_FF_00_00)),
+            "\x1b[0;4:3;39;49;58:2::255:0:0m"
+        );
+    }
+
+    #[test]
+    fn build_sgr_omits_underline_color_when_none() {
+        let sgr = build_sgr(0x00_00_00_00, 0x00_00_00_00, 0, None);
+        assert!(!sgr.contains("58"));
+    }
+
+    #[test]
+    fn underline_color_change_alone_is_reblitted() {
+        let mut plain = make_cell("A", 0, 0, 0);
+        let mut colored = make_cell("A", 0, 0, 0);
+        plain.underline_color = None;
+        colored.underline_color = Some(0x02_FF_00_00);
+        assert!(!cells_equal(&plain, &colored));
+        assert!(!cells_visually_equal(&[], &plain, &[], &colored));
+
+        let mut encoder = BlitEncoder::new();
+        let first_frame = make_frame(1, 1, vec![plain]);
+        let first = encoder.encode(&first_frame, false);
+        encoder.commit(first_frame, first);
+        let second = encoder.encode(&make_frame(1, 1, vec![colored]), false);
+        assert!(String::from_utf8(second.bytes)
+            .unwrap()
+            .contains("58:2::255:0:0"));
     }
 
     #[test]

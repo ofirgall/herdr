@@ -1,10 +1,13 @@
 //! Virtual rendering helpers for headless client frame streaming.
 
+use std::borrow::Cow;
+
 use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::layout::{Position, Rect, Size};
 
 use crate::app::state::AppState;
 use crate::protocol::render_ansi::{BlitEncoder, EncodedBlit};
+use crate::protocol::surface_underline::UnderlineColors;
 use crate::protocol::{
     CursorState, FrameData, PaneSurfaceFrame, PaneSurfacePatch, RenderEncoding, ServerMessage,
     SurfaceGraphicsAssetKey, SurfaceGraphicsScene, TerminalFrame,
@@ -20,6 +23,7 @@ pub(crate) enum ClientRenderState {
         surface_reuse: bool,
         surface_delta: bool,
         surface_scroll: bool,
+        surface_underline: bool,
         recompute_pending: bool,
     },
     /// Terminal-ANSI clients keep a terminal diff encoder and sequence number.
@@ -39,6 +43,7 @@ impl ClientRenderState {
                 surface_reuse: false,
                 surface_delta: false,
                 surface_scroll: false,
+                surface_underline: false,
                 recompute_pending: false,
             },
             RenderEncoding::TerminalAnsi => Self::TerminalAnsi {
@@ -64,6 +69,15 @@ impl ClientRenderState {
     pub(crate) fn enable_surface_scroll(&mut self, enabled: bool) {
         if let Self::Semantic { surface_scroll, .. } = self {
             *surface_scroll = enabled;
+        }
+    }
+
+    pub(crate) fn enable_surface_underline(&mut self, enabled: bool) {
+        if let Self::Semantic {
+            surface_underline, ..
+        } = self
+        {
+            *surface_underline = enabled;
         }
     }
 
@@ -178,6 +192,7 @@ impl ClientRenderState {
             surface_revision,
             surface_reuse,
             surface_delta,
+            surface_underline,
             recompute_pending,
             ..
         } = self
@@ -204,6 +219,9 @@ impl ClientRenderState {
         let queued_graphics_assets = assets.iter().map(|asset| asset.key.clone()).collect();
         let committed_surface = surface.clone();
         surface.graphics.assets = assets;
+        let underline = surface_underline
+            .then(|| UnderlineColors::of_surface(&committed_surface))
+            .flatten();
         let mut message = ServerMessage::PaneSurface(surface);
         let delta = (*surface_delta)
             .then_some(last_surface.as_deref())
@@ -238,6 +256,7 @@ impl ClientRenderState {
             message: delta.or(reused).unwrap_or(message),
             committed_surface: Box::new(committed_surface),
             queued_graphics_assets,
+            underline,
         })
     }
 
@@ -249,6 +268,7 @@ impl ClientRenderState {
             last_surface,
             surface_revision,
             surface_scroll,
+            surface_underline,
             ..
         } = self
         else {
@@ -269,14 +289,19 @@ impl ClientRenderState {
         let scrolled = (*surface_scroll)
             .then(|| crate::protocol::surface_scroll::message(last, &patch))
             .flatten();
+        let underline = surface_underline
+            .then(|| UnderlineColors::of_patch(last, &patch))
+            .flatten();
         Some(match scrolled {
             Some(message) => PreparedRender::SemanticPatch {
                 message,
                 encoded: Some(Box::new(patch)),
+                underline,
             },
             None => PreparedRender::SemanticPatch {
                 message: ServerMessage::PaneSurfacePatch(patch),
                 encoded: None,
+                underline,
             },
         })
     }
@@ -304,7 +329,9 @@ impl ClientRenderState {
                     surface_revision,
                     ..
                 },
-                PreparedRender::SemanticPatch { message, encoded },
+                PreparedRender::SemanticPatch {
+                    message, encoded, ..
+                },
             ) => {
                 let patch = match (encoded, message) {
                     (Some(patch), _) => *patch,
@@ -378,11 +405,14 @@ pub(crate) enum PreparedRender {
         message: ServerMessage,
         committed_surface: Box<PaneSurfaceFrame>,
         queued_graphics_assets: Vec<SurfaceGraphicsAssetKey>,
+        /// Underline colors for a peer that negotiated them; v1 cells cannot carry them.
+        underline: Option<Box<UnderlineColors>>,
     },
     SemanticPatch {
         message: ServerMessage,
         /// The pane patch a compact `message` encodes; `None` when `message` is that patch.
         encoded: Option<Box<PaneSurfacePatch>>,
+        underline: Option<Box<UnderlineColors>>,
     },
     TerminalAnsi {
         message: ServerMessage,
@@ -397,6 +427,23 @@ impl PreparedRender {
             Self::Semantic { message, .. }
             | Self::SemanticPatch { message, .. }
             | Self::TerminalAnsi { message, .. } => message,
+        }
+    }
+
+    /// The message to frame for the peer: `message()` plus any negotiated underline colors.
+    pub(crate) fn wire_message(&self) -> Cow<'_, ServerMessage> {
+        let message = self.message();
+        match self {
+            Self::Semantic {
+                underline: Some(colors),
+                ..
+            }
+            | Self::SemanticPatch {
+                underline: Some(colors),
+                ..
+            } => crate::protocol::surface_underline::wrap(message, colors)
+                .map_or(Cow::Borrowed(message), Cow::Owned),
+            _ => Cow::Borrowed(message),
         }
     }
 
@@ -861,5 +908,155 @@ mod tests {
         ));
         state.commit_sent_frame(prepared);
         assert_eq!(state.last_pane_surface().unwrap().surface_revision, 2);
+    }
+
+    fn underlined_surface(width: u16, height: u16, colored: &[(u16, u16)]) -> PaneSurfaceFrame {
+        let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, width, height));
+        for &(x, y) in colored {
+            let cell = &mut buffer[(x, y)];
+            cell.set_symbol("~");
+            cell.underline_color = ratatui::style::Color::Rgb(255, 0, 0);
+        }
+        let mut surface = popup_surface("popup");
+        surface.popup = None;
+        surface.frame = FrameData::from_ratatui_buffer(&buffer, None);
+        surface
+    }
+
+    fn over_the_wire(message: &ServerMessage) -> ServerMessage {
+        let mut bytes = Vec::new();
+        crate::protocol::write_message(&mut bytes, message).unwrap();
+        crate::protocol::read_message(&mut bytes.as_slice(), crate::protocol::MAX_FRAME_SIZE)
+            .unwrap()
+    }
+
+    #[test]
+    fn negotiated_underline_colors_survive_every_surface_encoding() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        state.enable_surface_reuse(true);
+        state.enable_surface_delta(true);
+        state.enable_surface_scroll(true);
+        state.enable_surface_underline(true);
+        let mut decoder = crate::protocol::surface_reuse::Decoder::new(true, true, true);
+
+        let mut surface = underlined_surface(40, 6, &[(2, 1)]);
+        let initial = state.prepare_pane_surface(surface.clone()).unwrap();
+        assert!(
+            matches!(&*initial.wire_message(), ServerMessage::EndpointControl { kind, .. }
+            if kind == crate::protocol::surface_underline::MESSAGE_KIND)
+        );
+        let decoded = decoder
+            .decode(over_the_wire(&initial.wire_message()))
+            .unwrap();
+        let ServerMessage::PaneSurface(decoded) = decoded else {
+            panic!("expected a pane surface");
+        };
+        assert_eq!(decoded.frame.cells, surface.frame.cells);
+        state.commit_sent_frame(initial);
+
+        // A projection-only update retains cells from the decoder baseline.
+        surface.projection_revision += 1;
+        let update = state.prepare_pane_surface(surface.clone()).unwrap();
+        let ServerMessage::PaneSurface(decoded) = decoder
+            .decode(over_the_wire(&update.wire_message()))
+            .unwrap()
+        else {
+            panic!("expected a pane surface");
+        };
+        assert_eq!(decoded.frame.cells, surface.frame.cells);
+        state.commit_sent_frame(update);
+
+        // Moving the underline clears the retained color at its old position.
+        let moved = underlined_surface(40, 6, &[(7, 3)]);
+        surface.frame = moved.frame;
+        let update = state.prepare_pane_surface(surface.clone()).unwrap();
+        let ServerMessage::PaneSurface(decoded) = decoder
+            .decode(over_the_wire(&update.wire_message()))
+            .unwrap()
+        else {
+            panic!("expected a pane surface");
+        };
+        assert_eq!(decoded.frame.cells, surface.frame.cells);
+        state.commit_sent_frame(update);
+
+        // A patch colors its changed cells and the baseline keeps them for later reuse.
+        let mut cell = surface.frame.cells[0].clone();
+        cell.symbol = "!".into();
+        cell.underline_color = Some(crate::protocol::color_to_u32(
+            ratatui::style::Color::Indexed(171),
+        ));
+        let patch = PaneSurfacePatch {
+            boot_id: surface.boot_id.clone(),
+            projection_revision: surface.projection_revision,
+            base_surface_revision: state.last_pane_surface().unwrap().surface_revision,
+            surface_revision: 0,
+            rows: vec![crate::protocol::PaneSurfacePatchRow {
+                x: 9,
+                y: 4,
+                cells: vec![cell.clone()],
+            }],
+            panes: Vec::new(),
+            cursor: None,
+        };
+        let prepared = state.prepare_pane_surface_patch(patch).unwrap();
+        let ServerMessage::PaneSurfacePatch(decoded) = decoder
+            .decode(over_the_wire(&prepared.wire_message()))
+            .unwrap()
+        else {
+            panic!("expected a pane surface patch");
+        };
+        assert_eq!(decoded.rows[0].cells, vec![cell.clone()]);
+        state.commit_sent_frame(prepared);
+        surface.frame.cells[4 * 40 + 9] = cell;
+
+        surface.projection_revision += 1;
+        let update = state.prepare_pane_surface(surface.clone()).unwrap();
+        let ServerMessage::PaneSurface(decoded) = decoder
+            .decode(over_the_wire(&update.wire_message()))
+            .unwrap()
+        else {
+            panic!("expected a pane surface");
+        };
+        assert_eq!(decoded.frame.cells, surface.frame.cells);
+    }
+
+    #[test]
+    fn underline_colors_stay_off_the_wire_without_negotiation() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        let surface = underlined_surface(4, 1, &[(1, 0)]);
+        let mut plain = surface.clone();
+        for cell in &mut plain.frame.cells {
+            cell.underline_color = None;
+        }
+        let prepared = state.prepare_pane_surface(surface).unwrap();
+        assert!(matches!(prepared.wire_message(), Cow::Borrowed(_)));
+        let mut expected = Vec::new();
+        plain.surface_revision = 1;
+        crate::protocol::write_message(&mut expected, &ServerMessage::PaneSurface(plain)).unwrap();
+        let mut sent = Vec::new();
+        crate::protocol::write_message(&mut sent, &prepared.wire_message()).unwrap();
+        assert_eq!(sent, expected, "v1 cell bytes must not change");
+        assert!(
+            crate::protocol::surface_reuse::Decoder::new(false, false, false)
+                .decode(ServerMessage::EndpointControl {
+                    kind: crate::protocol::surface_underline::MESSAGE_KIND.into(),
+                    data: String::new(),
+                })
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn underline_color_change_alone_sends_a_new_surface() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        state.enable_surface_underline(true);
+        let prepared = state
+            .prepare_pane_surface(underlined_surface(4, 1, &[]))
+            .unwrap();
+        assert!(matches!(prepared.wire_message(), Cow::Borrowed(_)));
+        state.commit_sent_frame(prepared);
+        let mut surface = underlined_surface(4, 1, &[]);
+        surface.frame.cells[1].underline_color = Some(0x02_00_00_FF);
+        assert!(state.prepare_pane_surface(surface).is_some());
     }
 }

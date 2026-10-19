@@ -402,7 +402,7 @@ fn surface_encoding_client(mode: &str, surface: &PaneSurfaceFrame) -> SurfaceEnc
             crate::protocol::RenderEncoding::SemanticFrame,
         ),
         decoder: (reuse || delta)
-            .then(|| crate::protocol::surface_reuse::Decoder::new(delta, false)),
+            .then(|| crate::protocol::surface_reuse::Decoder::new(delta, false, false)),
     };
     client.state.enable_surface_reuse(reuse);
     client.state.enable_surface_delta(delta);

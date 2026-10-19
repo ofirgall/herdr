@@ -693,7 +693,7 @@ pub enum AttachScrollSource {
 
 /// A single cell in a rendered frame, serialized independently from ratatui's
 /// `Cell` type to keep the wire protocol stable.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellData {
     /// Grapheme cluster displayed in this cell (usually 1–2 chars).
     pub symbol: String,
@@ -707,7 +707,31 @@ pub struct CellData {
     pub skip: bool,
     /// Index into `FrameData::hyperlinks` for this cell's OSC 8 target, if any.
     pub hyperlink: Option<u32>,
+    /// Underline color (SGR 58) as a packed u32, if the cell sets one.
+    ///
+    /// Not part of the frozen v1 cell codec: endpoint peers carry it only through
+    /// the negotiated `surface_underline_color` capability.
+    #[serde(skip)]
+    pub underline_color: Option<u32>,
 }
+
+// Decodes exactly the v1 cell fields; `underline_color` is never on the v1 wire.
+impl<Context> bincode::Decode<Context> for CellData {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self {
+            symbol: bincode::Decode::decode(decoder)?,
+            fg: bincode::Decode::decode(decoder)?,
+            bg: bincode::Decode::decode(decoder)?,
+            modifier: bincode::Decode::decode(decoder)?,
+            skip: bincode::Decode::decode(decoder)?,
+            hyperlink: bincode::Decode::decode(decoder)?,
+            underline_color: None,
+        })
+    }
+}
+bincode::impl_borrow_decode!(CellData);
 
 impl Clone for CellData {
     fn clone(&self) -> Self {
@@ -733,6 +757,10 @@ impl CellData {
             modifier: modifier_to_u16(cell.modifier),
             skip: cell.skip,
             hyperlink: None,
+            underline_color: match cell.underline_color {
+                ratatui::style::Color::Reset => None,
+                color => Some(color_to_u32(color)),
+            },
         }
     }
 }
@@ -885,6 +913,9 @@ impl FrameData {
                 cell.bg = u32_to_color(cell_data.bg);
                 cell.modifier = u16_to_modifier(cell_data.modifier);
                 cell.skip = cell_data.skip;
+                cell.underline_color = cell_data
+                    .underline_color
+                    .map_or(ratatui::style::Color::Reset, u32_to_color);
             }
         }
 
@@ -2511,6 +2542,7 @@ mod tests {
                     modifier: Modifier::BOLD.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "i".into(),
@@ -2519,6 +2551,7 @@ mod tests {
                     modifier: Modifier::ITALIC.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "!".into(),
@@ -2527,6 +2560,7 @@ mod tests {
                     modifier: (Modifier::BOLD | Modifier::UNDERLINED).bits(),
                     skip: false,
                     hyperlink: Some(0),
+                    underline_color: None,
                 },
                 CellData {
                     symbol: " ".into(),
@@ -2535,6 +2569,7 @@ mod tests {
                     modifier: Modifier::empty().bits(),
                     skip: true,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "→".into(), // multi-byte grapheme
@@ -2543,6 +2578,7 @@ mod tests {
                     modifier: Modifier::REVERSED.bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
                 CellData {
                     symbol: "🦀".into(), // emoji, wide grapheme cluster
@@ -2551,6 +2587,7 @@ mod tests {
                     modifier: Modifier::empty().bits(),
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 },
             ],
             width: 3,
@@ -2611,6 +2648,7 @@ mod tests {
                     modifier: 3,
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 }],
             }],
             panes: Vec::new(),
@@ -3082,6 +3120,7 @@ mod tests {
                 modifier: ((i % 16) as u16),
                 skip: i % 100 == 0,
                 hyperlink: None,
+                underline_color: None,
             })
             .collect();
 
@@ -3441,6 +3480,7 @@ mod tests {
                     modifier: 0,
                     skip: false,
                     hyperlink: None,
+                    underline_color: None,
                 };
                 5
             ], // 5 cells but 3×2 = 6 expected
@@ -3507,6 +3547,41 @@ mod tests {
 
         let c = Color::Rgb(255, 255, 255);
         assert_eq!(u32_to_color(color_to_u32(c)), c);
+    }
+
+    #[test]
+    fn underline_color_stays_out_of_the_v1_cell_codec() {
+        let plain = CellData::from_ratatui_cell(&ratatui::buffer::Cell::new("x"));
+        let mut cell = ratatui::buffer::Cell::new("x");
+        cell.underline_color = Color::Rgb(255, 0, 0);
+        let colored = CellData::from_ratatui_cell(&cell);
+        assert_eq!(
+            colored.underline_color,
+            Some(color_to_u32(Color::Rgb(255, 0, 0)))
+        );
+        let config = bincode::config::standard();
+        let bytes = bincode::serde::encode_to_vec(&colored, config).unwrap();
+        assert_eq!(
+            bytes,
+            bincode::serde::encode_to_vec(&plain, config).unwrap()
+        );
+        let (serde_decoded, _): (CellData, _) =
+            bincode::serde::decode_from_slice(&bytes, config).unwrap();
+        let (native_decoded, _): (CellData, _) =
+            bincode::decode_from_slice(&bytes, config).unwrap();
+        assert_eq!(serde_decoded, plain);
+        assert_eq!(native_decoded, plain);
+
+        let frame = FrameData {
+            cells: vec![colored],
+            width: 1,
+            height: 1,
+            cursor: None,
+            hyperlinks: Vec::new(),
+            graphics: Vec::new(),
+        };
+        let buffer = frame.to_ratatui_buffer().unwrap();
+        assert_eq!(buffer[(0, 0)].underline_color, Color::Rgb(255, 0, 0));
     }
 
     // ---- Modifier conversion ----
