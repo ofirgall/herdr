@@ -14,7 +14,10 @@ DEV_CONFIG_DIR ?= $(CONFIG_ROOT)/herdr-dev
 CLEAN_RUN_DIR ?= $(CONFIG_ROOT)/herdr-clean-run
 SHARED_PLUGIN_ENTRIES := plugins plugins.json .plugins.lock
 RUN_ENV := env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_CONFIG_PATH ZIG=$(ZIG)
-RUN_SHARED := $(RUN_ENV) HERDR_CONFIG_PATH="$(STABLE_CONFIG_DIR)/config.toml" cargo run --
+# `make run` reads the installed config, or config-dev.generated.toml next to it when
+# present (installed config plus dev-only overrides, generated outside this repo).
+DEV_CONFIG_FILE ?= $(firstword $(wildcard $(STABLE_CONFIG_DIR)/config-dev.generated.toml) $(STABLE_CONFIG_DIR)/config.toml)
+RUN_SHARED := $(RUN_ENV) HERDR_CONFIG_PATH="$(DEV_CONFIG_FILE)" cargo run --
 
 .PHONY: setup build install run run-restart run-clean-config share-plugins check test clean
 
