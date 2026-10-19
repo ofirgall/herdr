@@ -1660,6 +1660,12 @@ fn available_pane_shell_from_snapshot(
         .then(|| shell.name.clone())
 }
 
+/// The foreground job already chooses from the pane shell's whole descendant
+/// tree, so there is no nested agent left for a separate walk to find.
+pub fn descendant_agent_job(_shell_pid: u32) -> Option<ForegroundJob> {
+    None
+}
+
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {
     let snapshot = cached_foreground_processes();
     let entry = snapshot.entry(process_group_id)?;

@@ -650,6 +650,38 @@ pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJo
     })
 }
 
+/// Walk the pane shell's descendants for an agent outside the foreground job.
+/// Children come from the bounded task/children reads used for foreground jobs.
+pub fn descendant_agent_job(shell_pid: u32) -> Option<ForegroundJob> {
+    let running_inside_wsl = running_inside_wsl();
+    let mut budget = ForegroundScanBudget::for_probe();
+    super::find_descendant_agent_job(
+        shell_pid,
+        |pid| {
+            process_task_ids(pid, &mut budget)
+                .into_iter()
+                .flat_map(|tid| process_task_children(pid, tid, &mut budget))
+                .collect()
+        },
+        |pid| {
+            let (pgrp, name, state) = process_pgrp_comm_and_state(pid)?;
+            let argv = process_allows_remote_memory_read(state, &name, running_inside_wsl)
+                .then(|| process_argv(pid))
+                .flatten();
+            Some((
+                u32::try_from(pgrp).ok()?,
+                ForegroundProcess {
+                    pid,
+                    name,
+                    argv0: None,
+                    cmdline: argv.as_ref().map(|parts| parts.join(" ")),
+                    argv,
+                },
+            ))
+        },
+    )
+}
+
 pub fn foreground_process_group_id(child_pid: u32) -> Option<u32> {
     // /proc/<pid>/stat format: "pid (comm) state ppid pgrp session tty_nr tpgid ..."
     // The (comm) field can contain spaces and parens, so we find the last ')' first.

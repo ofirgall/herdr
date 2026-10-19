@@ -151,6 +151,58 @@ pub struct ForegroundJob {
     pub processes: Vec<ForegroundProcess>,
 }
 
+/// Upper bound on processes inspected while looking for an agent below the
+/// pane shell. The walk runs only on process probes whose foreground job holds
+/// no agent, but it must stay bounded however many descendants accumulate.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const DESCENDANT_AGENT_SCAN_LIMIT: usize = 128;
+
+/// Breadth-first walk of the pane shell's descendants for the first process
+/// that identifies as an agent. It finds agents that run in a process group
+/// other than the terminal's foreground group, such as one started from an
+/// editor's embedded terminal.
+///
+/// `read_process` returns a process's group and identity, or `None` when it
+/// is gone. The returned job holds only the identified process.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn find_descendant_agent_job(
+    shell_pid: u32,
+    mut children: impl FnMut(u32) -> Vec<u32>,
+    mut read_process: impl FnMut(u32) -> Option<(u32, ForegroundProcess)>,
+) -> Option<ForegroundJob> {
+    if shell_pid == 0 {
+        return None;
+    }
+
+    let mut visited = std::collections::HashSet::from([shell_pid]);
+    let mut queue = std::collections::VecDeque::from([shell_pid]);
+    let mut inspected = 0usize;
+    while let Some(parent) = queue.pop_front() {
+        for child in children(parent) {
+            if !visited.insert(child) {
+                continue;
+            }
+            if inspected >= DESCENDANT_AGENT_SCAN_LIMIT {
+                return None;
+            }
+            inspected += 1;
+
+            let Some((process_group_id, process)) = read_process(child) else {
+                continue;
+            };
+            let job = ForegroundJob {
+                process_group_id,
+                processes: vec![process],
+            };
+            if crate::detect::identify_agent_process_in_job(&job).is_some() {
+                return Some(job);
+            }
+            queue.push_back(child);
+        }
+    }
+    None
+}
+
 /// A request from outside the process to stop the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServerQuitSignal {
@@ -1031,6 +1083,87 @@ mod tests {
             read_limited_reader(input, 16).expect("limited read"),
             LimitedRead::Complete(b"image".to_vec())
         );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn named_process(pid: u32, name: &str) -> Option<(u32, ForegroundProcess)> {
+        Some((
+            pid,
+            ForegroundProcess {
+                pid,
+                name: name.to_string(),
+                argv0: None,
+                argv: Some(vec![name.to_string()]),
+                cmdline: Some(name.to_string()),
+            },
+        ))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn descendant_agent_walk_finds_agent_nested_below_another_group() {
+        let tree = std::collections::HashMap::from([
+            (100, vec![200]),
+            (200, vec![300, 301]),
+            (301, vec![400]),
+        ]);
+        let names = std::collections::HashMap::from([
+            (200, "nvim"),
+            (300, "rg"),
+            (301, "zsh"),
+            (400, "cursor-agent"),
+        ]);
+
+        let job = find_descendant_agent_job(
+            100,
+            |pid| tree.get(&pid).cloned().unwrap_or_default(),
+            |pid| named_process(pid, names.get(&pid).copied()?),
+        )
+        .expect("nested agent");
+
+        assert_eq!(job.process_group_id, 400);
+        assert_eq!(job.processes.len(), 1);
+        assert_eq!(job.processes[0].name, "cursor-agent");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn descendant_agent_walk_stops_at_the_scan_limit() {
+        let mut inspected = 0usize;
+
+        let job = find_descendant_agent_job(
+            100,
+            |pid| {
+                if pid == 100 {
+                    (1_000..1_000 + DESCENDANT_AGENT_SCAN_LIMIT as u32 + 10).collect()
+                } else {
+                    Vec::new()
+                }
+            },
+            |pid| {
+                inspected += 1;
+                named_process(pid, if pid == 2_000 { "claude" } else { "sleep" })
+            },
+        );
+
+        assert_eq!(job, None);
+        assert_eq!(inspected, DESCENDANT_AGENT_SCAN_LIMIT);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn descendant_agent_walk_survives_cycles_and_vanished_processes() {
+        let job = find_descendant_agent_job(
+            100,
+            |pid| match pid {
+                100 => vec![200, 201],
+                200 => vec![100, 200],
+                _ => Vec::new(),
+            },
+            |pid| (pid == 200).then(|| named_process(pid, "sh")).flatten(),
+        );
+
+        assert_eq!(job, None);
     }
 }
 

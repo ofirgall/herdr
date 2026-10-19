@@ -871,6 +871,7 @@ fn probe_foreground_process_from_jobs(
     leader_job: Option<crate::platform::ForegroundJob>,
     foreground_job: impl FnOnce() -> Option<crate::platform::ForegroundJob>,
     read_hint: impl Fn(u32) -> Option<Agent> + Copy,
+    descendant_job: impl FnOnce() -> Option<crate::platform::ForegroundJob>,
 ) -> ProcessProbeResult {
     if let Some(job) = leader_job.as_ref() {
         if let Some(hinted) = agent_hint_for_foreground_job_members(job, read_hint) {
@@ -895,12 +896,39 @@ fn probe_foreground_process_from_jobs(
         if let Some(identified) = crate::detect::identify_agent_process_in_job(job) {
             return process_probe_result(job, pid, identified);
         }
+        let foreground_is_pane_shell = job.processes.iter().any(|process| process.pid == pid);
+        // An agent can run in a process group nested below the foreground job,
+        // such as one started from an editor's embedded terminal. The result
+        // keeps the foreground job's group so change tracking stays on the
+        // kernel's view. With the shell itself in front, descendants are
+        // background jobs, which the agent job tracker accounts for instead.
+        if !foreground_is_pane_shell {
+            if let Some(identified) = descendant_job()
+                .as_ref()
+                .and_then(crate::detect::identify_agent_process_in_job)
+            {
+                return process_probe_result(job, pid, identified);
+            }
+        }
         return ProcessProbeResult {
             process_group_id: Some(job.process_group_id),
-            foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
+            foreground_is_pane_shell,
             agent: None,
             agent_pid: None,
             process_name: None,
+        };
+    }
+
+    if let Some((agent, process_name, agent_pid)) = descendant_job()
+        .as_ref()
+        .and_then(crate::detect::identify_agent_process_in_job)
+    {
+        return ProcessProbeResult {
+            process_group_id: foreground_pgid,
+            foreground_is_pane_shell: false,
+            agent: Some(agent),
+            agent_pid: Some(agent_pid),
+            process_name: Some(process_name),
         };
     }
 
@@ -920,6 +948,7 @@ fn probe_foreground_process(pid: u32, foreground_pgid: Option<u32>) -> ProcessPr
         foreground_pgid.and_then(crate::detect::foreground_group_leader_job),
         || crate::detect::foreground_job(pid),
         crate::platform::process_agent_hint,
+        || crate::detect::descendant_agent_job(pid),
     )
 }
 
@@ -5947,6 +5976,7 @@ mod tests {
             Some(job),
             || None,
             |pid| (pid == 99).then_some(Agent::Claude),
+            || None,
         );
 
         assert_eq!(result.agent, Some(Agent::Claude));
@@ -5966,6 +5996,7 @@ mod tests {
             None,
             || Some(job),
             |pid| (pid == 99).then_some(Agent::Claude),
+            || None,
         );
 
         assert_eq!(result.agent, Some(Agent::Claude));
@@ -5988,6 +6019,7 @@ mod tests {
             None,
             || Some(job),
             |pid| (pid == 100).then_some(Agent::Claude),
+            || None,
         );
 
         assert_eq!(result.agent, Some(Agent::Codex));
@@ -6005,7 +6037,8 @@ mod tests {
             ],
         };
 
-        let result = probe_foreground_process_from_jobs(42, Some(99), None, || Some(job), |_| None);
+        let result =
+            probe_foreground_process_from_jobs(42, Some(99), None, || Some(job), |_| None, || None);
 
         assert_eq!(result.agent, Some(Agent::Claude));
         assert_eq!(result.agent_pid, Some(100));
@@ -6028,10 +6061,120 @@ mod tests {
             None,
             || Some(job),
             |pid| (pid == 100).then_some(Agent::Claude),
+            || None,
         );
 
         assert_eq!(result.agent, Some(Agent::Claude));
         assert_eq!(result.process_name.as_deref(), Some("claude"));
+    }
+
+    fn cursor_agent_job(pid: u32) -> crate::platform::ForegroundJob {
+        crate::platform::ForegroundJob {
+            process_group_id: pid,
+            processes: vec![foreground_process(pid, "cursor-agent")],
+        }
+    }
+
+    #[test]
+    fn descendant_agent_is_found_when_the_foreground_job_has_none() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "nvim")],
+        };
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(99),
+            None,
+            || Some(job),
+            |_| None,
+            || Some(cursor_agent_job(500)),
+        );
+
+        assert_eq!(result.agent, Some(Agent::Cursor));
+        assert_eq!(result.agent_pid, Some(500));
+        assert_eq!(result.process_name.as_deref(), Some("cursor-agent"));
+        assert_eq!(result.process_group_id, Some(99));
+        assert!(!result.foreground_is_pane_shell);
+    }
+
+    #[test]
+    fn descendant_walk_is_skipped_when_the_foreground_job_identifies_an_agent() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "codex")],
+        };
+        let mut descendant_walked = false;
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(99),
+            None,
+            || Some(job),
+            |_| None,
+            || {
+                descendant_walked = true;
+                Some(cursor_agent_job(500))
+            },
+        );
+
+        assert_eq!(result.agent, Some(Agent::Codex));
+        assert!(!descendant_walked);
+    }
+
+    #[test]
+    fn descendant_walk_is_skipped_while_the_pane_shell_is_in_front() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![foreground_process(42, "zsh")],
+        };
+        let mut descendant_walked = false;
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(42),
+            None,
+            || Some(job),
+            |_| None,
+            || {
+                descendant_walked = true;
+                Some(cursor_agent_job(500))
+            },
+        );
+
+        assert_eq!(result.agent, None);
+        assert!(result.foreground_is_pane_shell);
+        assert!(!descendant_walked);
+    }
+
+    #[test]
+    fn foreground_job_without_agent_reports_none_when_descendants_have_none() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "nvim")],
+        };
+
+        let result =
+            probe_foreground_process_from_jobs(42, Some(99), None, || Some(job), |_| None, || None);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(result.process_group_id, Some(99));
+    }
+
+    #[test]
+    fn descendant_agent_is_found_when_no_foreground_job_is_available() {
+        let result = probe_foreground_process_from_jobs(
+            42,
+            None,
+            None,
+            || None,
+            |_| None,
+            || Some(cursor_agent_job(500)),
+        );
+
+        assert_eq!(result.agent, Some(Agent::Cursor));
+        assert_eq!(result.agent_pid, Some(500));
+        assert_eq!(result.process_group_id, None);
     }
 
     fn process_probe_input() -> ProcessProbeInput {

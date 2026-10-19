@@ -184,6 +184,7 @@ pub(crate) fn write_config_temporary(
 }
 
 const PROC_PGRP_ONLY: u32 = 2;
+const PROC_PPID_ONLY: u32 = 6;
 const SERVER_NOFILE_LIMIT_TARGET: libc::rlim_t = 8192;
 
 pub(crate) fn should_draw_host_cursor_by_default() -> bool {
@@ -492,6 +493,33 @@ pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJo
 }
 
 fn process_group_pids(process_group_id: u32) -> Vec<u32> {
+    filtered_pids(PROC_PGRP_ONLY, process_group_id)
+}
+
+fn child_pids(parent_pid: u32) -> Vec<u32> {
+    filtered_pids(PROC_PPID_ONLY, parent_pid)
+}
+
+/// Walk the pane shell's descendants for an agent outside the foreground job.
+pub fn descendant_agent_job(shell_pid: u32) -> Option<ForegroundJob> {
+    super::find_descendant_agent_job(shell_pid, child_pids, |pid| {
+        let info = process_bsdinfo(pid)?;
+        let name = comm_from_bsdinfo(&info)?;
+        let argv = process_argv(pid);
+        Some((
+            info.pbi_pgid,
+            ForegroundProcess {
+                pid,
+                name,
+                argv0: process_argv0_name(pid),
+                cmdline: argv.as_ref().map(|parts| parts.join(" ")),
+                argv,
+            },
+        ))
+    })
+}
+
+fn filtered_pids(filter: u32, filter_arg: u32) -> Vec<u32> {
     let mut capacity = 16usize;
 
     for _ in 0..8 {
@@ -499,8 +527,8 @@ fn process_group_pids(process_group_id: u32) -> Vec<u32> {
         let buffer_bytes = pids.len() * std::mem::size_of::<libc::pid_t>();
         let returned_bytes = unsafe {
             libc::proc_listpids(
-                PROC_PGRP_ONLY,
-                process_group_id,
+                filter,
+                filter_arg,
                 pids.as_mut_ptr() as *mut libc::c_void,
                 buffer_bytes as libc::c_int,
             )
@@ -1209,6 +1237,20 @@ pub fn process_exists(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_pids_lists_direct_children_of_a_process() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn child");
+
+        let children = child_pids(std::process::id());
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(children.contains(&child.id()));
+    }
 
     #[test]
     fn nofile_target_raises_low_soft_limit_to_cap_when_hard_is_unlimited() {

@@ -373,6 +373,13 @@ pub fn foreground_process_group_id(child_pid: u32) -> Option<u32> {
     crate::platform::foreground_process_group_id(child_pid)
 }
 
+/// Find an agent among the pane shell's descendants, for when the foreground
+/// job holds none because the agent runs in a nested process group, such as
+/// one started from an editor's embedded terminal.
+pub fn descendant_agent_job(shell_pid: u32) -> Option<crate::platform::ForegroundJob> {
+    crate::platform::descendant_agent_job(shell_pid)
+}
+
 /// True when the pane's own shell is at its prompt with nothing running in it.
 pub fn pane_shell_is_idle(child_pid: u32) -> bool {
     crate::platform::available_pane_shell(child_pid).is_some()
