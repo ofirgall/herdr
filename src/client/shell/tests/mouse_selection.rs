@@ -862,6 +862,57 @@ fn pane_content_updates_preserve_live_ranges_until_geometry_or_screen_changes() 
 }
 
 #[test]
+fn middle_click_down_is_forwarded_and_focuses_the_pane() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut unfocused = snapshot();
+    unfocused.focused_pane_id = Some("pane_2".into());
+    state.set_snapshot(Box::new(unfocused));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    let middle_down = crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Middle),
+        column: pane.inner_rect.x + 1,
+        row: pane.inner_rect.y + 1,
+        modifiers: KeyModifiers::empty(),
+    };
+
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(middle_down)]);
+    assert!(matches!(
+        &click.requests[..],
+        [ClientMessage::ClientShellPaneInput { pane_id, events }]
+            if pane_id == "pane_1"
+                && matches!(
+                    &events[..],
+                    [ClientPaneInputEvent::Mouse {
+                        kind: crate::protocol::ClientMouseKind::Down(
+                            crate::protocol::ClientMouseButton::Middle
+                        ),
+                        ..
+                    }]
+                )
+    ));
+    assert!(matches!(
+        &click.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, crate::api::schema::Method::PaneFocus(target)
+                if target.pane_id == "pane_1")
+    ));
+
+    // A pane that already has focus is not refocused.
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Middle),
+        ..middle_down
+    })]);
+    state.set_snapshot(Box::new(snapshot()));
+    let focused = state.handle_raw_events(vec![RawInputEvent::Mouse(middle_down)]);
+    assert_eq!(focused.requests.len(), 1);
+    assert!(focused.actions.is_empty());
+}
+
+#[test]
 fn pane_mouse_input_keeps_stable_target_and_endpoint_encoding() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

@@ -2287,6 +2287,14 @@ impl ClientShellState {
                     .cloned()
                 {
                     self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                    if self.focused_pane_id().as_deref() != Some(hit.pane_id.as_str()) {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                                pane_id: hit.pane_id.clone(),
+                            }),
+                            outcome,
+                        );
+                    }
                     self.pane_mouse_gesture = Some(ClientPaneMouseGesture {
                         last_position: self.pane_mouse_position(&hit, mouse),
                         hit,
