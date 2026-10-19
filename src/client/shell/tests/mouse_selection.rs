@@ -913,6 +913,91 @@ fn middle_click_down_is_forwarded_and_focuses_the_pane() {
 }
 
 #[test]
+fn back_and_forward_reach_mouse_reporting_panes_and_release_where_pressed() {
+    use crate::input::mouse::{ExtendedMouseButton, ExtendedMouseEvent};
+    use crate::protocol::pane_extended_mouse::{self, PaneExtendedMouse};
+
+    fn sent(outcome: &ClientShellInput) -> Vec<PaneExtendedMouse> {
+        outcome
+            .requests
+            .iter()
+            .filter_map(|request| match request {
+                ClientMessage::EndpointControl { kind, data }
+                    if kind == pane_extended_mouse::MESSAGE_KIND =>
+                {
+                    Some(pane_extended_mouse::decode(data).expect("pane extended mouse"))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    let back_down = ExtendedMouseEvent {
+        button: ExtendedMouseButton::Back,
+        pressed: true,
+        column: pane.inner_rect.x + 2,
+        row: pane.inner_rect.y + 1,
+        modifiers: KeyModifiers::CONTROL,
+    };
+
+    let press = state.handle_raw_events(vec![RawInputEvent::ExtendedMouse(back_down)]);
+    assert_eq!(
+        sent(&press),
+        [PaneExtendedMouse {
+            pane_id: "pane_1".into(),
+            button: ExtendedMouseButton::Back,
+            pressed: true,
+            column: 2,
+            row: 1,
+            modifiers: KeyModifiers::CONTROL.bits(),
+        }]
+    );
+
+    // A forward release without its press is dropped; the back release follows
+    // the press and is clamped to the pane even outside it.
+    let stray = state.handle_raw_events(vec![RawInputEvent::ExtendedMouse(ExtendedMouseEvent {
+        button: ExtendedMouseButton::Forward,
+        pressed: false,
+        ..back_down
+    })]);
+    assert!(sent(&stray).is_empty());
+    let release = state.handle_raw_events(vec![RawInputEvent::ExtendedMouse(ExtendedMouseEvent {
+        pressed: false,
+        column: 0,
+        row: 0,
+        ..back_down
+    })]);
+    assert_eq!(
+        sent(&release)
+            .iter()
+            .map(|input| (
+                input.pane_id.as_str(),
+                input.pressed,
+                input.column,
+                input.row
+            ))
+            .collect::<Vec<_>>(),
+        [("pane_1", false, 0, 0)]
+    );
+
+    // Panes without mouse reporting never see the buttons.
+    let mut quiet_surface = surface();
+    quiet_surface.panes[0].mouse_reporting = false;
+    state.set_pane_surface(quiet_surface);
+    state.compose(106, 20).expect("composed frame");
+    let ignored = state.handle_raw_events(vec![RawInputEvent::ExtendedMouse(back_down)]);
+    assert!(ignored.requests.is_empty());
+    assert!(ignored.actions.is_empty());
+}
+
+#[test]
 fn pane_mouse_input_keeps_stable_target_and_endpoint_encoding() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

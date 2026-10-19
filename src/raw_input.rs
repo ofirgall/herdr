@@ -31,6 +31,7 @@ pub(crate) fn parse_framed_input(data: &[u8]) -> Vec<RawInputEvent> {
     events
 }
 
+use crate::input::mouse::{ExtendedMouseButton, ExtendedMouseEvent};
 use crate::input::{parse_terminal_key_sequence, TerminalKey, TextCommit};
 use crate::terminal_theme::{
     parse_default_color_response, parse_palette_color_response, DefaultColorKind, HostAppearance,
@@ -81,6 +82,7 @@ pub enum RawInputEvent {
     Text(TextCommit),
     Paste(String),
     Mouse(MouseEvent),
+    ExtendedMouse(ExtendedMouseEvent),
     OuterFocusGained,
     OuterFocusLost,
     HostDefaultColor {
@@ -1022,9 +1024,8 @@ fn extract_one_event(buffer: &[u8]) -> Option<(RawInputEvent, usize)> {
     if buffer[0] == ESC {
         let seq_len = complete_escape_sequence_len(buffer)?;
         if buffer[..seq_len].starts_with(b"\x1b[M") {
-            let event = parse_default_mouse(&buffer[..seq_len])
-                .map(RawInputEvent::Mouse)
-                .unwrap_or(RawInputEvent::Unsupported);
+            let event =
+                parse_default_mouse(&buffer[..seq_len]).unwrap_or(RawInputEvent::Unsupported);
             return Some((event, seq_len));
         }
         let seq = std::str::from_utf8(&buffer[..seq_len]).ok()?;
@@ -1062,7 +1063,7 @@ fn extract_one_event(buffer: &[u8]) -> Option<(RawInputEvent, usize)> {
         }
 
         if let Some(mouse) = parse_sgr_mouse(seq) {
-            return Some((RawInputEvent::Mouse(mouse), seq_len));
+            return Some((mouse, seq_len));
         }
 
         if let Some(key) = parse_terminal_key_sequence(seq) {
@@ -1517,7 +1518,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-fn parse_default_mouse(sequence: &[u8]) -> Option<MouseEvent> {
+fn parse_default_mouse(sequence: &[u8]) -> Option<RawInputEvent> {
     let &[ESC, b'[', b'M', encoded_cb, encoded_column, encoded_row] = sequence else {
         return None;
     };
@@ -1526,15 +1527,10 @@ fn parse_default_mouse(sequence: &[u8]) -> Option<MouseEvent> {
     let row = u16::from(encoded_row).checked_sub(33)?;
     let (kind, modifiers) = parse_mouse_cb(cb)?;
 
-    Some(MouseEvent {
-        kind,
-        column,
-        row,
-        modifiers,
-    })
+    Some(kind.at_cell(column, row, modifiers))
 }
 
-fn parse_sgr_mouse(sequence: &str) -> Option<MouseEvent> {
+fn parse_sgr_mouse(sequence: &str) -> Option<RawInputEvent> {
     let report = parse_sgr_mouse_report(sequence.as_bytes())?;
     let column = u16::try_from(report.x.checked_sub(1)?).ok()?;
     let row = u16::try_from(report.y.checked_sub(1)?).ok()?;
@@ -1545,7 +1541,7 @@ fn parse_sgr_mouse(sequence: &str) -> Option<MouseEvent> {
 /// coordinates: cells normally, pixels when the host reports SGR pixels (1016).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SgrMouseReport {
-    kind: MouseEventKind,
+    kind: MouseReportKind,
     modifiers: KeyModifiers,
     pub(crate) x: u32,
     pub(crate) y: u32,
@@ -1553,12 +1549,38 @@ pub(crate) struct SgrMouseReport {
 
 impl SgrMouseReport {
     /// The report as a mouse event at a 0-based cell.
-    pub(crate) fn at_cell(self, column: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind: self.kind,
-            column,
-            row,
-            modifiers: self.modifiers,
+    pub(crate) fn at_cell(self, column: u16, row: u16) -> RawInputEvent {
+        self.kind.at_cell(column, row, self.modifiers)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseReportKind {
+    Standard(MouseEventKind),
+    Extended {
+        button: ExtendedMouseButton,
+        pressed: bool,
+    },
+}
+
+impl MouseReportKind {
+    fn at_cell(self, column: u16, row: u16, modifiers: KeyModifiers) -> RawInputEvent {
+        match self {
+            Self::Standard(kind) => RawInputEvent::Mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers,
+            }),
+            Self::Extended { button, pressed } => {
+                RawInputEvent::ExtendedMouse(ExtendedMouseEvent {
+                    button,
+                    pressed,
+                    column,
+                    row,
+                    modifiers,
+                })
+            }
         }
     }
 }
@@ -1578,7 +1600,13 @@ pub(crate) fn parse_sgr_mouse_report(sequence: &[u8]) -> Option<SgrMouseReport> 
     }
     let (kind, modifiers) = parse_mouse_cb(cb)?;
     let kind = match (final_byte, kind) {
-        (b'm', MouseEventKind::Down(button)) => MouseEventKind::Up(button),
+        (b'm', MouseReportKind::Standard(MouseEventKind::Down(button))) => {
+            MouseReportKind::Standard(MouseEventKind::Up(button))
+        }
+        (b'm', MouseReportKind::Extended { button, .. }) => MouseReportKind::Extended {
+            button,
+            pressed: false,
+        },
         (_, kind) => kind,
     };
     Some(SgrMouseReport {
@@ -1595,11 +1623,42 @@ fn parse_report_number(value: &[u8]) -> Option<u32> {
         .flatten()
 }
 
-fn parse_mouse_cb(cb: u8) -> Option<(MouseEventKind, KeyModifiers)> {
+fn parse_mouse_cb(cb: u8) -> Option<(MouseReportKind, KeyModifiers)> {
     let button_number = (cb & 0b0000_0011) | ((cb & 0b1100_0000) >> 4);
     let dragging = cb & 0b0010_0000 == 0b0010_0000;
 
     let kind = match (button_number, dragging) {
+        // Legacy reports cannot say which button was released, so only SGR
+        // reports (final `m`) produce extended releases.
+        (8, false) => MouseReportKind::Extended {
+            button: ExtendedMouseButton::Back,
+            pressed: true,
+        },
+        (9, false) => MouseReportKind::Extended {
+            button: ExtendedMouseButton::Forward,
+            pressed: true,
+        },
+        (button_number, dragging) => {
+            MouseReportKind::Standard(standard_mouse_kind(button_number, dragging)?)
+        }
+    };
+
+    let mut modifiers = KeyModifiers::empty();
+    if cb & 0b0000_0100 != 0 {
+        modifiers |= KeyModifiers::SHIFT;
+    }
+    if cb & 0b0000_1000 != 0 {
+        modifiers |= KeyModifiers::ALT;
+    }
+    if cb & 0b0001_0000 != 0 {
+        modifiers |= KeyModifiers::CONTROL;
+    }
+
+    Some((kind, modifiers))
+}
+
+fn standard_mouse_kind(button_number: u8, dragging: bool) -> Option<MouseEventKind> {
+    Some(match (button_number, dragging) {
         (0, false) => MouseEventKind::Down(MouseButton::Left),
         (1, false) => MouseEventKind::Down(MouseButton::Middle),
         (2, false) => MouseEventKind::Down(MouseButton::Right),
@@ -1615,20 +1674,7 @@ fn parse_mouse_cb(cb: u8) -> Option<(MouseEventKind, KeyModifiers)> {
         (6, false) => MouseEventKind::ScrollLeft,
         (7, false) => MouseEventKind::ScrollRight,
         _ => return None,
-    };
-
-    let mut modifiers = KeyModifiers::empty();
-    if cb & 0b0000_0100 != 0 {
-        modifiers |= KeyModifiers::SHIFT;
-    }
-    if cb & 0b0000_1000 != 0 {
-        modifiers |= KeyModifiers::ALT;
-    }
-    if cb & 0b0001_0000 != 0 {
-        modifiers |= KeyModifiers::CONTROL;
-    }
-
-    Some((kind, modifiers))
+    })
 }
 
 #[cfg(test)]
@@ -1765,6 +1811,36 @@ mod tests {
         assert_eq!(mouse.column, 19);
         assert_eq!(mouse.row, 9);
         assert_eq!(mouse.modifiers, KeyModifiers::empty());
+    }
+
+    #[test]
+    fn parses_sgr_back_and_forward_buttons() {
+        let (RawInputEvent::ExtendedMouse(back), _) = extract_one_event(b"\x1b[<132;5;3M").unwrap()
+        else {
+            panic!("expected back press");
+        };
+        assert_eq!(
+            back,
+            ExtendedMouseEvent {
+                button: ExtendedMouseButton::Back,
+                pressed: true,
+                column: 4,
+                row: 2,
+                modifiers: KeyModifiers::SHIFT,
+            }
+        );
+        let (RawInputEvent::ExtendedMouse(forward), _) =
+            extract_one_event(b"\x1b[<129;5;3m").unwrap()
+        else {
+            panic!("expected forward release");
+        };
+        assert_eq!(forward.button, ExtendedMouseButton::Forward);
+        assert!(!forward.pressed);
+        // Drags with an extended button held stay plain motion.
+        let (RawInputEvent::Mouse(drag), _) = extract_one_event(b"\x1b[<160;5;3M").unwrap() else {
+            panic!("expected motion");
+        };
+        assert_eq!(drag.kind, MouseEventKind::Moved);
     }
 
     #[test]

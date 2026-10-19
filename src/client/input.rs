@@ -451,7 +451,10 @@ fn windows_client_input_event_from_raw(
                 color: color.into(),
             })
         }
-        crate::raw_input::RawInputEvent::HostPaletteColors { .. }
+        // The Windows console path carries input as frozen endpoint events,
+        // which cannot represent extended buttons.
+        crate::raw_input::RawInputEvent::ExtendedMouse(_)
+        | crate::raw_input::RawInputEvent::HostPaletteColors { .. }
         | crate::raw_input::RawInputEvent::HostColorSchemeChanged(_)
         | crate::raw_input::RawInputEvent::HostCellSizeReport { .. }
         | crate::raw_input::RawInputEvent::Unsupported => None,

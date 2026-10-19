@@ -217,6 +217,38 @@ pub(super) fn apply_client_pane_input_events(
     Ok(keyboard_forwarded)
 }
 
+#[cfg(test)]
+pub(crate) fn test_apply_pane_extended_mouse(
+    runtime: &crate::terminal::TerminalRuntime,
+    input: &crate::protocol::pane_extended_mouse::PaneExtendedMouse,
+) -> Result<(), String> {
+    apply_pane_extended_mouse(runtime, input)
+}
+
+pub(super) fn apply_pane_extended_mouse(
+    runtime: &crate::terminal::TerminalRuntime,
+    input: &crate::protocol::pane_extended_mouse::PaneExtendedMouse,
+) -> Result<(), String> {
+    let bytes = runtime
+        .encode_extended_mouse_button(
+            input.button,
+            input.pressed,
+            crate::input::mouse::Position::Cell {
+                column: input.column,
+                row: input.row,
+            },
+            KeyModifiers::from_bits_truncate(input.modifiers),
+        )
+        .unwrap_or_default();
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    runtime.scroll_reset();
+    runtime
+        .try_send_bytes(Bytes::from(bytes))
+        .map_err(|err| format!("pane extended mouse input failed: {err}"))
+}
+
 pub(super) fn apply_client_popup_input_events(
     runtime: &crate::terminal::TerminalRuntime,
     events: &[ClientPaneInputEvent],
@@ -346,6 +378,7 @@ pub(super) fn apply_client_terminal_input_events(
                     .map_err(|err| format!("targeted pane paste failed: {err}"))?;
             }
             crate::raw_input::RawInputEvent::Mouse(_)
+            | crate::raw_input::RawInputEvent::ExtendedMouse(_)
             | crate::raw_input::RawInputEvent::OuterFocusGained
             | crate::raw_input::RawInputEvent::OuterFocusLost
             | crate::raw_input::RawInputEvent::HostDefaultColor { .. }
@@ -363,6 +396,44 @@ pub(super) fn apply_client_terminal_input_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn extended_mouse_buttons_encode_as_buttons_eight_and_nine() {
+        use crate::input::mouse::ExtendedMouseButton;
+        use crate::protocol::pane_extended_mouse::PaneExtendedMouse;
+
+        let (runtime, mut rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                20, 5, 0, b"", 64,
+            );
+        let input = |button, pressed| PaneExtendedMouse {
+            pane_id: "pane_1".into(),
+            button,
+            pressed,
+            column: 3,
+            row: 1,
+            modifiers: KeyModifiers::SHIFT.bits(),
+        };
+        let mut sent = |input: PaneExtendedMouse| {
+            apply_pane_extended_mouse(&runtime, &input).expect("extended mouse");
+            let mut bytes = Vec::new();
+            while let Ok(chunk) = rx.try_recv() {
+                bytes.extend_from_slice(&chunk);
+            }
+            bytes
+        };
+
+        assert!(sent(input(ExtendedMouseButton::Back, true)).is_empty());
+        runtime.test_process_pty_bytes(b"\x1b[?1000h\x1b[?1006h");
+        assert_eq!(
+            sent(input(ExtendedMouseButton::Back, true)),
+            b"\x1b[<132;4;2M"
+        );
+        assert_eq!(
+            sent(input(ExtendedMouseButton::Forward, false)),
+            b"\x1b[<133;4;2m"
+        );
+    }
 
     #[tokio::test]
     async fn terminal_attach_stale_geometry_falls_back_to_the_canonical_cell() {

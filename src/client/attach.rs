@@ -174,7 +174,9 @@ pub(super) fn direct_attach_pixel_mouse(
 )> {
     let report = crate::raw_input::parse_sgr_mouse_report(data)?;
     let (column, row) = geometry.cell(report.x, report.y)?;
-    let mouse = report.at_cell(column, row);
+    let crate::raw_input::RawInputEvent::Mouse(mouse) = report.at_cell(column, row) else {
+        return None;
+    };
     Some((
         crate::protocol::ClientMouseKind::from_crossterm(mouse.kind)?,
         crate::protocol::ClientMousePosition::Pixels {

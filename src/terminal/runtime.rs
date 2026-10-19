@@ -545,6 +545,17 @@ impl TerminalRuntime {
         self.0.encode_mouse_button(kind, position, modifiers)
     }
 
+    pub(crate) fn encode_extended_mouse_button(
+        &self,
+        button: crate::input::mouse::ExtendedMouseButton,
+        pressed: bool,
+        position: crate::input::mouse::Position,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<Vec<u8>> {
+        self.0
+            .encode_extended_mouse_button(button, pressed, position, modifiers)
+    }
+
     pub(crate) fn encode_mouse_motion(
         &self,
         kind: crossterm::event::MouseEventKind,

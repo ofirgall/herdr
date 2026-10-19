@@ -2343,6 +2343,77 @@ impl ClientShellState {
         }
     }
 
+    /// Back/forward reach the mouse-reporting pane under the press; the release
+    /// follows the press so the pane never sees a button stuck down.
+    pub(super) fn handle_extended_mouse(
+        &mut self,
+        mouse: crate::input::mouse::ExtendedMouseEvent,
+        outcome: &mut ClientShellInput,
+    ) {
+        let hit = if mouse.pressed {
+            if self.overlay.is_some()
+                || self.popup_pending
+                || self.popup_terminal_id.is_some()
+                || self.hits.popup.is_some()
+            {
+                return;
+            }
+            let point = (mouse.column, mouse.row);
+            let Some(hit) = self
+                .hits
+                .panes
+                .iter()
+                .find(|hit| super::contains(hit.inner_rect, point) && hit.mouse_reporting)
+                .cloned()
+            else {
+                return;
+            };
+            if self.focused_pane_id().as_deref() != Some(hit.pane_id.as_str()) {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                        pane_id: hit.pane_id.clone(),
+                    }),
+                    outcome,
+                );
+            }
+            self.extended_mouse_press = Some((mouse.button, hit.clone()));
+            hit
+        } else {
+            match self.extended_mouse_press.take() {
+                Some((button, pressed)) if button == mouse.button => self
+                    .hits
+                    .panes
+                    .iter()
+                    .find(|hit| hit.pane_id == pressed.pane_id)
+                    .cloned()
+                    .unwrap_or(pressed),
+                other => {
+                    self.extended_mouse_press = other;
+                    return;
+                }
+            }
+        };
+        let rect = hit.inner_rect;
+        let input = crate::protocol::pane_extended_mouse::PaneExtendedMouse {
+            pane_id: hit.pane_id,
+            button: mouse.button,
+            pressed: mouse.pressed,
+            column: mouse
+                .column
+                .saturating_sub(rect.x)
+                .min(rect.width.saturating_sub(1)),
+            row: mouse
+                .row
+                .saturating_sub(rect.y)
+                .min(rect.height.saturating_sub(1)),
+            modifiers: mouse.modifiers.bits(),
+        };
+        match crate::protocol::pane_extended_mouse::message(&input) {
+            Ok(message) => outcome.requests.push(message),
+            Err(error) => tracing::warn!(%error, "failed to encode pane extended mouse"),
+        }
+    }
+
     fn pane_mouse_position(&self, hit: &PaneHit, mouse: MouseEvent) -> ClientMousePosition {
         let cell = ClientMousePosition::Cell {
             column: mouse.column.saturating_sub(hit.inner_rect.x),

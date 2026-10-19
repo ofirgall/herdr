@@ -321,6 +321,25 @@ pub(super) fn ghostty_mouse_event_from_button_kind(
     Some(event)
 }
 
+pub(super) fn ghostty_extended_mouse_event(
+    button: crate::input::mouse::ExtendedMouseButton,
+    pressed: bool,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<crate::ghostty::MouseEvent> {
+    let mut event = crate::ghostty::MouseEvent::new().ok()?;
+    event.set_action(if pressed {
+        crate::ghostty::MOUSE_ACTION_PRESS
+    } else {
+        crate::ghostty::MOUSE_ACTION_RELEASE
+    });
+    event.set_button(match button {
+        crate::input::mouse::ExtendedMouseButton::Back => crate::ghostty::MOUSE_BUTTON_EIGHT,
+        crate::input::mouse::ExtendedMouseButton::Forward => crate::ghostty::MOUSE_BUTTON_NINE,
+    });
+    event.set_mods(ghostty_mods_from_key_modifiers(modifiers));
+    Some(event)
+}
+
 pub(super) fn ghostty_mouse_event_from_motion_kind(
     kind: crossterm::event::MouseEventKind,
     column: u16,

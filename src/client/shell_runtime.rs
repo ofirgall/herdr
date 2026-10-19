@@ -850,6 +850,13 @@ pub(super) fn finish_client_shell_input(
             // Pane input and non-focus host effects do not cross the frozen handoff boundary.
             continue;
         }
+        if matches!(&request, ClientMessage::EndpointControl { kind, .. }
+            if kind == crate::protocol::pane_extended_mouse::MESSAGE_KIND)
+            && !endpoints
+                .active_supports_capability(crate::protocol::pane_extended_mouse::CAPABILITY)
+        {
+            continue;
+        }
         write_to_server(endpoints, &request).map_err(ClientError::ConnectionLost)?;
     }
     if let Some(frame) = frame {

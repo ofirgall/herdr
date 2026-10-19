@@ -506,6 +506,11 @@ pub(crate) enum ServerEvent {
         pane_id: String,
         events: Vec<ClientPaneInputEvent>,
     },
+    /// A client-owned shell pressed or released an extended mouse button over a pane.
+    ClientShellPaneExtendedMouse {
+        client_id: u64,
+        input: crate::protocol::pane_extended_mouse::PaneExtendedMouse,
+    },
     /// A client-owned shell delivered semantic input to its active popup terminal.
     ClientShellPopupInput {
         client_id: u64,
@@ -1348,6 +1353,17 @@ fn client_read_loop_with_endpoint_controls(
                 ServerEvent::ClientShellPresentationSync {
                     client_id,
                     token: data,
+                }
+            }
+            ClientMessage::EndpointControl { kind, data }
+                if kind == crate::protocol::pane_extended_mouse::MESSAGE_KIND =>
+            {
+                match crate::protocol::pane_extended_mouse::decode(&data) {
+                    Ok(input) => ServerEvent::ClientShellPaneExtendedMouse { client_id, input },
+                    Err(error) => {
+                        debug!(client_id, %error, "ignoring pane extended mouse");
+                        continue;
+                    }
                 }
             }
             ClientMessage::EndpointControl { kind, data } => {

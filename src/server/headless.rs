@@ -2459,6 +2459,51 @@ impl HeadlessServer {
                 }
                 foreground_changed | geometry_changed || scroll_changed
             }
+            ServerEvent::ClientShellPaneExtendedMouse { client_id, input } => {
+                if self.handoff_in_progress
+                    || !self
+                        .clients
+                        .get(&client_id)
+                        .is_some_and(ClientConnection::is_active_shell_client)
+                {
+                    return false;
+                }
+                let Some((workspace_index, runtime_pane_id)) =
+                    self.app.parse_pane_id(&input.pane_id)
+                else {
+                    return false;
+                };
+                // Like other pane releases, a release reaches a pane the client no
+                // longer views so the application never keeps the button held.
+                if input.pressed {
+                    let popup_blocks_input = self.app.state.popup_pane.is_some()
+                        && self.popup_owner_tab_id == self.shell_tab_id_for_client(client_id);
+                    if popup_blocks_input
+                        || !self.shell_client_views_pane(
+                            client_id,
+                            workspace_index,
+                            runtime_pane_id,
+                        )
+                    {
+                        return false;
+                    }
+                }
+                let foreground_changed =
+                    input.pressed && self.promote_client_to_foreground(client_id);
+                let geometry_changed =
+                    input.pressed && self.claim_shell_tab_geometry(client_id, false);
+                let Some(runtime) = self.app.state.runtime_for_pane_in_workspace(
+                    &self.app.terminal_runtimes,
+                    workspace_index,
+                    runtime_pane_id,
+                ) else {
+                    return foreground_changed | geometry_changed;
+                };
+                if let Err(err) = super::pane_input::apply_pane_extended_mouse(runtime, &input) {
+                    warn!(client_id, pane_id = input.pane_id, err = %err, "pane extended mouse failed");
+                }
+                foreground_changed | geometry_changed
+            }
             ServerEvent::ClientShellPopupInput {
                 client_id,
                 terminal_id,

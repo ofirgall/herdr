@@ -4,6 +4,25 @@ pub(crate) enum Position {
     Pixels { x: u32, y: u32 },
 }
 
+/// Back and forward (X11 buttons 8 and 9), which crossterm and the frozen
+/// endpoint mouse enum cannot represent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ExtendedMouseButton {
+    Back,
+    Forward,
+}
+
+/// A press or release of an extended button at a 0-based cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExtendedMouseEvent {
+    pub(crate) button: ExtendedMouseButton,
+    pub(crate) pressed: bool,
+    pub(crate) column: u16,
+    pub(crate) row: u16,
+    pub(crate) modifiers: crossterm::event::KeyModifiers,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HostGeometry {
     pub(crate) cols: u16,

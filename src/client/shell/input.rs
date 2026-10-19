@@ -173,8 +173,7 @@ impl ClientShellState {
             y: report.y,
             geometry,
         });
-        let outcome =
-            self.handle_raw_events(vec![RawInputEvent::Mouse(report.at_cell(column, row))]);
+        let outcome = self.handle_raw_events(vec![report.at_cell(column, row)]);
         self.host_mouse_pixels = None;
         outcome
     }
@@ -313,6 +312,9 @@ impl ClientShellState {
                     }
                 }
                 RawInputEvent::Mouse(mouse) => self.handle_mouse(mouse, &mut outcome),
+                RawInputEvent::ExtendedMouse(mouse) => {
+                    self.handle_extended_mouse(mouse, &mut outcome);
+                }
                 RawInputEvent::OuterFocusGained => {
                     self.outer_focused = Some(true);
                     outcome.query_host_appearance = true;

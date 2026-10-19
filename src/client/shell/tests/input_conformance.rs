@@ -332,11 +332,21 @@ impl HerdrPath {
         &mut self,
         outcome: ClientShellInput,
         events: &mut Vec<ClientPaneInputEvent>,
+        extended: &mut Vec<crate::protocol::pane_extended_mouse::PaneExtendedMouse>,
     ) -> bool {
         let mut owned = outcome.detach;
         for request in outcome.requests {
-            if let ClientMessage::ClientShellPaneInput { events: batch, .. } = request {
-                events.extend(batch);
+            match request {
+                ClientMessage::ClientShellPaneInput { events: batch, .. } => events.extend(batch),
+                ClientMessage::EndpointControl { kind, data }
+                    if kind == crate::protocol::pane_extended_mouse::MESSAGE_KIND =>
+                {
+                    extended.push(
+                        crate::protocol::pane_extended_mouse::decode(&data)
+                            .expect("pane extended mouse"),
+                    );
+                }
+                _ => {}
             }
         }
         let mut replay = Vec::new();
@@ -371,7 +381,7 @@ impl HerdrPath {
         }
         if !replay.is_empty() {
             let outcome = self.state.replay_mouse_events(replay);
-            owned |= self.absorb(outcome, events);
+            owned |= self.absorb(outcome, events, extended);
         }
         owned
     }
@@ -402,9 +412,10 @@ impl HerdrPath {
     /// pane receives. None when Herdr kept the input for itself.
     fn deliver(&mut self, outcomes: Vec<ClientShellInput>) -> Option<Vec<u8>> {
         let mut events = Vec::new();
+        let mut extended = Vec::new();
         let mut herdr_owned = false;
         for outcome in outcomes {
-            herdr_owned |= self.absorb(outcome, &mut events);
+            herdr_owned |= self.absorb(outcome, &mut events, &mut extended);
         }
         herdr_owned |= self.state.mode != ClientShellMode::Terminal || self.state.overlay.is_some();
         if herdr_owned {
@@ -415,6 +426,13 @@ impl HerdrPath {
             crate::server::pane_input::test_apply_client_pane_input_events(&self.runtime, &events)
         {
             out.extend_from_slice(format!("<server error: {err}>").as_bytes());
+        }
+        for input in &extended {
+            if let Err(err) =
+                crate::server::pane_input::test_apply_pane_extended_mouse(&self.runtime, input)
+            {
+                out.extend_from_slice(format!("<server error: {err}>").as_bytes());
+            }
         }
         while let Ok(bytes) = self.rx.try_recv() {
             out.extend_from_slice(&bytes);
@@ -732,6 +750,40 @@ const GESTURES: &[(&str, &[MouseStep])] = &[
             step(
                 ghostty::MOUSE_ACTION_RELEASE,
                 Some(ghostty::MOUSE_BUTTON_MIDDLE),
+                0,
+                0,
+            ),
+        ],
+    ),
+    (
+        "click-back",
+        &[
+            step(
+                ghostty::MOUSE_ACTION_PRESS,
+                Some(ghostty::MOUSE_BUTTON_EIGHT),
+                0,
+                0,
+            ),
+            step(
+                ghostty::MOUSE_ACTION_RELEASE,
+                Some(ghostty::MOUSE_BUTTON_EIGHT),
+                0,
+                0,
+            ),
+        ],
+    ),
+    (
+        "click-forward",
+        &[
+            step(
+                ghostty::MOUSE_ACTION_PRESS,
+                Some(ghostty::MOUSE_BUTTON_NINE),
+                0,
+                0,
+            ),
+            step(
+                ghostty::MOUSE_ACTION_RELEASE,
+                Some(ghostty::MOUSE_BUTTON_NINE),
                 0,
                 0,
             ),

@@ -906,6 +906,8 @@ pub(crate) struct ClientShellState {
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
+    /// The pane that received an extended-button press, so its release follows it.
+    pub(super) extended_mouse_press: Option<(crate::input::mouse::ExtendedMouseButton, PaneHit)>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
     pub(super) url_click_consumes_until_up: bool,
     /// The host terminal reports key releases (Kitty event types), so text
@@ -1080,6 +1082,7 @@ impl ClientShellState {
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,
+            extended_mouse_press: None,
             link_hover: None,
             url_click_consumes_until_up: false,
             host_reports_key_releases: false,
@@ -1276,6 +1279,7 @@ impl ClientShellState {
             .then_some(ClientShellOverlay::Onboarding);
         self.previous_pane_id = None;
         self.pane_mouse_gesture = None;
+        self.extended_mouse_press = None;
         self.link_hover = None;
         self.url_click_consumes_until_up = false;
         self.replaying_url_click = false;

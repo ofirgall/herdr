@@ -25,7 +25,7 @@ use super::cursor::CURSOR_POSITION_SETTLE;
 use super::cursor::{CursorPositionSettleState, DecscusrTracker};
 use super::{
     input::{
-        configure_key_encoder, ghostty_key_event_from_terminal_key,
+        configure_key_encoder, ghostty_extended_mouse_event, ghostty_key_event_from_terminal_key,
         ghostty_mouse_encoder_for_terminal, ghostty_mouse_event_from_button_kind,
         ghostty_mouse_event_from_motion_kind, ghostty_mouse_event_from_wheel_kind,
         legacy_shell_key, legacy_super_chord,
@@ -654,6 +654,17 @@ impl PaneTerminal {
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
         self.ghostty.encode_mouse_button(kind, position, modifiers)
+    }
+
+    pub(crate) fn encode_extended_mouse_button(
+        &self,
+        button: crate::input::mouse::ExtendedMouseButton,
+        pressed: bool,
+        position: crate::input::mouse::Position,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<Vec<u8>> {
+        self.ghostty
+            .encode_extended_mouse_button(button, pressed, position, modifiers)
     }
 
     pub(crate) fn encode_mouse_motion(
@@ -2094,6 +2105,20 @@ impl GhosttyPaneTerminal {
     ) -> Option<Vec<u8>> {
         self.encode_mouse_event(
             ghostty_mouse_event_from_button_kind(kind, 0, 0, modifiers)?,
+            position,
+            false,
+        )
+    }
+
+    pub(crate) fn encode_extended_mouse_button(
+        &self,
+        button: crate::input::mouse::ExtendedMouseButton,
+        pressed: bool,
+        position: crate::input::mouse::Position,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<Vec<u8>> {
+        self.encode_mouse_event(
+            ghostty_extended_mouse_event(button, pressed, modifiers)?,
             position,
             false,
         )

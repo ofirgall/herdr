@@ -280,6 +280,12 @@ impl EndpointRegistry {
         changed
     }
 
+    pub(crate) fn active_supports_capability(&self, capability: &str) -> bool {
+        self.connections
+            .get(&self.active)
+            .is_some_and(|connection| connection.negotiation.supports_capability(capability))
+    }
+
     pub(crate) fn send(&mut self, message: &ClientMessage) -> EndpointSendOutcome {
         let endpoint_id = self.active.clone();
         self.send_to(&endpoint_id, message)
