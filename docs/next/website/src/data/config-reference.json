@@ -1091,6 +1091,48 @@
           "description": "Override the agent status glyph for the unknown state. Unset or empty keeps the status_indicators glyph."
         },
         {
+          "key": "ui.tab_status.enabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "Prefix each tab label with its agents' status glyph and use the status color as the tab background. Tabs without agent state keep their plain style."
+        },
+        {
+          "key": "ui.tab_status.inactive_dim",
+          "type": "integer",
+          "default": "40",
+          "description": "Percent (0-100) that unfocused tab backgrounds fade from the status color toward the plain tab color so the focused tab stands out. 0 disables dimming."
+        },
+        {
+          "key": "ui.tab_status.fg",
+          "type": "string",
+          "default": "unset",
+          "description": "Text color on status-colored tabs: hex, named color, or rgb(r,g,b). Unset or empty picks the theme text color that contrasts best with each tab's background."
+        },
+        {
+          "key": "ui.tab_status.colors.blocked",
+          "type": "string",
+          "default": "unset",
+          "description": "Tab color for the blocked state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's red."
+        },
+        {
+          "key": "ui.tab_status.colors.working",
+          "type": "string",
+          "default": "unset",
+          "description": "Tab color for the working state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's yellow."
+        },
+        {
+          "key": "ui.tab_status.colors.done",
+          "type": "string",
+          "default": "unset",
+          "description": "Tab color for the done state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's teal."
+        },
+        {
+          "key": "ui.tab_status.colors.idle",
+          "type": "string",
+          "default": "unset",
+          "description": "Tab color for the idle state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's green."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

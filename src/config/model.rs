@@ -157,6 +157,61 @@ impl StatusIconsConfig {
     }
 }
 
+/// Agent status indicators in tab labels.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TabStatusConfig {
+    /// Prefix each tab label with its agents' status glyph and color the tab background. Default: false.
+    pub enabled: bool,
+    /// Percent (0-100) that unfocused tab backgrounds fade toward the plain tab color. Default: 40.
+    pub inactive_dim: u8,
+    /// Text color on status-colored tabs. Default: unset (the theme text color that reads best).
+    pub fg: Option<String>,
+    /// Per-state tab colors. Unset states use the theme's status colors.
+    pub colors: TabStatusColorsConfig,
+}
+
+impl Default for TabStatusConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            inactive_dim: 40,
+            fg: None,
+            colors: TabStatusColorsConfig::default(),
+        }
+    }
+}
+
+/// Per-state colors for tab status indicators: hex, named colors, or rgb(r,g,b).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TabStatusColorsConfig {
+    /// Color for tabs with a blocked agent. Default: unset (the theme's red).
+    pub blocked: Option<String>,
+    /// Color for tabs with a working agent. Default: unset (the theme's yellow).
+    pub working: Option<String>,
+    /// Color for tabs with an agent that finished unseen work. Default: unset (the theme's teal).
+    pub done: Option<String>,
+    /// Color for tabs with idle agents. Default: unset (the theme's green).
+    pub idle: Option<String>,
+}
+
+impl TabStatusColorsConfig {
+    /// The configured color for `status`, ignoring empty values.
+    pub fn get(&self, status: crate::api::schema::AgentStatus) -> Option<&str> {
+        use crate::api::schema::AgentStatus;
+        match status {
+            AgentStatus::Blocked => &self.blocked,
+            AgentStatus::Working => &self.working,
+            AgentStatus::Done => &self.done,
+            AgentStatus::Idle => &self.idle,
+            AgentStatus::Unknown => return None,
+        }
+        .as_deref()
+        .filter(|color| !color.trim().is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -1032,6 +1087,8 @@ pub struct UiConfig {
     pub status_indicators: StatusIndicatorStyle,
     /// Per-state glyphs that override the `status_indicators` style.
     pub status_icons: StatusIconsConfig,
+    /// Agent status indicators in tab labels.
+    pub tab_status: TabStatusConfig,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     /// Accent color for highlights, borders, and navigation UI.
@@ -1261,6 +1318,7 @@ impl Default for UiConfig {
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
             status_icons: StatusIconsConfig::default(),
+            tab_status: TabStatusConfig::default(),
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
             toast: ToastConfig::default(),
@@ -1548,6 +1606,32 @@ done = ""
         // Empty and missing glyphs fall back to the indicator style.
         assert_eq!(icons.get(AgentStatus::Done), None);
         assert_eq!(icons.get(AgentStatus::Blocked), None);
+    }
+
+    #[test]
+    fn tab_status_is_off_by_default_and_reads_per_state_colors() {
+        use crate::api::schema::AgentStatus;
+        assert!(!Config::default().ui.tab_status.enabled);
+        assert_eq!(Config::default().ui.tab_status.inactive_dim, 40);
+        assert_eq!(Config::default().ui.tab_status.fg, None);
+
+        let config: Config = toml::from_str(
+            r##"
+[ui.tab_status]
+enabled = true
+
+[ui.tab_status.colors]
+working = "#f8921a"
+done = " "
+"##,
+        )
+        .unwrap();
+        let tab_status = &config.ui.tab_status;
+        assert!(tab_status.enabled);
+        assert_eq!(tab_status.colors.get(AgentStatus::Working), Some("#f8921a"));
+        assert_eq!(tab_status.colors.get(AgentStatus::Done), None);
+        assert_eq!(tab_status.colors.get(AgentStatus::Blocked), None);
+        assert_eq!(tab_status.colors.get(AgentStatus::Unknown), None);
     }
 
     #[test]

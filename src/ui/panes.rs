@@ -890,6 +890,33 @@ fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
         .unwrap_or_else(|| panel_contrast_fg(p))
 }
 
+/// `color` blended toward `background` by `amount`, or `None` when either has no RGB value.
+pub(crate) fn blend_color(color: Color, background: Color, amount: f32) -> Option<Color> {
+    let (r, g, b) = mix_rgb(color_to_rgb(color)?, color_to_rgb(background)?, amount);
+    Some(Color::Rgb(r, g, b))
+}
+
+/// Whichever of `dark` and `light` contrasts more with `background`, or `dark` when the
+/// colors have no RGB value.
+pub(crate) fn readable_fg(background: Color, dark: Color, light: Color) -> Color {
+    fn contrast(a: Rgb, b: Rgb) -> f32 {
+        let (a, b) = (relative_luminance(a), relative_luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+    match (
+        color_to_rgb(background),
+        color_to_rgb(dark),
+        color_to_rgb(light),
+    ) {
+        (Some(bg), Some(dark_rgb), Some(light_rgb))
+            if contrast(bg, light_rgb) > contrast(bg, dark_rgb) =>
+        {
+            light
+        }
+        _ => dark,
+    }
+}
+
 fn mix_rgb(base: Rgb, target: Rgb, amount: f32) -> Rgb {
     fn channel(base: u8, target: u8, amount: f32) -> u8 {
         (f32::from(base) + (f32::from(target) - f32::from(base)) * amount).round() as u8

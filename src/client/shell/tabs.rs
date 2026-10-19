@@ -24,7 +24,7 @@ pub(crate) fn render_tab_bar(
     let desired_widths = tabs
         .iter()
         .map(|tab| {
-            let label = tab_label(tab);
+            let label = tab_label(tab, config);
             display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
@@ -92,7 +92,7 @@ pub(crate) fn render_tab_bar(
     let mut first_visible = None;
     let mut last_visible = None;
     for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
-        let name = tab_label(tab);
+        let name = tab_label(tab, config);
         let desired = desired_widths[index];
         let remaining = tab_right.saturating_sub(x);
         let width = desired.min(remaining);
@@ -100,7 +100,14 @@ pub(crate) fn render_tab_bar(
             break;
         }
         let rect = Rect::new(x, area.y, width, 1);
-        let style = if tab.focused {
+        let style = if let Some(status) = tab_agent_status(tab, config) {
+            let base = config.tab_status.tab_style(status, palette, tab.focused);
+            if tab.custom_label {
+                base.add_modifier(Modifier::BOLD)
+            } else {
+                base
+            }
+        } else if tab.focused {
             let base = Style::default()
                 .fg(panel_contrast_fg(palette))
                 .bg(palette.accent);
@@ -371,12 +378,25 @@ fn max_tab_scroll(widths: &[u16], available: u16) -> usize {
     start
 }
 
-fn tab_label(tab: &ClientShellTab) -> String {
-    if tab.zoomed {
+fn tab_label(tab: &ClientShellTab, config: &ClientShellConfig) -> String {
+    let label = if tab.zoomed {
         format!("{} Z", tab.label)
     } else {
         tab.label.clone()
+    };
+    match tab_agent_status(tab, config) {
+        Some(status) => format!("{} {label}", status_icon(status, &config.status_indicators)),
+        None => label,
     }
+}
+
+/// The tab's agent status when tab status indicators are on and the tab has agent state.
+fn tab_agent_status(
+    tab: &ClientShellTab,
+    config: &ClientShellConfig,
+) -> Option<crate::api::schema::AgentStatus> {
+    (config.tab_status.enabled && tab.agent_status != crate::api::schema::AgentStatus::Unknown)
+        .then_some(tab.agent_status)
 }
 
 #[cfg(test)]

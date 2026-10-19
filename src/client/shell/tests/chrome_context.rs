@@ -47,6 +47,102 @@ fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
 }
 
 #[test]
+fn tab_status_prefixes_agent_glyphs_and_colors_tab_backgrounds() {
+    let mut snapshot = snapshot();
+    snapshot
+        .tabs
+        .extend([(2, AgentStatus::Working), (3, AgentStatus::Unknown)].map(
+            |(number, agent_status)| ClientShellTab {
+                tab_id: format!("tab_{number}"),
+                workspace_id: "ws_1".into(),
+                number,
+                label: format!("t{number}"),
+                custom_label: false,
+                zoomed: false,
+                focused: false,
+                agent_status,
+            },
+        ));
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot.clone()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 20).expect("tab bar without indicators");
+    let tab_row = frame_rows(&frame)[state.hits.tabs[0].0.y as usize].clone();
+    assert!(!tab_row.contains('◐'), "tab row: {tab_row}");
+
+    let mut config = Config::default();
+    config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+    config.ui.tab_status.enabled = true;
+    config.ui.tab_status.colors.working = Some("#010203".into());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 20).expect("tab bar with indicators");
+    let tab_y = state.hits.tabs[0].0.y;
+    let tab_row = frame_rows(&frame)[tab_y as usize].clone();
+    assert!(tab_row.contains("○ 1"), "tab row: {tab_row}");
+    assert!(tab_row.contains("◐ t2"), "tab row: {tab_row}");
+    assert!(tab_row.contains(" t3 "), "tab row: {tab_row}");
+    assert!(!tab_row.contains("· t3"), "tab row: {tab_row}");
+
+    let working = state
+        .hits
+        .tabs
+        .iter()
+        .find(|(_, tab_id)| tab_id == "tab_2")
+        .expect("working tab")
+        .0;
+    let glyph_x = (working.x..working.right())
+        .find(|x| frame.cells[(tab_y * frame.width + x) as usize].symbol == "◐")
+        .expect("working glyph");
+    let configured = ratatui::style::Color::Rgb(1, 2, 3);
+    let dimmed =
+        crate::ui::blend_color(configured, state.config.palette.surface0, 0.4).expect("rgb blend");
+    assert_ne!(dimmed, configured);
+    let glyph = &frame.cells[(tab_y * frame.width + glyph_x) as usize];
+    assert_eq!(
+        glyph.bg,
+        crate::protocol::color_to_u32(dimmed),
+        "unfocused tabs fade toward the plain tab background by default"
+    );
+    assert_eq!(
+        glyph.fg,
+        crate::protocol::color_to_u32(state.config.palette.text),
+        "light text reads better on a dark status background"
+    );
+    let focused = state.hits.tabs[0].0;
+    assert_eq!(
+        frame.cells[(tab_y * frame.width + focused.x) as usize].bg,
+        crate::protocol::color_to_u32(state.config.palette.green),
+        "the focused tab keeps the full status color"
+    );
+
+    config.ui.tab_status.inactive_dim = 0;
+    state.config.tab_status = TabStatus::from_config(&config);
+    let frame = state.compose(100, 20).expect("tab bar without dimming");
+    assert_eq!(
+        frame.cells[(tab_y * frame.width + glyph_x) as usize].bg,
+        crate::protocol::color_to_u32(configured)
+    );
+
+    config.ui.tab_status.fg = Some("#11111b".into());
+    state.config.tab_status = TabStatus::from_config(&config);
+    let frame = state
+        .compose(100, 20)
+        .expect("tab bar with a fixed text color");
+    let fixed = crate::protocol::color_to_u32(ratatui::style::Color::Rgb(0x11, 0x11, 0x1b));
+    assert_eq!(
+        frame.cells[(tab_y * frame.width + glyph_x) as usize].fg,
+        fixed
+    );
+    assert_eq!(
+        frame.cells[(tab_y * frame.width + focused.x) as usize].fg,
+        fixed
+    );
+}
+
+#[test]
 fn focused_last_overflow_tab_shows_its_full_label() {
     let mut projected = snapshot();
     let labels = [

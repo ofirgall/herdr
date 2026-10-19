@@ -343,6 +343,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Per-state glyph overrides; unset states keep the status_indicators glyph.
 # status_icons = { blocked = "!", working = "◐" }
 
+# Show agent status glyphs in tab labels with the status color as tab background; colors
+# default to the theme, and inactive_dim fades unfocused tabs.
+# tab_status = { enabled = true, inactive_dim = 40, colors = { working = "#f8921a" } }
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"

@@ -368,6 +368,21 @@ working = "◐"
 done = "✓"
 ```
 
+Tabs can show the status of the agents inside them too. With `[ui.tab_status]` enabled, each tab with agent state gets its status glyph before the label and the status color as its background, with text in whichever theme color reads better, or in the `fg` color when set. Tabs without agents keep their plain style. Unfocused tab backgrounds fade toward the plain tab color by `inactive_dim` percent (default 40, `0` disables it) so the focused tab stands out. Colors default to the theme's status colors; override any state with a hex, named, or `rgb(r,g,b)` color:
+
+```toml
+[ui.tab_status]
+enabled = true
+inactive_dim = 40
+fg = "#11111b"
+
+[ui.tab_status.colors]
+blocked = "#ea417e"
+working = "#f8921a"
+done = "#58cbe1"
+idle = "#9eda26"
+```
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:

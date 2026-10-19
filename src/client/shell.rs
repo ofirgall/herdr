@@ -191,6 +191,90 @@ impl StatusIndicators {
     }
 }
 
+/// The client's tab status indicator settings, with colors parsed once per config load.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TabStatus {
+    pub(crate) enabled: bool,
+    inactive_dim: u8,
+    fg: Option<ratatui::style::Color>,
+    colors: [Option<ratatui::style::Color>; 4],
+}
+
+impl TabStatus {
+    pub(crate) fn from_config(config: &crate::config::Config) -> Self {
+        use crate::api::schema::AgentStatus;
+        let tab_status = &config.ui.tab_status;
+        let color = |status| {
+            tab_status
+                .colors
+                .get(status)
+                .map(crate::config::parse_color)
+        };
+        Self {
+            enabled: tab_status.enabled,
+            inactive_dim: tab_status.inactive_dim.min(100),
+            fg: tab_status
+                .fg
+                .as_deref()
+                .filter(|fg| !fg.trim().is_empty())
+                .map(crate::config::parse_color),
+            colors: [
+                color(AgentStatus::Blocked),
+                color(AgentStatus::Working),
+                color(AgentStatus::Done),
+                color(AgentStatus::Idle),
+            ],
+        }
+    }
+
+    /// The tab color for `status`: the configured color, else the theme's status color.
+    fn color(
+        &self,
+        status: crate::api::schema::AgentStatus,
+        palette: &Palette,
+    ) -> ratatui::style::Color {
+        use crate::api::schema::AgentStatus;
+        let configured = match status {
+            AgentStatus::Blocked => self.colors[0],
+            AgentStatus::Working => self.colors[1],
+            AgentStatus::Done => self.colors[2],
+            AgentStatus::Idle => self.colors[3],
+            AgentStatus::Unknown => None,
+        };
+        configured.unwrap_or_else(|| status_color(status, palette))
+    }
+
+    /// A tab's style: the status color as background, faded toward the unfocused tab
+    /// background when not focused (or dimmed by the terminal when it cannot be blended),
+    /// with whichever theme text color reads better on it.
+    fn tab_style(
+        &self,
+        status: crate::api::schema::AgentStatus,
+        palette: &Palette,
+        focused: bool,
+    ) -> Style {
+        let color = self.color(status, palette);
+        let (background, modifier) = if focused || self.inactive_dim == 0 {
+            (color, Modifier::empty())
+        } else {
+            match crate::ui::blend_color(
+                color,
+                palette.surface0,
+                f32::from(self.inactive_dim) / 100.0,
+            ) {
+                Some(dimmed) => (dimmed, Modifier::empty()),
+                None => (color, Modifier::DIM),
+            }
+        };
+        Style::default()
+            .bg(background)
+            .fg(self.fg.unwrap_or_else(|| {
+                crate::ui::readable_fg(background, panel_contrast_fg(palette), palette.text)
+            }))
+            .add_modifier(modifier)
+    }
+}
+
 fn status_icon(status: crate::api::schema::AgentStatus, indicators: &StatusIndicators) -> &str {
     indicators
         .icons
