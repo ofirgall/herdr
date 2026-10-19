@@ -177,14 +177,8 @@ pub(crate) fn space_rows(
         .collect()
 }
 
-pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
-    if matches!(previous.kind, ResolvedTokenKind::StateIcon)
-        || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
-    {
-        " "
-    } else {
-        " · "
-    }
+pub(crate) fn separator(_previous: &ResolvedToken, _current: &ResolvedToken) -> &'static str {
+    " "
 }
 
 #[cfg(test)]

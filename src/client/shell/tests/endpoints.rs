@@ -1476,8 +1476,8 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("○ Local · local agent"), "frame: {text}");
-    assert!(text.contains("× Build · remote agent"), "frame: {text}");
+    assert!(text.contains("○ Local local agent"), "frame: {text}");
+    assert!(text.contains("× Build remote agent"), "frame: {text}");
     assert!(text.contains("grouped"), "frame: {text}");
     let toggle = state.hits.agent_sort_toggle;
     assert!(!toggle.is_empty());
@@ -1544,8 +1544,8 @@ fn current_workspace_agent_view_excludes_same_workspace_id_on_other_machine() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("Local · local agent"), "frame: {text}");
-    assert!(!text.contains("Build · remote agent"), "frame: {text}");
+    assert!(text.contains("Local local agent"), "frame: {text}");
+    assert!(!text.contains("Build remote agent"), "frame: {text}");
 
     assert!(state.activate_endpoint_projection(&endpoint_id));
     let mut remote_surface = surface();
@@ -1562,8 +1562,8 @@ fn current_workspace_agent_view_excludes_same_workspace_id_on_other_machine() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!text.contains("Local · local agent"), "frame: {text}");
-    assert!(text.contains("Build · remote agent"), "frame: {text}");
+    assert!(!text.contains("Local local agent"), "frame: {text}");
+    assert!(text.contains("Build remote agent"), "frame: {text}");
 }
 
 #[test]
@@ -1631,9 +1631,9 @@ fn current_workspace_or_blocked_keeps_foreign_attention_only() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("Local · local agent"), "frame: {text}");
-    assert!(!text.contains("Build · remote idle"), "frame: {text}");
-    assert!(text.contains("Build · remote blocked"), "frame: {text}");
+    assert!(text.contains("Local local agent"), "frame: {text}");
+    assert!(!text.contains("Build remote idle"), "frame: {text}");
+    assert!(text.contains("Build remote blocked"), "frame: {text}");
 }
 
 #[test]
@@ -1687,8 +1687,8 @@ fn selected_default_view_ignores_inactive_endpoint_projection() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("Local · local agent"), "frame: {text}");
-    assert!(text.contains("Build · remote agent"), "frame: {text}");
+    assert!(text.contains("Local local agent"), "frame: {text}");
+    assert!(text.contains("Build remote agent"), "frame: {text}");
     assert!(text.contains("grouped"), "frame: {text}");
 }
 
@@ -1773,8 +1773,8 @@ fn legacy_custom_views_keep_v1_per_endpoint_projection() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("Local · local agent"), "frame: {text}");
-    assert!(text.contains("Build · remote agent"), "frame: {text}");
+    assert!(text.contains("Local local agent"), "frame: {text}");
+    assert!(text.contains("Build remote agent"), "frame: {text}");
 }
 
 #[test]
@@ -1826,8 +1826,8 @@ fn selected_custom_sort_orders_rendering_and_indexed_navigation() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        text.find("Build · remote idle").expect("remote row")
-            < text.find("Local · local blocked").expect("local row"),
+        text.find("Build remote idle").expect("remote row")
+            < text.find("Local local blocked").expect("local row"),
         "frame: {text}"
     );
 
@@ -1953,24 +1953,24 @@ fn aggregate_priority_uses_client_observed_recency_across_machines() {
     };
     let text = frame_text(&mut state);
     assert!(
-        text.find("Local · local agent").expect("local agent")
-            < text.find("Build · remote agent").expect("remote agent")
+        text.find("Local local agent").expect("local agent")
+            < text.find("Build remote agent").expect("remote agent")
     );
 
     remote.agents = vec![agent("remote agent", AgentStatus::Working, 2)];
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
     let text = frame_text(&mut state);
     assert!(
-        text.find("Build · remote agent").expect("remote agent")
-            < text.find("Local · local agent").expect("local agent")
+        text.find("Build remote agent").expect("remote agent")
+            < text.find("Local local agent").expect("local agent")
     );
 
     remote.agents = vec![agent("remote agent", AgentStatus::Idle, 3)];
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
     let text = frame_text(&mut state);
     assert!(
-        text.find("Build · remote agent").expect("remote agent")
-            < text.find("Local · local agent").expect("local agent")
+        text.find("Build remote agent").expect("remote agent")
+            < text.find("Local local agent").expect("local agent")
     );
     let mut outcome = ClientShellInput::default();
     assert!(
@@ -2420,7 +2420,7 @@ fn disconnected_active_endpoint_freezes_surface_and_marks_cached_ui_stale() {
         Some(ClientEndpointStatus::Reconnecting)
     );
     assert!(text.contains("◐ reconnecting"), "frame: {text}");
-    assert!(text.contains("Build · remote agent"), "frame: {text}");
+    assert!(text.contains("Build remote agent"), "frame: {text}");
     assert!(
         text.contains("LIVE"),
         "frozen surface should remain: {text}"
