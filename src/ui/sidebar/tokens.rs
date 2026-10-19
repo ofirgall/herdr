@@ -18,6 +18,7 @@ pub(crate) enum ResolvedTokenKind {
     Tab(String),
     Pane(String),
     Agent(String),
+    AgentIndex(usize),
     TerminalTitle(String),
     Branch(String),
     GitStatus { ahead: usize, behind: usize },
@@ -36,7 +37,7 @@ impl ResolvedTokenKind {
             | Self::TerminalTitle(value)
             | Self::Branch(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::GitStatus { .. } => None,
+            Self::StateIcon | Self::AgentIndex(_) | Self::GitStatus { .. } => None,
         }
     }
 }
@@ -58,6 +59,8 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) tab: Option<&'a str>,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
+    /// Zero-based position of the agent in the agents panel list.
+    pub(crate) agent_index: usize,
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) canonical_agent: Option<crate::detect::Agent>,
@@ -97,6 +100,9 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Agent => context
                             .agent_label
                             .map(|value| ResolvedTokenKind::Agent(value.to_string())),
+                        AgentSidebarToken::AgentIndex => {
+                            Some(ResolvedTokenKind::AgentIndex(context.agent_index))
+                        }
                         AgentSidebarToken::TerminalTitle => context
                             .terminal_title
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
@@ -217,6 +223,7 @@ mod tests {
             tab: entry.tab.as_deref(),
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
+            agent_index: 0,
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             canonical_agent: entry.canonical_agent,
@@ -500,6 +507,47 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("custom title".into())),
             ]]
         );
+    }
+
+    #[test]
+    fn agent_index_token_renders_one_based_list_position() {
+        let entry = entry();
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::AgentIndex,
+                AgentSidebarToken::Agent,
+            ]],
+            ..Default::default()
+        };
+        let mut context = context(&entry);
+        context.agent_index = 11;
+        let rows = agent_rows(&config, context, "working");
+        assert_eq!(
+            rows,
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::AgentIndex(11)),
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("pi".into())),
+            ]]
+        );
+
+        let style = ratatui::style::Style::default();
+        let text = |width| {
+            super::super::resolved_token_spans(
+                &rows[0],
+                ("*", style),
+                style,
+                style,
+                style,
+                style,
+                &super::super::Palette::catppuccin(),
+                width,
+            )
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect::<String>()
+        };
+        assert_eq!(text(40), "12 pi");
+        assert_eq!(text(4), "12 …");
     }
 
     #[test]

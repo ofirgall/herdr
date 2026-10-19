@@ -241,7 +241,10 @@ pub(super) fn agent_rows(
 ) -> Vec<AgentRow> {
     ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
         .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
+        .enumerate()
+        .filter_map(|(agent_index, pane_id)| {
+            agent_row(snapshot, &pane_id, config, machine, agent_index)
+        })
         .collect()
 }
 
@@ -250,6 +253,7 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    agent_index: usize,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -303,6 +307,7 @@ pub(super) fn agent_row(
                 .as_deref()
                 .or_else(|| pane.and_then(|pane| pane.label.as_deref())),
             agent_label,
+            agent_index,
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             canonical_agent,

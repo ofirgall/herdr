@@ -1503,6 +1503,55 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
 }
 
 #[test]
+fn aggregate_agent_index_token_follows_panel_order() {
+    use crate::api::schema::AgentStatus;
+    use crate::config::{AgentPanelSortConfig, AgentSidebarToken};
+
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![
+        AgentSidebarToken::AgentIndex,
+        AgentSidebarToken::Machine,
+        AgentSidebarToken::Agent,
+    ]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+
+    let mut local = snapshot();
+    local.agents = vec![agent("local agent", AgentStatus::Idle, 1)];
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.agents = vec![agent("remote agent", AgentStatus::Blocked, 1)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    let frame_text = |state: &mut ClientShellState| {
+        let frame = state.compose(100, 28).expect("combined endpoint frame");
+        frame
+            .cells
+            .chunks(frame.width as usize)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let text = frame_text(&mut state);
+    assert!(text.contains("1 Local local agent"), "frame: {text}");
+    assert!(text.contains("2 Build remote agent"), "frame: {text}");
+
+    state.config.agent_panel_sort = AgentPanelSortConfig::Priority;
+    let text = frame_text(&mut state);
+    assert!(text.contains("1 Build remote agent"), "frame: {text}");
+    assert!(text.contains("2 Local local agent"), "frame: {text}");
+}
+
+#[test]
 fn current_workspace_agent_view_excludes_same_workspace_id_on_other_machine() {
     use crate::api::schema::AgentStatus;
     use crate::config::AgentSidebarToken;

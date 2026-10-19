@@ -113,6 +113,7 @@ pub enum AgentSidebarToken {
     Tab,
     Pane,
     Agent,
+    AgentIndex,
     TerminalTitle,
     TerminalTitleStripped,
     Custom(String),
@@ -277,6 +278,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Tab => "tab".into(),
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
+        AgentSidebarToken::AgentIndex => "agent_index".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
@@ -336,6 +338,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("tab", Self::Tab),
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
+                ("agent_index", Self::AgentIndex),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
             ],
@@ -518,7 +521,7 @@ mod tests {
         let config: crate::config::Config = toml::from_str(
             r#"
 [ui.sidebar.agents]
-rows = [["state_icon", "workspace"], ["state_text", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"]]
+rows = [["state_icon", "agent_index", "workspace"], ["state_text", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"]]
 row_gap = 1
 
 [ui.sidebar.agents.rows_by_agent]
@@ -531,6 +534,14 @@ row_gap = 3
         )
         .expect("sidebar token config");
 
+        assert_eq!(
+            config.ui.sidebar.agents.rows[0],
+            vec![
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::AgentIndex,
+                AgentSidebarToken::Workspace,
+            ]
+        );
         assert_eq!(
             config.ui.sidebar.agents.rows[1],
             vec![
