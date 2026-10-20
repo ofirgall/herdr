@@ -19,6 +19,7 @@ mod creation;
 mod custom_commands;
 mod git_refresh;
 mod ids;
+mod panels;
 mod popup;
 mod runtime;
 mod session;
@@ -102,6 +103,11 @@ impl AppPolicy {
     };
 }
 
+#[cfg(test)]
+pub(crate) type TestPanelRuntimeFactory = Box<
+    dyn FnMut(&state::PanelSpec, u16, u16) -> io::Result<crate::terminal::TerminalRuntime> + Send,
+>;
+
 pub struct App {
     pub state: AppState,
     pub(crate) pixel_mouse_available: bool,
@@ -141,6 +147,9 @@ pub struct App {
     pub(crate) agent_metadata_deadline: Option<Instant>,
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
     startup_per_agent_delay: Duration,
+    /// Replaces the real panel process spawn in tests.
+    #[cfg(test)]
+    pub(crate) test_panel_runtime_factory: Option<TestPanelRuntimeFactory>,
     resume_command_prefix: Vec<String>,
     next_agent_resume_at: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
@@ -569,6 +578,7 @@ impl App {
             ),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
+            panels: Vec::new(),
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
@@ -652,6 +662,8 @@ impl App {
             loaded_host_cursor: config.ui.host_cursor,
             agent_metadata_deadline: None,
             pending_agent_resume_deadline: None,
+            #[cfg(test)]
+            test_panel_runtime_factory: None,
             startup_per_agent_delay: Duration::from_millis(
                 config.session.startup_per_agent_delay_ms.into(),
             ),
@@ -920,6 +932,10 @@ impl App {
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
             }
+        }
+
+        if !invalid_section("panels") {
+            diagnostics.extend(self.reconcile_panels(&config.valid_panels()));
         }
 
         if !invalid_section("session") {

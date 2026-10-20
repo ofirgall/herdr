@@ -70,6 +70,7 @@ pub fn run_server() -> io::Result<()> {
             event_hub,
         )?;
         seed_startup_workspace_if_empty(&mut app);
+        app.spawn_configured_panels(&loaded_config.config);
 
         // Create the headless server.
         let mut server = match HeadlessServer::new(
@@ -200,6 +201,8 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
         crate::server::handoff::report_ready(&mut received.stream)?;
         crate::server::handoff::wait_committed(&mut received.stream)?;
         server.app.assume_handoff_ownership();
+        // Panel processes are not handed off in v1; the new server starts its own.
+        server.app.spawn_configured_panels(&loaded_config.config);
         server.app.unpause_handoff_readers();
         server.pending_handoff_repaint_nudge = true;
         if let Err(err) = crate::server::handoff::report_owned(&mut received.stream) {

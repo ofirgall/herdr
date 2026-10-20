@@ -31,12 +31,44 @@ pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
 pub const AGENT_COMPLETIONS_CAPABILITY: &str = "agent_completions";
 pub const AGENT_COMPLETIONS_KIND: &str = "endpoint.agent-completions.v1";
+pub const PANEL_SURFACES_CAPABILITY: &str = "panel_surfaces";
+pub const PANEL_SURFACE_KIND: &str = "endpoint.panel-surface.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointAgentCompletions {
     pub boot_id: String,
     pub revision: u64,
     pub completions: std::collections::BTreeMap<String, u64>,
+}
+
+/// Run state of a server-owned panel as carried by [`EndpointPanelSurface`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointPanelStatus {
+    Running,
+    Exited,
+    /// A status this client does not know; show the panel as unavailable.
+    #[serde(other)]
+    Unknown,
+}
+
+/// One full screen of a server-owned panel, sent as `endpoint.panel-surface.v1`
+/// only to clients that declared the panel visible through `panel.surface.set`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointPanelSurface {
+    pub boot_id: String,
+    pub id: String,
+    /// Per-panel, per-connection counter that grows with every frame sent.
+    pub revision: u64,
+    pub title: String,
+    pub status: EndpointPanelStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub frame: super::FrameData,
+    pub mouse_reporting: bool,
+    pub sgr_pixel_mouse: bool,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
 }
 
 fn default_true() -> bool {
@@ -141,6 +173,13 @@ pub fn agent_view_projection_message(
     })
 }
 
+pub fn panel_surface_message(surface: &EndpointPanelSurface) -> serde_json::Result<ServerMessage> {
+    Ok(ServerMessage::EndpointControl {
+        kind: PANEL_SURFACE_KIND.into(),
+        data: serde_json::to_string(surface)?,
+    })
+}
+
 impl EndpointClientHello {
     pub fn supports_required_codecs(&self) -> bool {
         self.snapshot_codecs
@@ -179,6 +218,7 @@ impl EndpointServerWelcome {
                 HEALTH_CHECK_CAPABILITY.into(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.into(),
                 AGENT_COMPLETIONS_CAPABILITY.into(),
+                PANEL_SURFACES_CAPABILITY.into(),
             ],
             error: None,
         }
@@ -398,6 +438,7 @@ mod tests {
                 HEALTH_CHECK_CAPABILITY.to_string(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.to_string(),
                 AGENT_COMPLETIONS_CAPABILITY.to_string(),
+                PANEL_SURFACES_CAPABILITY.to_string(),
             ]
         );
     }

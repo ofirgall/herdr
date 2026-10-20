@@ -13,13 +13,29 @@ impl ClientShellState {
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar) => {
                 self.sidebar_collapsed = !self.sidebar_collapsed;
                 self.sidebar_collapsed_manual = true;
+                // Panels are not drawn in a collapsed sidebar; the resize below covers the width.
+                self.focused_panel = None;
                 self.reveal_navigation_workspace = true;
                 self.invalidate_pane_surface();
                 outcome.repaint = true;
                 outcome.resize = true;
                 self.persist_chrome_preferences(outcome);
             }
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusPanel) => {
+                self.cycle_panel_focus(outcome);
+            }
             crate::input::KeybindMatch::Action(action) => {
+                // Herdr actions take over from the panel; the ones that only open
+                // chrome keep it so the panel is still there when they close.
+                if !matches!(
+                    action,
+                    crate::input::KeybindAction::Help
+                        | crate::input::KeybindAction::Settings
+                        | crate::input::KeybindAction::ReloadConfig
+                        | crate::input::KeybindAction::OpenNavigator
+                ) {
+                    self.set_focused_panel(None, outcome);
+                }
                 if self.workspace_preview_action_blocked()
                     && matches!(
                         action,
@@ -370,6 +386,7 @@ impl ClientShellState {
         };
         if changes_focus {
             outcome.repaint |= self.pending_workspace_highlight.take().is_some();
+            self.set_focused_panel(None, outcome);
         }
         if !self.endpoint_is_online(&self.active_endpoint_id) {
             let label = self.active_endpoint_label().to_owned();
@@ -516,6 +533,13 @@ impl ClientShellState {
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
         }
+        if let PendingEndpointKind::PanelSurface { endpoint_id, id } = pending.kind {
+            return self.complete_panel_surface_request(&endpoint_id, &id, result);
+        }
+        if matches!(pending.kind, PendingEndpointKind::PanelInput) {
+            // Input to a panel that went away or an inactive surface is simply dropped.
+            return (false, Vec::new());
+        }
         if result.is_ok() {
             let timeout_key = ClientEndpointNoticeKey {
                 boot_id: boot_id.to_owned(),
@@ -568,7 +592,9 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
-            PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
+            PendingEndpointKind::PaneLinkResolve { .. }
+            | PendingEndpointKind::PanelSurface { .. }
+            | PendingEndpointKind::PanelInput => unreachable!("handled above"),
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

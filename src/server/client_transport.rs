@@ -568,14 +568,14 @@ pub(crate) fn clamp_terminal_size(cols: u16, rows: u16) -> (u16, u16) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InputEventLimit {
+pub(crate) enum InputEventLimit {
     WithinLimits,
     TooManyEvents,
     PasteTooLarge { size: usize },
     InputPayloadTooLarge { size: usize },
 }
 
-fn pane_input_event_limit(events: &[ClientPaneInputEvent]) -> InputEventLimit {
+pub(crate) fn pane_input_event_limit(events: &[ClientPaneInputEvent]) -> InputEventLimit {
     let mut expanded_events = 0usize;
     let mut paste_bytes = 0usize;
     let mut input_bytes = 0usize;

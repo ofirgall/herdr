@@ -507,6 +507,17 @@ async fn run_client_loop(
                 .as_ref()
                 .and_then(|(_, handshake)| handshake.endpoint_methods.clone()),
         );
+        shell.set_endpoint_panel_surfaces_supported(
+            &endpoint::ClientEndpointId::Local,
+            initial
+                .as_ref()
+                .and_then(|(_, handshake)| handshake.endpoint_capabilities.as_ref())
+                .is_some_and(|capabilities| {
+                    capabilities.iter().any(|capability| {
+                        capability == crate::protocol::endpoint::PANEL_SURFACES_CAPABILITY
+                    })
+                }),
+        );
         shell.set_endpoint_agent_view_projection_supported(
             &endpoint::ClientEndpointId::Local,
             initial
@@ -682,6 +693,22 @@ async fn run_client_loop(
     #[cfg(windows)]
     let mut stdin_open = true;
     while !should_quit.load(Ordering::Acquire) {
+        // Panel size declarations queued by the last compose.
+        if let Some(actions) = state
+            .shell
+            .as_mut()
+            .map(|shell| shell.take_pending_panel_actions())
+            .filter(|actions| !actions.is_empty())
+        {
+            shell_runtime::dispatch_client_shell_actions(
+                actions,
+                &mut endpoint_commands,
+                &mut write_stream,
+                state.shell.as_mut(),
+                &mut state.detached_process_children,
+                &mut scheduled_activation,
+            )?;
+        }
         if pending_activation.is_none() {
             if let Some(reload) = pending_catalog.take() {
                 match reload {
@@ -1389,11 +1416,17 @@ async fn run_client_loop(
                     let agent_view_projection_supported = negotiation.supports_capability(
                         crate::protocol::endpoint::AGENT_VIEW_PROJECTION_CAPABILITY,
                     );
+                    let panel_surfaces_supported = negotiation
+                        .supports_capability(crate::protocol::endpoint::PANEL_SURFACES_CAPABILITY);
                     let frame = state.shell.as_mut().and_then(|shell| {
                         shell.set_endpoint_methods_for(&endpoint_id, Some(negotiation.methods()));
                         shell.set_endpoint_agent_view_projection_supported(
                             &endpoint_id,
                             agent_view_projection_supported,
+                        );
+                        shell.set_endpoint_panel_surfaces_supported(
+                            &endpoint_id,
+                            panel_surfaces_supported,
                         );
                         shell.compose(state.reported_size.0, state.reported_size.1)
                     });
@@ -2125,6 +2158,29 @@ async fn run_client_loop(
                                         generation,
                                         projection,
                                     );
+                                }
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::PanelSurface(surface)) => {
+                                let repaint = state.shell.as_mut().is_some_and(|shell| {
+                                    shell.receive_panel_surface(&endpoint_id, *surface)
+                                });
+                                if repaint {
+                                    let frame = state.shell.as_mut().and_then(|shell| {
+                                        shell.compose(state.reported_size.0, state.reported_size.1)
+                                    });
+                                    if finish_client_shell_input(
+                                        &mut state,
+                                        shell::ClientShellInput::default(),
+                                        frame,
+                                        &mut write_stream,
+                                        &mut pending_activation,
+                                        &mut endpoint_commands,
+                                        &mut prefix_input_source,
+                                        &mut scheduled_activation,
+                                    )? {
+                                        return Ok(());
+                                    }
                                 }
                                 continue;
                             }

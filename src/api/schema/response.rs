@@ -6,6 +6,7 @@ use super::events::EventEnvelope;
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
 };
+use super::panels::PanelInfo;
 use super::panes::{
     LayoutDescription, PaneEdgesResult, PaneFocusDirectionResult, PaneInfo, PaneLayoutSnapshot,
     PaneMoveResult, PaneNeighborResult, PaneProcessInfo, PaneReadResult, PaneResizeResult,
@@ -276,6 +277,12 @@ pub enum ResponseResult {
     ClientShellSurfaceSet {
         active: bool,
         projection_revision: u64,
+    },
+    PanelList {
+        panels: Vec<PanelInfo>,
+    },
+    PanelRestarted {
+        panel: PanelInfo,
     },
     Ok {},
 }

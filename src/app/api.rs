@@ -208,6 +208,10 @@ impl App {
 
         let mut worktree_restore_updates = Vec::new();
         if let AppEvent::PaneDied { pane_id, .. } = &ev {
+            // The platform wait handle does not report the exit code here.
+            if self.handle_panel_process_exit(*pane_id, None) {
+                return Vec::new();
+            }
             if self
                 .state
                 .popup_pane
@@ -1255,6 +1259,15 @@ impl App {
             }
             Method::PluginPaneClose(params) => {
                 return self.handle_plugin_pane_close(request.id, params);
+            }
+            Method::PanelList(_) => return self.handle_panel_list(request.id),
+            Method::PanelRestart(params) => return self.handle_panel_restart(request.id, params),
+            Method::PanelSurfaceSet(_) | Method::PanelInput(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "connection_local_only",
+                    "panel.surface.set and panel.input are only available through a client shell endpoint",
+                );
             }
             _ => {
                 return responses::encode_error(

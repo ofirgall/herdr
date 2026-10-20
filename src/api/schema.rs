@@ -6,6 +6,7 @@ pub mod common;
 pub mod events;
 pub mod integrations;
 pub(crate) mod operations;
+pub mod panels;
 pub mod panes;
 pub mod plugins;
 pub mod response;
@@ -20,6 +21,7 @@ pub use commands::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
+pub use panels::*;
 pub use panes::*;
 pub use plugins::*;
 pub use response::*;
@@ -145,6 +147,10 @@ operations::define_operations! {
     PluginPaneOpen(PluginPaneOpenParams) => "plugin.pane.open", true, false;
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
+    PanelList(EmptyParams) => "panel.list", false, true;
+    PanelRestart(PanelRestartParams) => "panel.restart", true, true;
+    PanelSurfaceSet(PanelSurfaceSetParams) => "panel.surface.set", false, true;
+    PanelInput(PanelInputParams) => "panel.input", false, true;
 }
 
 #[cfg(test)]

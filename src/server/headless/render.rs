@@ -339,6 +339,7 @@ impl HeadlessServer {
                 }
             }
         }
+        pane_ids.extend(self.visible_panel_pane_ids());
         self.app.render_dirty.set_immediate_pty_sources(pane_ids);
     }
 
@@ -371,6 +372,9 @@ impl HeadlessServer {
         has_app_target: bool,
         direct_terminal_targets: &HashSet<&str>,
     ) -> bool {
+        if let Some(visible) = self.panel_pane_visibility(pane_id) {
+            return has_app_target && visible;
+        }
         let terminal_id = self.terminal_id_for_pane(pane_id);
         (has_app_target && (terminal_id.is_none() || self.any_shell_surface_contains_pane(pane_id)))
             || terminal_id.is_none_or(|source| direct_terminal_targets.contains(source.as_str()))

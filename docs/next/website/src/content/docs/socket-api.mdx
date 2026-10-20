@@ -109,6 +109,7 @@ Raw socket method names use dot notation:
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
+| Panels | `panel.list`, `panel.restart`, `panel.surface.set`, `panel.input` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
 `agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked` without sending input or starting the wait.
@@ -604,6 +605,54 @@ the active popup and returns
 pane; tab panes can target a workspace. Split, tab, zoomed, and overlay panes
 behave like normal Herdr panes, and `plugin.pane.focus` and `plugin.pane.close`
 continue to operate on those panes.
+
+## Panels
+
+Panels are long-lived terminal processes declared with `[[panels]]` in the
+config (see Configuration). They belong to the server, not to a workspace, tab,
+or pane, and keep running while no client shows them.
+
+`panel.list` returns every configured panel in config order:
+
+```json
+{"id":"p1","method":"panel.list","params":{}}
+{"id":"p1","result":{"type":"panel_list","panels":[{"id":"prs","status":"running"},{"id":"logs","status":"exited","exit_code":1}]}}
+```
+
+`status` is `running` or `exited`; `exit_code` is present only for an exited
+panel whose platform reported one. `panel.restart` starts a fresh process for a
+panel, whether it is running or has exited, and keeps its size:
+
+```json
+{"id":"p2","method":"panel.restart","params":{"id":"prs"}}
+{"id":"p2","result":{"type":"panel_restarted","panel":{"id":"prs","status":"running"}}}
+```
+
+An unknown id returns `panel_not_found`. A process that cannot be started
+returns `panel_restart_failed`. From the CLI, use `herdr panel list` and
+`herdr panel restart ID`.
+
+`panel.surface.set` and `panel.input` belong to a client connection, so they are
+available only to interactive client endpoints that negotiated the
+`panel_surfaces` capability, and are answered with `connection_local_only` on
+the plain socket. Both require an active client shell surface
+(`surface_inactive` otherwise) and return `{"type":"ok"}`:
+
+```json
+{"id":"s1","method":"panel.surface.set","params":{"id":"prs","cols":48,"rows":20,"visible":true}}
+{"id":"i1","method":"panel.input","params":{"id":"prs","events":[{"Paste":"hello"}]}}
+```
+
+`panel.surface.set` declares whether this connection shows the panel and at
+which size. A visible claim resizes the panel terminal (the most recent claim
+wins) and the server then streams `endpoint.panel-surface.v1` control messages
+with the panel's full screen, `status`, `exit_code`, a per-connection
+`revision`, and the mouse-reporting state. Frames are sent only for panels some
+client currently shows, at most one per render tick, and the first frame follows
+the acknowledgement. Hiding a panel, or disconnecting, drops the claim; hidden
+panels cost no rendering work. `panel.input` carries semantic input events (the
+same `ClientPaneInputEvent` values used for pane input) to the panel terminal.
+Invalid events return `invalid_params` and oversize batches `input_too_large`.
 
 ## Socket transport
 

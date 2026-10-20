@@ -478,11 +478,180 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+/// One entry of `[ui.sidebar] sections`, in render order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarSection {
+    Spaces,
+    Agents,
+    /// A server-owned terminal panel, written `"panel:<id>"`.
+    Panel(String),
+}
+
+/// Height of a panel section: terminal rows, or a percentage of the sidebar height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelHeight {
+    Rows(u16),
+    Percent(u16),
+}
+
+impl PanelHeight {
+    /// Panels take 30% of the sidebar unless configured otherwise.
+    pub const DEFAULT: PanelHeight = PanelHeight::Percent(30);
+
+    /// Rows this height asks for in a sidebar of `total_rows` rows.
+    pub fn rows(self, total_rows: u16) -> u16 {
+        match self {
+            PanelHeight::Rows(rows) => rows,
+            PanelHeight::Percent(percent) => {
+                ((u32::from(total_rows) * u32::from(percent) + 50) / 100) as u16
+            }
+        }
+    }
+}
+
+/// Raw `height` value: an integer row count or a string such as `"40%"`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum PanelHeightSetting {
+    Rows(i64),
+    Text(String),
+}
+
+impl PanelHeightSetting {
+    fn resolve(&self) -> Result<PanelHeight, String> {
+        match self {
+            PanelHeightSetting::Rows(rows) => u16::try_from(*rows)
+                .ok()
+                .filter(|rows| *rows > 0)
+                .map(PanelHeight::Rows)
+                .ok_or_else(|| format!("height {rows} must be between 1 and {}", u16::MAX)),
+            PanelHeightSetting::Text(text) => {
+                let trimmed = text.trim();
+                if let Some(percent) = trimmed.strip_suffix('%') {
+                    return percent
+                        .trim()
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|percent| (1..=100).contains(percent))
+                        .map(PanelHeight::Percent)
+                        .ok_or_else(|| {
+                            format!("height \"{text}\" must be a percentage from 1% to 100%")
+                        });
+                }
+                trimmed
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|rows| *rows > 0)
+                    .map(PanelHeight::Rows)
+                    .ok_or_else(|| {
+                        format!(
+                            "height \"{text}\" must be a row count or a percentage like \"30%\""
+                        )
+                    })
+            }
+        }
+    }
+}
+
+/// `[ui.sidebar.panel.<id>]`: how the client presents a server-owned panel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SidebarPanelConfig {
+    /// Section header text. Default: the panel id.
+    pub title: Option<String>,
+    /// Section height in rows or as a percentage. Default: "30%".
+    pub height: Option<PanelHeightSetting>,
+    /// Sidebar width while the panel has focus. Default: unchanged.
+    pub focus_width: Option<u16>,
+}
+
+impl SidebarPanelConfig {
+    /// Configured height, or the default when unset or invalid.
+    pub fn resolved_height(&self) -> PanelHeight {
+        self.height
+            .as_ref()
+            .and_then(|height| height.resolve().ok())
+            .unwrap_or(PanelHeight::DEFAULT)
+    }
+}
+
+fn default_sidebar_sections() -> Vec<String> {
+    vec!["spaces".to_owned(), "agents".to_owned()]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// Expanded sidebar sections in order: "spaces", "agents" and "panel:<id>".
+    pub sections: Vec<String>,
+    /// Presentation of panels declared by `[[panels]]`, keyed by panel id.
+    pub panel: BTreeMap<String, SidebarPanelConfig>,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            agents: AgentsSidebarConfig::default(),
+            spaces: SpacesSidebarConfig::default(),
+            sections: default_sidebar_sections(),
+            panel: BTreeMap::new(),
+        }
+    }
+}
+
+impl SidebarConfig {
+    /// Parsed `sections`, dropping unknown and duplicate entries with a warning.
+    /// A list with no usable entry falls back to the default sections.
+    pub fn resolved_sections(&self) -> (Vec<SidebarSection>, Vec<String>) {
+        let mut diagnostics = Vec::new();
+        let mut sections = Vec::<SidebarSection>::new();
+        for entry in &self.sections {
+            let parsed = match entry.trim() {
+                "spaces" => Some(SidebarSection::Spaces),
+                "agents" => Some(SidebarSection::Agents),
+                other => other
+                    .strip_prefix("panel:")
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| SidebarSection::Panel(id.to_owned())),
+            };
+            let Some(section) = parsed else {
+                diagnostics.push(format!(
+                    "ui.sidebar.sections: unknown entry \"{entry}\"; ignoring (use \"spaces\", \"agents\" or \"panel:<id>\")"
+                ));
+                continue;
+            };
+            if sections.contains(&section) {
+                diagnostics.push(format!(
+                    "ui.sidebar.sections: duplicate entry \"{entry}\"; ignoring"
+                ));
+                continue;
+            }
+            sections.push(section);
+        }
+        if sections.is_empty() {
+            diagnostics.push(
+                "ui.sidebar.sections: no usable entries; using [\"spaces\", \"agents\"]".to_owned(),
+            );
+            sections = vec![SidebarSection::Spaces, SidebarSection::Agents];
+        }
+        (sections, diagnostics)
+    }
+
+    /// Warnings for `sections` and `[ui.sidebar.panel.<id>]`.
+    pub fn diagnostics(&self) -> Vec<String> {
+        let mut diagnostics = self.resolved_sections().1;
+        for (id, panel) in &self.panel {
+            if let Some(Err(error)) = panel.height.as_ref().map(PanelHeightSetting::resolve) {
+                diagnostics.push(format!(
+                    "ui.sidebar.panel.{id}: {error}; using the default height"
+                ));
+            }
+        }
+        diagnostics
+    }
 }
 
 #[cfg(test)]
@@ -736,5 +905,156 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                 "accepted key {key:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    fn parse(input: &str) -> crate::config::Config {
+        toml::from_str(input).expect("sidebar section config")
+    }
+
+    #[test]
+    fn default_sections_are_spaces_then_agents() {
+        let config = SidebarConfig::default();
+        let (sections, diagnostics) = config.resolved_sections();
+        assert_eq!(
+            sections,
+            vec![SidebarSection::Spaces, SidebarSection::Agents]
+        );
+        assert!(diagnostics.is_empty());
+        assert!(config.panel.is_empty());
+        assert!(config.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn parses_sections_and_panel_presentation() {
+        let config = parse(
+            r#"
+[ui.sidebar]
+sections = ["spaces", "panel:prs", "agents"]
+
+[ui.sidebar.panel.prs]
+title = "Pull requests"
+height = "40%"
+focus_width = 80
+
+[ui.sidebar.panel.logs]
+height = 8
+"#,
+        );
+        let (sections, diagnostics) = config.ui.sidebar.resolved_sections();
+        assert_eq!(
+            sections,
+            vec![
+                SidebarSection::Spaces,
+                SidebarSection::Panel("prs".into()),
+                SidebarSection::Agents
+            ]
+        );
+        assert!(diagnostics.is_empty());
+        let prs = &config.ui.sidebar.panel["prs"];
+        assert_eq!(prs.title.as_deref(), Some("Pull requests"));
+        assert_eq!(prs.resolved_height(), PanelHeight::Percent(40));
+        assert_eq!(prs.focus_width, Some(80));
+        let logs = &config.ui.sidebar.panel["logs"];
+        assert_eq!(logs.resolved_height(), PanelHeight::Rows(8));
+        assert_eq!(logs.title, None);
+        assert_eq!(logs.focus_width, None);
+        assert!(config.ui.sidebar.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn unknown_and_duplicate_sections_are_dropped_with_warnings() {
+        let config = parse(
+            r#"
+[ui.sidebar]
+sections = ["spaces", "bogus", "panel:", "spaces", "panel:a", "panel:a", "agents"]
+"#,
+        );
+        let (sections, diagnostics) = config.ui.sidebar.resolved_sections();
+        assert_eq!(
+            sections,
+            vec![
+                SidebarSection::Spaces,
+                SidebarSection::Panel("a".into()),
+                SidebarSection::Agents
+            ]
+        );
+        assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
+        assert!(diagnostics[0].contains("bogus"));
+        assert!(diagnostics[1].contains("panel:"));
+        assert!(diagnostics[2].contains("duplicate"));
+        assert!(diagnostics[3].contains("duplicate"));
+    }
+
+    #[test]
+    fn a_section_list_without_usable_entries_falls_back_to_the_default() {
+        let config = parse("[ui.sidebar]\nsections = [\"nope\"]\n");
+        let (sections, diagnostics) = config.ui.sidebar.resolved_sections();
+        assert_eq!(
+            sections,
+            vec![SidebarSection::Spaces, SidebarSection::Agents]
+        );
+        assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn panel_only_sections_are_allowed() {
+        let config = parse("[ui.sidebar]\nsections = [\"panel:a\"]\n");
+        let (sections, diagnostics) = config.ui.sidebar.resolved_sections();
+        assert_eq!(sections, vec![SidebarSection::Panel("a".into())]);
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn invalid_panel_heights_warn_and_use_the_default() {
+        let config = parse(
+            r#"
+[ui.sidebar.panel.a]
+height = "wide"
+[ui.sidebar.panel.b]
+height = 0
+[ui.sidebar.panel.c]
+height = "150%"
+[ui.sidebar.panel.d]
+height = -3
+[ui.sidebar.panel.e]
+height = "12"
+"#,
+        );
+        let diagnostics = config.ui.sidebar.diagnostics();
+        assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
+        for id in ["a", "b", "c", "d"] {
+            assert!(diagnostics
+                .iter()
+                .any(|d| d.contains(&format!("panel.{id}"))));
+            assert_eq!(
+                config.ui.sidebar.panel[id].resolved_height(),
+                PanelHeight::DEFAULT
+            );
+        }
+        assert_eq!(
+            config.ui.sidebar.panel["e"].resolved_height(),
+            PanelHeight::Rows(12)
+        );
+    }
+
+    #[test]
+    fn panel_height_rows_round_percentages() {
+        assert_eq!(PanelHeight::Percent(30).rows(20), 6);
+        assert_eq!(PanelHeight::Percent(50).rows(5), 3);
+        assert_eq!(PanelHeight::Rows(9).rows(3), 9);
+    }
+
+    #[test]
+    fn sidebar_diagnostics_reach_the_config_diagnostics() {
+        let config = parse("[ui.sidebar]\nsections = [\"bogus\", \"spaces\"]\n");
+        assert!(config
+            .collect_diagnostics()
+            .iter()
+            .any(|d| d.contains("bogus")));
     }
 }

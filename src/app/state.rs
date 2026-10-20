@@ -22,6 +22,43 @@ pub(crate) struct PopupPaneState {
     pub height: Option<crate::popup_size::PopupSize>,
 }
 
+/// What a server-owned panel runs. Kept apart from [`PanelState`] so other
+/// panel sources (for example plugins) can later share the same runtime.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PanelSpec {
+    pub argv: Vec<String>,
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+/// Where a panel was declared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PanelSource {
+    /// A `[[panels]]` entry in the config file.
+    Config,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PanelStatus {
+    Running,
+    /// The process ended. The exit code is `None` when it was not reported.
+    Exited(Option<i32>),
+}
+
+/// A long-lived, server-owned terminal docked outside every workspace layout.
+/// Its terminal lives in `AppState::terminals` and its runtime in the terminal
+/// runtime registry, like the popup, but it is never attached to a pane.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PanelState {
+    pub id: String,
+    pub source: PanelSource,
+    pub pane_id: PaneId,
+    pub terminal_id: crate::terminal::TerminalId,
+    pub spec: PanelSpec,
+    pub status: PanelStatus,
+    pub cols: u16,
+    pub rows: u16,
+}
+
 use crate::terminal_theme::{HostAppearance, TerminalTheme};
 use crate::workspace::Workspace;
 
@@ -875,6 +912,8 @@ pub struct AppState {
     pub(crate) plugin_panes: std::collections::HashMap<PaneId, PluginPaneRecord>,
     /// Session-modal terminal popup. This is intentionally outside workspace layouts.
     pub(crate) popup_pane: Option<PopupPaneState>,
+    /// Server-owned terminal panels, in config order. Outside every workspace.
+    pub(crate) panels: Vec<PanelState>,
     /// Recent plugin action/event command executions.
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
@@ -1113,6 +1152,7 @@ impl AppState {
             installed_plugins: std::collections::HashMap::new(),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
+            panels: Vec::new(),
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
@@ -1151,7 +1191,77 @@ impl AppState {
         state
     }
 
+    fn assert_panel_invariants_for_test(&self) {
+        let mut ids = std::collections::HashSet::new();
+        let mut pane_ids = std::collections::HashSet::new();
+        let mut terminal_ids = std::collections::HashSet::new();
+        let tiled_panes: std::collections::HashSet<PaneId> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.tabs.iter())
+            .flat_map(|tab| tab.panes.keys().copied())
+            .collect();
+        let tiled_terminals: std::collections::HashSet<crate::terminal::TerminalId> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.tabs.iter())
+            .flat_map(|tab| tab.panes.values())
+            .map(|pane| pane.attached_terminal_id.clone())
+            .collect();
+        for panel in &self.panels {
+            assert!(!panel.id.is_empty(), "panel id must not be empty");
+            assert!(
+                ids.insert(panel.id.clone()),
+                "duplicate panel id {}",
+                panel.id
+            );
+            assert!(
+                pane_ids.insert(panel.pane_id),
+                "panel {} reuses pane id {:?}",
+                panel.id,
+                panel.pane_id
+            );
+            assert!(
+                terminal_ids.insert(panel.terminal_id.clone()),
+                "panel {} reuses terminal {}",
+                panel.id,
+                panel.terminal_id
+            );
+            assert!(
+                self.terminals.contains_key(&panel.terminal_id),
+                "panel {} references missing terminal {}",
+                panel.id,
+                panel.terminal_id
+            );
+            assert!(
+                !tiled_terminals.contains(&panel.terminal_id),
+                "panel {} terminal {} must not be attached to a tiled pane",
+                panel.id,
+                panel.terminal_id
+            );
+            assert!(
+                !tiled_panes.contains(&panel.pane_id),
+                "panel {} pane {:?} must not be a tiled pane",
+                panel.id,
+                panel.pane_id
+            );
+            assert!(
+                !panel.spec.argv.is_empty(),
+                "panel {} must have a command",
+                panel.id
+            );
+            if let Some(popup) = &self.popup_pane {
+                assert!(
+                    popup.pane_id != panel.pane_id && popup.terminal_id != panel.terminal_id,
+                    "panel {} must not share identity with the popup",
+                    panel.id
+                );
+            }
+        }
+    }
+
     pub fn assert_invariants_for_test(&self) {
+        self.assert_panel_invariants_for_test();
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),
@@ -1371,6 +1481,86 @@ mod tests {
         assert!(ws.public_pane_number(new_pane).is_some());
         state.ensure_test_terminals();
 
+        state.assert_invariants_for_test();
+    }
+
+    fn test_panel(id: &str) -> (PanelState, crate::terminal::TerminalState) {
+        let terminal_id = crate::terminal::TerminalId::alloc();
+        (
+            PanelState {
+                id: id.to_string(),
+                source: PanelSource::Config,
+                pane_id: PaneId::alloc(),
+                terminal_id: terminal_id.clone(),
+                spec: PanelSpec {
+                    argv: vec!["gh".into(), "dash".into()],
+                    cwd: None,
+                },
+                status: PanelStatus::Running,
+                cols: 80,
+                rows: 24,
+            },
+            crate::terminal::TerminalState::new(terminal_id, std::path::PathBuf::from("/")),
+        )
+    }
+
+    #[test]
+    fn panel_invariants_hold_over_adversarial_state() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        for id in ["prs", "logs"] {
+            let (panel, terminal) = test_panel(id);
+            state.terminals.insert(terminal.id.clone(), terminal);
+            state.panels.push(panel);
+        }
+        state.assert_invariants_for_test();
+
+        // Panels also hold with no workspaces at all.
+        state.workspaces.clear();
+        state.active = None;
+        state.selected = 0;
+        state.pane_id_aliases.clear();
+        state.public_pane_id_aliases.clear();
+        state.previous_pane_focus = None;
+        state.plugin_panes.clear();
+        state.pending_agent_notifications.clear();
+        state.toast = None;
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    #[should_panic(expected = "references missing terminal")]
+    fn panel_invariants_reject_missing_terminal() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        let (panel, _terminal) = test_panel("prs");
+        state.panels.push(panel);
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    #[should_panic(expected = "must not be attached to a tiled pane")]
+    fn panel_invariants_reject_terminal_attached_to_tiled_pane() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        let attached = state.workspaces[0].tabs[0]
+            .panes
+            .values()
+            .next()
+            .map(|pane| pane.attached_terminal_id.clone())
+            .unwrap();
+        let (mut panel, _terminal) = test_panel("prs");
+        panel.terminal_id = attached;
+        state.panels.push(panel);
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate panel id")]
+    fn panel_invariants_reject_duplicate_ids() {
+        let mut state = AppState::test_new();
+        for _ in 0..2 {
+            let (panel, terminal) = test_panel("prs");
+            state.terminals.insert(terminal.id.clone(), terminal);
+            state.panels.push(panel);
+        }
         state.assert_invariants_for_test();
     }
 

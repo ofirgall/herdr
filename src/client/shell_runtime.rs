@@ -777,8 +777,12 @@ pub(super) fn finish_client_shell_input(
         query_host_terminal_theme();
     }
     sync_client_shell_keyboard_report_all(state)?;
+    let mut actions = outcome.actions;
+    if let Some(shell) = state.shell.as_mut() {
+        actions.extend(shell.take_pending_panel_actions());
+    }
     let (replay, dispatch_repaint) = dispatch_client_shell_actions(
-        outcome.actions,
+        actions,
         endpoint_commands,
         endpoints,
         state.shell.as_mut(),

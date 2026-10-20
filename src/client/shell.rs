@@ -17,6 +17,8 @@ mod endpoint_notices;
 mod endpoint_sidebar;
 mod endpoints;
 pub(super) use endpoints::*;
+pub(crate) use panels::EndpointPanels;
+use panels::{PanelSectionHit, SidebarSectionConfig};
 mod global_menu;
 mod graphics;
 mod input;
@@ -27,6 +29,7 @@ mod mouse;
 mod notification_policy;
 mod notifications;
 mod overlay_input;
+mod panels;
 mod preferences;
 mod render;
 mod scroll;
@@ -67,16 +70,21 @@ use crate::protocol::{
 #[cfg(test)]
 use crate::raw_input::RawInputEvent;
 
-fn target_event_message(target: ClientInputTarget, event: ClientPaneInputEvent) -> ClientMessage {
+fn target_event_message(
+    target: ClientInputTarget,
+    event: ClientPaneInputEvent,
+) -> Option<ClientMessage> {
     match target {
-        ClientInputTarget::Pane(pane_id) => ClientMessage::ClientShellPaneInput {
+        ClientInputTarget::Pane(pane_id) => Some(ClientMessage::ClientShellPaneInput {
             pane_id,
             events: vec![event],
-        },
-        ClientInputTarget::Popup(terminal_id) => ClientMessage::ClientShellPopupInput {
+        }),
+        ClientInputTarget::Popup(terminal_id) => Some(ClientMessage::ClientShellPopupInput {
             terminal_id,
             events: vec![event],
-        },
+        }),
+        // Panel input is a JSON API method, not a ClientMessage; see `flush_panel_input`.
+        ClientInputTarget::Panel(_) => None,
     }
 }
 
@@ -97,7 +105,7 @@ fn push_target_event(
                     return;
                 }
             }
-            outcome.requests.push(target_event_message(
+            outcome.requests.extend(target_event_message(
                 ClientInputTarget::Pane(pane_id),
                 event,
             ));
@@ -113,10 +121,19 @@ fn push_target_event(
                     return;
                 }
             }
-            outcome.requests.push(target_event_message(
+            outcome.requests.extend(target_event_message(
                 ClientInputTarget::Popup(terminal_id),
                 event,
             ));
+        }
+        ClientInputTarget::Panel(id) => {
+            if let Some((pending, events)) = outcome.panel_input.last_mut() {
+                if *pending == id {
+                    events.push(event);
+                    return;
+                }
+            }
+            outcome.panel_input.push((id, vec![event]));
         }
     }
 }

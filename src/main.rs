@@ -151,6 +151,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
 # goto = "prefix+g"
+# focus_panel = ""      # optional, unset by default; cycles focus through sidebar panels
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"
 # open_worktree = ""    # optional, unset by default
@@ -411,6 +412,28 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # a wrapper: ["kv", "--ai", "--"] runs `kv --ai -- claude --resume <id>`.
 # resume_command_prefix = []
 
+# Long-lived terminal programs owned by the server, outside every workspace.
+# Each entry needs a unique `id` and a non-empty `command`; `cwd` is optional.
+# Adding or changing an entry on config reload starts or restarts its process,
+# and removing one stops it.
+# [[panels]]
+# id = "prs"
+# command = ["gh", "dash"]
+# cwd = "~/work"
+
+# Sidebar sections from top to bottom: "spaces", "agents" and "panel:<id>".
+# Show a [[panels]] entry in the sidebar by listing it here.
+# [ui.sidebar]
+# sections = ["spaces", "panel:prs", "agents"]
+#
+# Per-panel sidebar settings. `height` is rows or a percentage ("30%" default);
+# `title` defaults to the id; `focus_width` is the sidebar width in columns
+# while the panel has focus.
+# [ui.sidebar.panel.prs]
+# title = "pull requests"
+# height = "30%"
+# focus_width = 48
+
 [remote]
 # Whether herdr manages the ssh config used for `herdr --remote`.
 # When true (default), herdr runs remote ssh through a generated config that
@@ -636,6 +659,7 @@ fn main() -> io::Result<()> {
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
         println!("       herdr notification <subcommand> ...");
+        println!("       herdr panel <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
         println!("       herdr session <subcommand> ...");
@@ -687,6 +711,10 @@ fn main() -> io::Result<()> {
             (
                 "herdr notification <subcommand>",
                 "Notification helpers over the socket API",
+            ),
+            (
+                "herdr panel <subcommand>",
+                "Sidebar panel helpers over the socket API",
             ),
             (
                 "herdr agent <subcommand>",

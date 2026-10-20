@@ -41,6 +41,7 @@ pub(super) fn command() -> Command {
         .subcommand(worktree_command())
         .subcommand(tab_command())
         .subcommand(notification_command())
+        .subcommand(super::panel::command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())

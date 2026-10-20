@@ -192,8 +192,22 @@ pub(crate) struct ClientConnection {
     pub(crate) shell_deferred_navigation_response: Option<Vec<u8>>,
     /// Whether this shell uses the endpoint-owned keymap rather than a client-owned keymap.
     pub(crate) shell_uses_endpoint_keybindings: bool,
+    /// Panel surfaces this connection has declared through `panel.surface.set`.
+    /// Dropped with the connection, which clears its visibility claims.
+    pub(crate) panel_surfaces: HashMap<String, ClientPanelSurface>,
     /// Channels for sending framed ServerMessage data to the client writer thread.
     pub(crate) writer: Option<ClientWriter>,
+}
+
+/// One client's view of a server-owned panel.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ClientPanelSurface {
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+    pub(crate) visible: bool,
+    /// Terminal id, content sequence and run state of the last frame sent, if any.
+    pub(crate) sent: Option<(String, u64, crate::api::schema::PanelRunState)>,
+    pub(crate) revision: u64,
 }
 
 impl ClientConnection {
@@ -255,6 +269,7 @@ impl ClientConnection {
             shell_deferred_navigation_request_id: None,
             shell_deferred_navigation_response: None,
             shell_uses_endpoint_keybindings: false,
+            panel_surfaces: HashMap::new(),
             writer,
         }
     }

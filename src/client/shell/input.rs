@@ -374,6 +374,7 @@ impl ClientShellState {
             self.reconcile_input_source();
         }
         outcome.repaint |= self.resume_mobile_switcher_if_ready();
+        self.flush_panel_input(&mut outcome);
         outcome
     }
 
@@ -483,7 +484,9 @@ impl ClientShellState {
                 width_px: gesture.hit.pixel_width,
                 height_px: gesture.hit.pixel_height,
             });
-            let target = if gesture.hit.popup {
+            let target = if gesture.hit.panel {
+                ClientInputTarget::Panel(gesture.hit.pane_id)
+            } else if gesture.hit.popup {
                 ClientInputTarget::Popup(gesture.hit.pane_id)
             } else {
                 ClientInputTarget::Pane(gesture.hit.pane_id)
@@ -683,7 +686,7 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
-                self.focused_pane_id().map(ClientInputTarget::Pane)
+                self.focused_key_target()
             }
             ClientShellMode::Prefix => {
                 let return_mode = if self.copy_mode.as_ref().is_some_and(|copy_mode| {
@@ -696,7 +699,7 @@ impl ClientShellState {
                 if self.config.keybinds.matches_prefix(key) {
                     self.mode = return_mode;
                     outcome.repaint = true;
-                    return self.focused_pane_id().map(ClientInputTarget::Pane);
+                    return self.focused_key_target();
                 }
                 if key.code == KeyCode::Esc {
                     self.mode = return_mode;
@@ -1077,7 +1080,7 @@ impl ClientShellState {
             overlay: self.overlay.as_ref().map(ClientShellOverlay::kind),
             popup_terminal_id: self.popup_input_target().and_then(|target| match target {
                 ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-                ClientInputTarget::Pane(_) => None,
+                ClientInputTarget::Pane(_) | ClientInputTarget::Panel(_) => None,
             }),
             popup_pending: self.popup_pending,
             retained_selection: self
@@ -1112,11 +1115,14 @@ impl ClientShellState {
         }
         if let Some(terminal_id) = self.popup_input_target().and_then(|target| match target {
             ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-            ClientInputTarget::Pane(_) => None,
+            ClientInputTarget::Pane(_) | ClientInputTarget::Panel(_) => None,
         }) {
             return Some(crate::protocol::ClientClipboardImageTarget::Popup(
                 terminal_id,
             ));
+        }
+        if self.focused_panel.is_some() {
+            return None;
         }
         if self.popup_pending || self.overlay.is_some() || self.mode != ClientShellMode::Terminal {
             return None;
@@ -1184,9 +1190,17 @@ impl ClientShellState {
         }
     }
 
+    /// Where non-binding input goes: the focused sidebar panel, else the focused pane.
+    fn focused_key_target(&self) -> Option<ClientInputTarget> {
+        match &self.focused_panel {
+            Some(id) => Some(ClientInputTarget::Panel(id.clone())),
+            None => self.focused_pane_id().map(ClientInputTarget::Pane),
+        }
+    }
+
     fn push_focused_pane_event(&self, event: ClientPaneInputEvent, outcome: &mut ClientShellInput) {
-        if let Some(pane_id) = self.focused_pane_id() {
-            super::push_target_event(ClientInputTarget::Pane(pane_id), event, outcome);
+        if let Some(target) = self.focused_key_target() {
+            super::push_target_event(target, event, outcome);
         }
     }
 }

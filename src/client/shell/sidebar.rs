@@ -211,10 +211,60 @@ pub(crate) fn render_sidebar(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
-    hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let specs = super::panels::section_specs(&config.sidebar_sections);
+    let layout = crate::ui::sidebar_section_layout(area, &specs, state.sidebar_section_split);
+    hits.sidebar_section_divider = crate::ui::sidebar_section_divider(&specs, &layout);
+    hits.sidebar_split_span = crate::ui::sidebar_split_span(&specs, &layout);
+    let workspace_area =
+        super::panels::section_rect(&specs, &layout, &crate::ui::SectionSpec::Spaces);
+    let detail_area = super::panels::section_rect(&specs, &layout, &crate::ui::SectionSpec::Agents);
+    if !workspace_area.is_empty() {
+        render_spaces_section(buffer, workspace_area, snapshot, config, state, hits);
+    }
+    if !detail_area.is_empty() {
+        super::render_agent_panel(
+            buffer,
+            detail_area,
+            snapshot,
+            config,
+            state.agent_scroll,
+            hits,
+        );
+    }
+    super::panels::render_panel_sections(
+        buffer,
+        &config.sidebar_sections,
+        &layout,
+        state.panels,
+        palette,
+        hits,
+    );
+
+    hits.sidebar_toggle = Rect::new(
+        area.right().saturating_sub(2),
+        area.bottom().saturating_sub(1),
+        u16::from(area.width > 1),
+        u16::from(area.height > 0),
+    );
+    put_text(
+        buffer,
+        hits.sidebar_toggle.x,
+        hits.sidebar_toggle.y,
+        hits.sidebar_toggle.width,
+        "«",
+        Style::default().fg(palette.overlay0),
+    );
+}
+
+fn render_spaces_section(
+    buffer: &mut Buffer,
+    workspace_area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    state: &mut ShellRenderState<'_>,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
     put_text(
         buffer,
         workspace_area.x,
@@ -429,30 +479,6 @@ pub(crate) fn render_sidebar(
             );
         }
     }
-
-    super::render_agent_panel(
-        buffer,
-        detail_area,
-        snapshot,
-        config,
-        state.agent_scroll,
-        hits,
-    );
-
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
-    );
 }
 
 pub(crate) fn workspace_entries(

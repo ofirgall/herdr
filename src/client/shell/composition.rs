@@ -54,6 +54,7 @@ impl ClientShellState {
                 && self.endpoint_status(&self.active_endpoint_id)
                     == Some(ClientEndpointStatus::Online)
         });
+        let panel_available = self.panel_surfaces_available();
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
             endpoints: &self.endpoints,
@@ -68,6 +69,10 @@ impl ClientShellState {
             reveal_focused_tab: &mut self.reveal_focused_tab,
             sidebar_collapsed: false,
             sidebar_section_split: self.sidebar_section_split,
+            panels: super::panels::PanelView::new(
+                panel_available,
+                self.panel_endpoints.get(&self.active_endpoint_id),
+            ),
             tab_drag_insert_index: None,
             selected_workspace_id: self
                 .navigate_workspace_id
@@ -152,6 +157,18 @@ impl ClientShellState {
         cols: u16,
         rows: u16,
     ) -> Option<crate::client::frame_output::ComposedFrame> {
+        let frame = self.compose_frame(cols, rows);
+        // Render is pure; the panel focus and size declarations follow the recorded geometry.
+        self.drop_focus_of_hidden_panel();
+        self.sync_panel_surfaces();
+        frame
+    }
+
+    fn compose_frame(
+        &mut self,
+        cols: u16,
+        rows: u16,
+    ) -> Option<crate::client::frame_output::ComposedFrame> {
         self.last_composed_at = Some(std::time::Instant::now());
         self.selection_repaint_deadline = None;
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
@@ -205,6 +222,7 @@ impl ClientShellState {
             _ => (None, None),
         };
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
+        let panel_available = self.panel_surfaces_available();
         self.hits = render::render_shell(
             &mut buffer,
             layout,
@@ -224,6 +242,10 @@ impl ClientShellState {
                 reveal_focused_tab: &mut self.reveal_focused_tab,
                 sidebar_collapsed: self.sidebar_collapsed,
                 sidebar_section_split: self.sidebar_section_split,
+                panels: super::panels::PanelView::new(
+                    panel_available,
+                    self.panel_endpoints.get(&self.active_endpoint_id),
+                ),
                 tab_drag_insert_index,
                 selected_workspace_id: self
                     .navigate_workspace_id
@@ -268,6 +290,7 @@ impl ClientShellState {
                 }),
                 pane_id: pane.pane_id.clone(),
                 popup: false,
+                panel: false,
                 mouse_reporting: pane.mouse_reporting,
                 sgr_pixel_mouse: pane.sgr_pixel_mouse,
                 pixel_width: pane.pixel_width,
@@ -339,6 +362,7 @@ impl ClientShellState {
             self.hits.tab_scroll_right = Rect::default();
         }
         let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+        self.blit_panel_frames(&mut frame);
         let mode_bar_cells = mode_bar.map(|bar| {
             let start = usize::from(bar.y) * usize::from(frame.width) + usize::from(bar.x);
             frame.cells[start..start + usize::from(bar.width)].to_vec()
@@ -587,6 +611,7 @@ impl ClientShellState {
                     scroll: None,
                     pane_id: popup.terminal_id.clone(),
                     popup: true,
+                    panel: false,
                     mouse_reporting: popup.mouse_reporting,
                     sgr_pixel_mouse: popup.sgr_pixel_mouse,
                     pixel_width: popup.pixel_width,
