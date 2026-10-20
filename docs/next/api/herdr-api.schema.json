@@ -3403,6 +3403,64 @@
           },
           "type": "object"
         },
+        "PanelInputParams": {
+          "description": "Semantic input for a panel terminal. Each event is a serialized\n`ClientPaneInputEvent`, the same shape `shell.input.semantic.v1` carries.",
+          "properties": {
+            "events": {
+              "items": true,
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "events"
+          ],
+          "type": "object"
+        },
+        "PanelRestartParams": {
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "PanelSurfaceSetParams": {
+          "description": "Declares one panel's size and whether this connection currently shows it.\nThe panel terminal follows the most recent visible declaration.",
+          "properties": {
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "visible": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "cols",
+            "rows",
+            "visible"
+          ],
+          "type": "object"
+        },
         "PingParams": {
           "type": "object"
         },
@@ -6312,6 +6370,70 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "panel.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "panel.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PanelRestartParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "panel.surface.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PanelSurfaceSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "panel.input",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PanelInputParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -8583,6 +8705,36 @@
           ],
           "type": "object"
         },
+        "PanelInfo": {
+          "properties": {
+            "exit_code": {
+              "description": "Exit code of an exited panel, when the platform reported one.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/schemas/success_response/$defs/PanelRunState"
+            }
+          },
+          "required": [
+            "id",
+            "status"
+          ],
+          "type": "object"
+        },
+        "PanelRunState": {
+          "enum": [
+            "running",
+            "exited"
+          ],
+          "type": "string"
+        },
         "PluginActionContext": {
           "enum": [
             "global",
@@ -10401,6 +10553,41 @@
                 "type",
                 "active",
                 "projection_revision"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "panels": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PanelInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "panel_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "panels"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "panel": {
+                  "$ref": "#/schemas/success_response/$defs/PanelInfo"
+                },
+                "type": {
+                  "const": "panel_restarted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "panel"
               ],
               "type": "object"
             },

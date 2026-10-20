@@ -55,6 +55,12 @@ impl HeadlessServer {
             );
             return changed;
         }
+        if let Some(changed) = self.handle_panel_endpoint_request(client_id, &boot_id, &request) {
+            return changed;
+        }
+        let Some(client) = self.clients.get(&client_id) else {
+            return false;
+        };
         if client.shell_endpoint_command_in_flight {
             let message = crate::server::client_commands::error_message(
                 boot_id,

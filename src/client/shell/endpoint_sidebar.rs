@@ -234,25 +234,15 @@ pub(super) fn render_collapsed(
     );
 }
 
-pub(super) fn render_expanded(
+fn render_machines_section(
     buffer: &mut Buffer,
-    area: Rect,
+    workspace_area: Rect,
     active_snapshot: Option<&ClientShellSnapshot>,
     config: &ClientShellConfig,
     state: &mut ShellRenderState<'_>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    super::render::render_sidebar_background(buffer, area, palette);
-    hits.sidebar_divider = if area.is_empty() {
-        Rect::default()
-    } else {
-        Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
-    };
-    let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
-    hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     put_text(
         buffer,
         workspace_area.x,
@@ -553,14 +543,51 @@ pub(super) fn render_expanded(
             }),
         );
     }
-    super::endpoint_agents::render_expanded(
+}
+
+pub(super) fn render_expanded(
+    buffer: &mut Buffer,
+    area: Rect,
+    active_snapshot: Option<&ClientShellSnapshot>,
+    config: &ClientShellConfig,
+    state: &mut ShellRenderState<'_>,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    super::render::render_sidebar_background(buffer, area, palette);
+    hits.sidebar_divider = if area.is_empty() {
+        Rect::default()
+    } else {
+        Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
+    };
+    let specs = super::panels::section_specs(&config.sidebar_sections);
+    let layout = crate::ui::sidebar_section_layout(area, &specs, state.sidebar_section_split);
+    hits.sidebar_section_divider = crate::ui::sidebar_section_divider(&specs, &layout);
+    hits.sidebar_split_span = crate::ui::sidebar_split_span(&specs, &layout);
+    let workspace_area =
+        super::panels::section_rect(&specs, &layout, &crate::ui::SectionSpec::Spaces);
+    let detail_area = super::panels::section_rect(&specs, &layout, &crate::ui::SectionSpec::Agents);
+    if !workspace_area.is_empty() {
+        render_machines_section(buffer, workspace_area, active_snapshot, config, state, hits);
+    }
+    if !detail_area.is_empty() {
+        super::endpoint_agents::render_expanded(
+            buffer,
+            detail_area,
+            active_snapshot.and_then(|snapshot| snapshot.agent_view_label.as_deref()),
+            state.endpoints,
+            state.active_endpoint_id,
+            config,
+            state.agent_scroll,
+            hits,
+        );
+    }
+    super::panels::render_panel_sections(
         buffer,
-        detail_area,
-        active_snapshot.and_then(|snapshot| snapshot.agent_view_label.as_deref()),
-        state.endpoints,
-        state.active_endpoint_id,
-        config,
-        state.agent_scroll,
+        &config.sidebar_sections,
+        &layout,
+        state.panels,
+        palette,
         hits,
     );
     hits.sidebar_toggle = Rect::new(

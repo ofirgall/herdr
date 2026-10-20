@@ -22,7 +22,7 @@ impl ClientShellState {
     }
 
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
-        let divider = self.hits.sidebar_divider;
+        let divider = self.hits.sidebar_split_span;
         if divider.height == 0 {
             return;
         }
@@ -878,7 +878,9 @@ impl ClientShellState {
             if gesture_event {
                 let button = gesture.button;
                 let modifiers = mouse.modifiers.difference(gesture.stripped_modifiers);
-                let hit = if gesture.hit.popup {
+                let hit = if gesture.hit.panel {
+                    self.panel_pane_hit(&gesture.hit.pane_id)
+                } else if gesture.hit.popup {
                     self.hits
                         .popup
                         .as_ref()
@@ -943,6 +945,9 @@ impl ClientShellState {
             return;
         }
         if self.popup_terminal_id.is_some() {
+            return;
+        }
+        if self.overlay.is_none() && self.handle_panel_mouse(mouse, outcome) {
             return;
         }
         if self.config.mouse_capture
@@ -2414,7 +2419,11 @@ impl ClientShellState {
         }
     }
 
-    fn pane_mouse_position(&self, hit: &PaneHit, mouse: MouseEvent) -> ClientMousePosition {
+    pub(super) fn pane_mouse_position(
+        &self,
+        hit: &PaneHit,
+        mouse: MouseEvent,
+    ) -> ClientMousePosition {
         let cell = ClientMousePosition::Cell {
             column: mouse.column.saturating_sub(hit.inner_rect.x),
             row: mouse.row.saturating_sub(hit.inner_rect.y),
@@ -2461,7 +2470,9 @@ impl ClientShellState {
                 height_px: hit.pixel_height,
             },
         );
-        let target = if hit.popup {
+        let target = if hit.panel {
+            ClientInputTarget::Panel(hit.pane_id.clone())
+        } else if hit.popup {
             ClientInputTarget::Popup(hit.pane_id.clone())
         } else {
             ClientInputTarget::Pane(hit.pane_id.clone())

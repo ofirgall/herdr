@@ -255,6 +255,27 @@ mod tests {
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
         );
 
+        // Panel methods ship with the `panel_surfaces` capability and are pinned by
+        // their own fixture so the published v1 file stays byte-identical.
+        let panel_methods: BTreeMap<String, String> = actual
+            .keys()
+            .filter(|name| name.starts_with("panel."))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|name| actual.remove(&name).map(|digest| (name, digest)))
+            .collect();
+        let expected_panel_methods: BTreeMap<String, String> =
+            serde_json::from_str(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/endpoint-method-shapes-panels-v1.json"
+            )))
+            .expect("panel endpoint method shape fixture");
+        assert_eq!(
+            panel_methods, expected_panel_methods,
+            "a panel endpoint method changed shape; add load-bearing behavior as a new advertised method or explicitly gate new fields"
+        );
+
         assert_eq!(
             actual, expected,
             "an existing endpoint method changed shape; add load-bearing behavior as a new advertised method or explicitly gate new fields"

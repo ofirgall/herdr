@@ -24,13 +24,13 @@ pub use self::{
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
         ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig, PaneBordersConfig,
-        ShellModeConfig, SidebarCollapsedModeConfig, StatusIconsConfig, StatusIndicatorStyle,
-        TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
-        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        PanelConfig, ShellModeConfig, SidebarCollapsedModeConfig, StatusIconsConfig,
+        StatusIndicatorStyle, TabBarPositionConfig, ToastClipboardPosition, ToastConfig,
+        ToastDelivery, ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
-        SpaceSidebarToken, SpacesSidebarConfig,
+        AgentSidebarToken, AgentsSidebarConfig, PanelHeight, SidebarConfig, SidebarSection,
+        SidebarTokenStyle, SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,
@@ -123,7 +123,19 @@ impl Config {
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
             .chain(self.invalid_headless_size_diagnostic())
+            .chain(self.panel_diagnostics())
+            .chain(self.ui.sidebar.diagnostics())
             .collect()
+    }
+
+    /// `[[panels]]` entries that passed validation, in declaration order.
+    pub fn valid_panels(&self) -> Vec<PanelConfig> {
+        model::validate_panels(&self.panels).0
+    }
+
+    /// Warnings for `[[panels]]` entries that were rejected.
+    pub fn panel_diagnostics(&self) -> Vec<String> {
+        model::validate_panels(&self.panels).1
     }
 
     pub(crate) fn headless_size(&self) -> (u16, u16) {

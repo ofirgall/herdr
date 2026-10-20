@@ -9,6 +9,7 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "experimental",
     "keys",
     "onboarding",
+    "panels",
     "remote",
     "server",
     "session",
@@ -375,8 +376,18 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut invalid_sections,
         |section| config.remote = section,
     );
+    load_live_section(
+        table,
+        "panels",
+        "panels config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.panels = section,
+    );
 
     diagnostics.extend(config.theme.diagnostics());
+    diagnostics.extend(config.panel_diagnostics());
+    diagnostics.extend(config.ui.sidebar.diagnostics());
 
     Ok(LoadedConfig {
         config,
@@ -898,6 +909,99 @@ resume_agents_on_restore = true
         assert!(loaded.config.session.resume_agents_on_restore);
         assert!(loaded.diagnostics.is_empty());
         assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_parses_valid_panels() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[panels]]
+id = "prs"
+command = ["gh", "dash"]
+cwd = "/tmp"
+
+[[panels]]
+id = "logs"
+command = ["tail", "-f", "x.log"]
+"#,
+        )
+        .unwrap();
+
+        let panels = loaded.config.valid_panels();
+        assert_eq!(panels.len(), 2);
+        assert_eq!(panels[0].id, "prs");
+        assert_eq!(panels[0].command, vec!["gh", "dash"]);
+        assert_eq!(panels[0].cwd, Some(std::path::PathBuf::from("/tmp")));
+        assert_eq!(panels[1].cwd, None);
+        assert!(loaded.diagnostics.is_empty());
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_rejects_duplicate_and_empty_panels_individually() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[panels]]
+id = "dup"
+command = ["a"]
+
+[[panels]]
+id = "dup"
+command = ["b"]
+
+[[panels]]
+id = "empty"
+command = []
+
+[[panels]]
+command = ["x"]
+
+[[panels]]
+id = "ok"
+command = ["gh", "dash"]
+"#,
+        )
+        .unwrap();
+
+        let panels = loaded.config.valid_panels();
+        assert_eq!(panels.len(), 1);
+        assert_eq!(panels[0].id, "ok");
+        assert_eq!(loaded.diagnostics.len(), 3, "{:?}", loaded.diagnostics);
+        assert!(loaded.diagnostics.iter().any(|d| d.contains("dup")));
+        assert!(loaded.diagnostics.iter().any(|d| d.contains("empty")));
+        assert!(loaded.diagnostics.iter().any(|d| d.contains("no id")));
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_reports_malformed_panels_as_invalid_section() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[panels]]
+id = "prs"
+command = "gh dash"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(loaded.invalid_sections, vec!["panels"]);
+        assert!(loaded.config.panels.is_empty());
+    }
+
+    #[test]
+    fn panels_are_a_known_top_level_section() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[panels]]
+id = "prs"
+command = ["gh"]
+"#,
+        )
+        .unwrap();
+        assert!(loaded
+            .diagnostics
+            .iter()
+            .all(|d| !d.contains("unknown config")));
     }
 
     #[test]

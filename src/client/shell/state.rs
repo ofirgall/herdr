@@ -22,6 +22,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
     pub(super) spaces: SpacesSidebarConfig,
+    pub(super) sidebar_sections: Vec<SidebarSectionConfig>,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) status_indicators: super::StatusIndicators,
@@ -103,6 +104,9 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
+    /// Rows shared by spaces and agents; a divider drag maps onto the split ratio across it.
+    pub(super) sidebar_split_span: Rect,
+    pub(super) panel_sections: Vec<PanelSectionHit>,
     pub(super) sidebar_toggle: Rect,
     pub(super) new_workspace: Rect,
     pub(super) new_tab: Rect,
@@ -149,6 +153,8 @@ pub(super) struct PaneHit {
     pub(super) scroll: Option<crate::pane::ScrollMetrics>,
     pub(super) pane_id: String,
     pub(super) popup: bool,
+    /// The hit is a sidebar panel body; `pane_id` is the panel id.
+    pub(super) panel: bool,
     pub(super) mouse_reporting: bool,
     pub(super) sgr_pixel_mouse: bool,
     pub(super) pixel_width: u32,
@@ -266,6 +272,8 @@ pub(crate) struct ClientShellInput {
     pub query_host_theme: bool,
     pub requests: Vec<ClientMessage>,
     pub actions: Vec<ClientShellAction>,
+    /// Semantic input for focused panels, turned into `panel.input` requests when the batch ends.
+    pub(super) panel_input: Vec<(String, Vec<ClientPaneInputEvent>)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -620,6 +628,12 @@ impl ClientShellOverlay {
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
     Generic,
+    PanelSurface {
+        endpoint_id: ClientEndpointId,
+        id: String,
+    },
+    /// `panel.input`: fire and forget, failures never raise notices.
+    PanelInput,
     ProductAnnouncementDismiss {
         version: String,
         id: String,
@@ -754,6 +768,8 @@ pub(super) struct ClientVisibleNotification {
 pub(super) enum ClientInputTarget {
     Pane(String),
     Popup(String),
+    /// A sidebar panel id.
+    Panel(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -945,6 +961,10 @@ pub(crate) struct ClientShellState {
     pub(super) popup_pending_deadline: Option<std::time::Instant>,
     pub(super) next_request_id: u64,
     pub(super) pending_requests: HashMap<String, PendingEndpointRequest>,
+    pub(super) panel_endpoints: HashMap<ClientEndpointId, EndpointPanels>,
+    /// The sidebar panel receiving keyboard input. TUI state only; never sent to the server.
+    pub(super) focused_panel: Option<String>,
+    pub(super) pending_panel_actions: Vec<ClientShellAction>,
     pub(super) pending_integration_installs: usize,
     pub(super) pending_notifications: Vec<ClientPendingNotification>,
     pub(super) visible_notification: Option<ClientVisibleNotification>,
@@ -1114,6 +1134,9 @@ impl ClientShellState {
             popup_pending_deadline: None,
             next_request_id: 1,
             pending_requests: HashMap::new(),
+            panel_endpoints: HashMap::new(),
+            focused_panel: None,
+            pending_panel_actions: Vec::new(),
             pending_integration_installs: 0,
             pending_notifications: Vec::new(),
             visible_notification: None,
@@ -1229,6 +1252,7 @@ impl ClientShellState {
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
+            self.focused_panel_focus_width(),
         )
     }
 
@@ -1246,6 +1270,7 @@ impl ClientShellState {
         self.pending_pane_surface = None;
         self.input_leases = ClientInputLeases::default();
         self.popup_terminal_id = None;
+        self.focused_panel = None;
         self.chrome_drag = None;
         self.workspace_press = None;
         self.tab_press = None;

@@ -26,6 +26,7 @@ mod integration;
 mod machine;
 pub(crate) mod notification;
 pub(crate) mod pane;
+pub(crate) mod panel;
 pub(crate) mod plugin;
 pub(crate) mod projection;
 mod protocol_guard;
@@ -130,6 +131,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "worktree" => worktree::run_worktree_command(&args[2..])?,
         "tab" => tab::run_tab_command(&args[2..])?,
         "notification" => notification::run_notification_command(&args[2..])?,
+        "panel" => panel::run_panel_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
         "terminal" => run_terminal_command(&args[2..])?,
         "pane" => pane::run_pane_command(&args[2..])?,
@@ -149,6 +151,7 @@ fn api_group(name: &str) -> Option<clap::Command> {
         "worktree" => worktree::command(),
         "tab" => tab::command(),
         "notification" => notification::command(),
+        "panel" => panel::command(),
         "agent" => agent::command(),
         "pane" => pane::command(),
         "plugin" => plugin::command(),

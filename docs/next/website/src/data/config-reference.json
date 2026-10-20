@@ -836,6 +836,12 @@
           "description": "Resize the focused pane toward the right. Unset by default."
         },
         {
+          "key": "keys.focus_panel",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Focus the next visible sidebar panel, wrapping around. Unset by default."
+        },
+        {
           "key": "keys.toggle_sidebar",
           "type": "keybinding",
           "default": "\"prefix+b\"",
@@ -1149,6 +1155,18 @@
           "type": "table of token rows",
           "default": "{}",
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
+        },
+        {
+          "key": "ui.sidebar.sections",
+          "type": "list of strings",
+          "default": "[\"spaces\", \"agents\"]",
+          "description": "Expanded sidebar sections from top to bottom. Entries are \"spaces\", \"agents\" and \"panel:<id>\" for a [[panels]] entry; unknown and duplicate entries are ignored with a warning. Omitting spaces or agents hides that section."
+        },
+        {
+          "key": "ui.sidebar.panel",
+          "type": "table of panel settings",
+          "default": "{}",
+          "description": "Per-panel sidebar settings keyed by panel id: [ui.sidebar.panel.<id>] with title (header text, defaults to the id), height (rows as an integer or a percentage string such as \"30%\" of the sidebar, default \"30%\") and focus_width (columns the sidebar grows to while the panel has focus; it never narrows the sidebar and leaves room for 20 pane columns)."
         },
         {
           "key": "ui.sidebar.spaces.row_gap",

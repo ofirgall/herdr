@@ -1,5 +1,8 @@
 use super::*;
 
+/// Columns kept for the main area while a focused panel widens the sidebar.
+const MIN_PANE_COLUMNS_WHILE_PANEL_FOCUSED: u16 = 20;
+
 pub(super) fn merged_config_diagnostic(
     local: Option<&str>,
     endpoint: Option<&str>,
@@ -89,6 +92,13 @@ impl ClientShellState {
                 if self.agent_panel_sort_manual {
                     self.config.agent_panel_sort = agent_panel_sort;
                 }
+                if self.focused_panel.as_ref().is_some_and(|focused| {
+                    !self.config.sidebar_sections.iter().any(|section| {
+                        matches!(section, super::panels::SidebarSectionConfig::Panel(panel) if &panel.id == focused)
+                    })
+                }) {
+                    self.focused_panel = None;
+                }
                 self.set_local_config_diagnostic(self.config.local_config_diagnostic(&diagnostics));
                 if let Some(snapshot) = self.snapshot.as_deref() {
                     let profile = snapshot.server_keybindings_toml.clone();
@@ -122,6 +132,7 @@ impl ClientShellConfig {
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             spaces: config.ui.sidebar.spaces.clone(),
+            sidebar_sections: super::panels::sections_from_config(config),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
             status_indicators: super::StatusIndicators::from_config(config),
@@ -350,6 +361,7 @@ impl ClientShellConfig {
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.spaces = ui.sidebar.spaces.clone();
+                self.sidebar_sections = super::panels::sections_from_config(config);
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = super::StatusIndicators::from_config(config);
@@ -391,6 +403,7 @@ impl ClientShellConfig {
         sidebar_collapsed: bool,
         tab_count: usize,
         sidebar_width: u16,
+        focus_width: Option<u16>,
     ) -> ClientShellLayout {
         if cols <= self.mobile_width_threshold {
             let header_height = rows.min(2);
@@ -413,7 +426,12 @@ impl ClientShellConfig {
                 self.sidebar_max_width,
             )
             .unwrap_or((18, 36));
-            sidebar_width.clamp(min, max)
+            let width = sidebar_width.clamp(min, max);
+            // A focused panel may widen the sidebar past the saved width and the usual bounds,
+            // but never so far that fewer than 20 columns remain for panes.
+            focus_width.map_or(width, |focus| {
+                width.max(focus.min(cols.saturating_sub(MIN_PANE_COLUMNS_WHILE_PANEL_FOCUSED)))
+            })
         }
         .min(cols.saturating_sub(1));
         let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
@@ -462,7 +480,7 @@ impl ClientShellConfig {
             .unwrap_or(self.sidebar_width)
             .clamp(min_width, max_width);
         let surface = self
-            .layout(cols, rows, sidebar_collapsed, 0, sidebar_width)
+            .layout(cols, rows, sidebar_collapsed, 0, sidebar_width, None)
             .pane_surface;
         ClientSurfaceSize {
             cols: surface.width.max(1),

@@ -579,6 +579,18 @@ fn handle_request(
         );
     }
 
+    if matches!(
+        &request.method,
+        Method::PanelSurfaceSet(_) | Method::PanelInput(_)
+    ) {
+        return error_response_json(
+            request.id,
+            "connection_local_only",
+            "panel.surface.set and panel.input are only available through a client shell endpoint"
+                .into(),
+        );
+    }
+
     if matches!(&request.method, Method::ServerStop(_)) {
         if let Some(server_stop) = server_stop {
             server_stop.request(ShutdownReason::ApiStop {

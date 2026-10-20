@@ -80,6 +80,7 @@ mod endpoint_requests;
 mod lifecycle;
 mod native_graphics;
 mod notifications;
+mod panels;
 mod render;
 mod retained_surface;
 mod surface_interest;
@@ -552,7 +553,15 @@ impl HeadlessServer {
                 && self.can_render_interactive(now);
             if needs_render && (render_cadence_due || presentation_due || interactive_due) {
                 crate::render_prof::event("render.attempt");
-                let render_request = self.app.render_dirty.take();
+                let mut render_request = self.app.render_dirty.take();
+                // Panel output never needs pane-surface rendering; it streams its
+                // own frames, and only for panels some client shows.
+                let panel_dirty = self.take_panel_pty_sources(&mut render_request.pty_sources);
+                // A generic dirty (panel exit, restart, reload) also carries panel
+                // status changes; unchanged panels are skipped by content key.
+                if panel_dirty || render_request.generic {
+                    self.stream_panel_surfaces();
+                }
                 let pty_dirty = !render_request.pty_sources.is_empty();
                 if pty_dirty {
                     crate::render_prof::event("render.attempt.pty_dirty");

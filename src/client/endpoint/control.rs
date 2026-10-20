@@ -10,6 +10,7 @@ pub(crate) enum EndpointControlMessage {
     HealthPong,
     AgentViewProjection(DecodedAgentViewProjection),
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
+    PanelSurface(Box<crate::protocol::endpoint::EndpointPanelSurface>),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
     Ignored,
 }
@@ -24,6 +25,12 @@ pub(crate) fn decode_endpoint_control(
     if kind == crate::protocol::endpoint::AGENT_COMPLETIONS_KIND {
         return Ok(serde_json::from_str(data)
             .map(EndpointControlMessage::AgentCompletions)
+            .unwrap_or(EndpointControlMessage::Ignored));
+    }
+    if kind == crate::protocol::endpoint::PANEL_SURFACE_KIND {
+        // Panels are optional chrome: a frame this client cannot read is dropped, not fatal.
+        return Ok(serde_json::from_str(data)
+            .map(|surface| EndpointControlMessage::PanelSurface(Box::new(surface)))
             .unwrap_or(EndpointControlMessage::Ignored));
     }
     if kind == crate::protocol::endpoint::AGENT_VIEW_PROJECTION_KIND {
@@ -160,6 +167,51 @@ mod tests {
                 "not json"
             )
             .unwrap(),
+            EndpointControlMessage::Ignored
+        ));
+    }
+
+    fn panel_surface() -> crate::protocol::endpoint::EndpointPanelSurface {
+        crate::protocol::endpoint::EndpointPanelSurface {
+            boot_id: "boot".into(),
+            id: "files".into(),
+            revision: 3,
+            title: "Files".into(),
+            status: crate::protocol::endpoint::EndpointPanelStatus::Running,
+            exit_code: None,
+            frame: crate::protocol::FrameData::from_ratatui_buffer_with_hyperlinks(
+                &ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 2, 1)),
+                None,
+                &[],
+            ),
+            mouse_reporting: false,
+            sgr_pixel_mouse: false,
+            pixel_width: 0,
+            pixel_height: 0,
+        }
+    }
+
+    #[test]
+    fn panel_surface_controls_decode() {
+        let surface = panel_surface();
+        let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+            crate::protocol::endpoint::panel_surface_message(&surface).unwrap()
+        else {
+            panic!("panel control");
+        };
+        let EndpointControlMessage::PanelSurface(decoded) =
+            decode_endpoint_control(&kind, &data).unwrap()
+        else {
+            panic!("decoded panel");
+        };
+        assert_eq!(*decoded, surface);
+    }
+
+    #[test]
+    fn malformed_panel_surface_is_ignored() {
+        assert!(matches!(
+            decode_endpoint_control(crate::protocol::endpoint::PANEL_SURFACE_KIND, "{\"id\":1}")
+                .unwrap(),
             EndpointControlMessage::Ignored
         ));
     }

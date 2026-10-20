@@ -70,6 +70,12 @@ Pane input follows the keyboard modes requested by the app. Plain shells receive
 
 On non-Latin layouts, Ctrl-only shortcuts such as Ctrl+W can use the physical base key reported by a Kitty-capable host. Latin layout characters, Ctrl+Shift chords, and AltGr keep their layout meaning. Terminals that do not report physical keys cannot provide the same layout-independent shortcuts.
 
+## Sidebar panels
+
+Click a running panel's body to focus it. While it has focus, keys that are not Herdr keybindings and pasted text go to the panel instead of the pane, and mouse clicks, drags, scrolling, and the middle button are forwarded when the panel program asks for mouse reporting. Click anywhere outside the panels, or use any pane, tab, or workspace focus action, to hand focus back. Clicking an exited panel restarts it.
+
+`focus_panel` has no default key. Bind it under `[keys]` to move focus to the first visible panel, then to the next one, wrapping around.
+
 ## Editing text fields
 
 Herdr's naming dialogs, worktree branch fields, filters, and copy-mode search support editing at the cursor. These shortcuts apply to Herdr-owned fields, not to the shell or agent inside a pane.

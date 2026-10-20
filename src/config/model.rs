@@ -414,6 +414,61 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    /// Long-lived terminal panels owned by the server (`[[panels]]`).
+    pub panels: Vec<PanelConfig>,
+}
+
+/// One `[[panels]]` entry. Fields default so that a malformed entry is rejected
+/// individually by validation instead of invalidating the whole list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PanelConfig {
+    /// Unique panel id, referenced as `panel:<id>` by sidebar sections.
+    pub id: String,
+    /// Program and arguments to run. Must not be empty.
+    pub command: Vec<String>,
+    /// Working directory for the process. Default: the server's working directory.
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+/// Split `[[panels]]` entries into the valid ones and warnings for the rest.
+///
+/// An entry is rejected when its id is empty, its command is empty (or starts
+/// with an empty program), or its id is shared with another entry. All entries
+/// that share an id are rejected, because there is no way to tell which one the
+/// user meant.
+pub(crate) fn validate_panels(panels: &[PanelConfig]) -> (Vec<PanelConfig>, Vec<String>) {
+    let mut diagnostics = Vec::new();
+    let mut valid = Vec::new();
+    let mut reported_duplicates = std::collections::HashSet::new();
+    for (index, panel) in panels.iter().enumerate() {
+        if panel.id.is_empty() {
+            diagnostics.push(format!("panels[{index}] has no id; ignoring panel"));
+            continue;
+        }
+        if panels.iter().filter(|other| other.id == panel.id).count() > 1 {
+            if reported_duplicates.insert(panel.id.clone()) {
+                diagnostics.push(format!(
+                    "panels: duplicate id \"{}\"; ignoring every panel with this id",
+                    panel.id
+                ));
+            }
+            continue;
+        }
+        if panel
+            .command
+            .first()
+            .is_none_or(|program| program.is_empty())
+        {
+            diagnostics.push(format!(
+                "panels \"{}\" has an empty command; ignoring panel",
+                panel.id
+            ));
+            continue;
+        }
+        valid.push(panel.clone());
+    }
+    (valid, diagnostics)
 }
 
 #[derive(Debug)]
@@ -448,6 +503,8 @@ pub struct KeysConfig {
     pub workspace_picker: BindingConfig,
     /// Open the session navigator. Default: "prefix+g"
     pub goto: BindingConfig,
+    /// Focus the next visible sidebar panel. Unset by default.
+    pub focus_panel: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
     pub navigate_workspace_up: BindingConfig,
     /// Move workspace selection down in navigate mode. Default: "down".
@@ -585,6 +642,8 @@ pub(crate) struct KeysConfigOverlay {
     workspace_picker: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     goto: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focus_panel: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -745,6 +804,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
         apply_field!(goto);
+        apply_field!(focus_panel);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
         apply_field!(navigate_pane_left);
@@ -850,6 +910,7 @@ impl KeysConfig {
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
+        copy_effective_action_field!(focus_panel, keybinds.focus_panel);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
@@ -1226,6 +1287,7 @@ impl Default for KeysConfig {
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
+            focus_panel: BindingConfig::empty(),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
             navigate_pane_left: BindingConfig::one("h"),
