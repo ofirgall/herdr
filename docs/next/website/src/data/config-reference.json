@@ -1513,6 +1513,12 @@
           "type": "integer",
           "default": "100",
           "description": "Milliseconds between automatic agent restores after a server restart. The first agent starts without this delay; 0 disables spacing. Does not delay manual launches or explicit terminal attaches. Restart the server to apply."
+        },
+        {
+          "key": "session.resume_command_prefix",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Words placed in front of every agent resume command, to restore agents inside a wrapper. [\"kv\", \"--ai\", \"--\"] runs kv --ai -- claude --resume <id>. The first word must be a plain command name, not a path."
         }
       ]
     },

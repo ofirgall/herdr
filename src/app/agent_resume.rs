@@ -238,7 +238,8 @@ impl App {
             return false;
         }
 
-        let Some(resume_command) = shell_command_from_argv(&plan.argv) else {
+        let argv = prefixed_resume_argv(&self.resume_command_prefix, &plan.argv);
+        let Some(resume_command) = shell_command_from_argv(&argv) else {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,
@@ -351,6 +352,26 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
         pane_inner.width.saturating_sub(1),
         pane_inner.height,
     )
+}
+
+/// The resume command run inside `[session] resume_command_prefix`. A prefix that
+/// would make the command unsafe to type into a shell is ignored, so a config
+/// mistake costs the wrapper rather than the restore.
+fn prefixed_resume_argv(prefix: &[String], argv: &[String]) -> Vec<String> {
+    if prefix.is_empty() {
+        return argv.to_vec();
+    }
+    let prefixed: Vec<String> = prefix.iter().chain(argv).cloned().collect();
+    match crate::agent_resume::validate_resume_argv(&prefixed) {
+        Ok(()) => prefixed,
+        Err(err) => {
+            tracing::warn!(
+                err = %err,
+                "ignoring invalid session.resume_command_prefix for agent resume"
+            );
+            argv.to_vec()
+        }
+    }
 }
 
 fn shell_command_from_argv(argv: &[String]) -> Option<String> {
@@ -951,6 +972,30 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+    }
+
+    fn words(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn resume_command_prefix_wraps_the_resume_argv() {
+        let resume = words(&["claude", "--resume", "id"]);
+        assert_eq!(
+            prefixed_resume_argv(&words(&["kv", "--ai", "--"]), &resume),
+            words(&["kv", "--ai", "--", "claude", "--resume", "id"])
+        );
+        assert_eq!(prefixed_resume_argv(&[], &resume), resume);
+    }
+
+    #[test]
+    fn invalid_resume_command_prefix_falls_back_to_the_plain_command() {
+        let resume = words(&["claude", "--resume", "id"]);
+        assert_eq!(
+            prefixed_resume_argv(&words(&["/usr/bin/kv"]), &resume),
+            resume
+        );
+        assert_eq!(prefixed_resume_argv(&words(&["--ai"]), &resume), resume);
     }
 
     #[test]

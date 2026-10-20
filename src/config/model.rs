@@ -357,6 +357,9 @@ pub struct SessionConfig {
     pub resume_agents_on_restore: bool,
     /// Milliseconds between automatic agent restores. Zero disables spacing.
     pub startup_per_agent_delay_ms: u32,
+    /// Command words placed in front of every agent resume command, for a
+    /// wrapper such as `["kv", "--ai", "--"]`. Empty runs the resume command as is.
+    pub resume_command_prefix: Vec<String>,
 }
 
 impl Default for SessionConfig {
@@ -364,6 +367,7 @@ impl Default for SessionConfig {
         Self {
             resume_agents_on_restore: true,
             startup_per_agent_delay_ms: 100,
+            resume_command_prefix: Vec::new(),
         }
     }
 }
