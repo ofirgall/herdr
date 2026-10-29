@@ -337,6 +337,15 @@ available through `HERDR_PLUGIN_CONTEXT_JSON`.
 Opening a popup returns `ui_busy` while Settings, Copy mode, or another Herdr
 modal is active, and `plugin.pane.open` returns an `ok` result after launch.
 
+A user can also dock a plugin pane in the sidebar as a
+[terminal panel](/docs/configuration/#terminal-panels) with
+`[[panels]] plugin = "<plugin-id>" entrypoint = "<pane-id>"`. Herdr starts it
+with the plugin's environment and keeps it running for every client. Like a
+popup, a panel is not a Herdr pane: its process gets `HERDR_PANEL_ID` (the
+panel's id) instead of `HERDR_PANE_ID` and no `HERDR_PLUGIN_CONTEXT_JSON`, so a
+pane that should work in both places can check `HERDR_PANEL_ID` and skip
+pane-only calls such as setting its own title.
+
 On Windows, build commands, action commands, and event commands resolve common
 `PATHEXT` shims such as `npm.cmd`, `bun.cmd`, and `pnpm.cmd` when the bare
 command is on `PATH`. Pane commands use Herdr's normal Windows pane launcher and

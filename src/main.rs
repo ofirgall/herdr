@@ -420,6 +420,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # id = "prs"
 # command = ["gh", "dash"]
 # cwd = "~/work"
+#
+# Or run a plugin's [[panes]] entry instead of a command:
+# [[panels]]
+# id = "board"
+# plugin = "herdr-pr-board"
+# entrypoint = "board"
 
 # Sidebar sections from top to bottom: "spaces", "agents" and "panel:<id>".
 # Show a [[panels]] entry in the sidebar by listing it here.

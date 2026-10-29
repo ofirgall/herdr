@@ -21,6 +21,8 @@ fn panel_server() -> (HeadlessServer, InputReceivers) {
         id: "dash".into(),
         command: vec!["dash".into()],
         cwd: None,
+        plugin: None,
+        entrypoint: None,
     }]);
     assert!(diagnostics.is_empty());
     (server, receivers)

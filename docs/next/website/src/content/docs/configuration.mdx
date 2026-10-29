@@ -125,9 +125,22 @@ cwd = "~/work"
 - `command` is the program and its arguments, and must not be empty.
 - `cwd` is the working directory; `~` expands to your home directory. It defaults to the server's working directory.
 
-Each panel is one process shared by every attached client. It is not a pane: it does not appear in pane or workspace listings, is not offered to agent detection, and is not saved in the session. An entry with a duplicate `id`, a missing `id` or an empty `command` is skipped with a config warning, and the other panels still start.
+A panel can run a pane from an installed [plugin](/docs/plugins/) instead of a command. Set `plugin` to the plugin id and `entrypoint` to the id of a `[[panes]]` entry in its manifest:
 
-Config reload starts panels whose `id` is new, stops panels whose `id` was removed, and restarts panels whose `command` or `cwd` changed. Unchanged panels keep running. When a panel's process exits, the panel stays listed as exited until it is restarted. Panels are started again, not carried over, when the server is replaced by a live handoff.
+```toml
+[[panels]]
+id = "prs"
+plugin = "herdr-pr-board"
+entrypoint = "board"
+```
+
+Herdr looks the plugin pane up each time the panel starts, so a restart after `herdr plugin update` runs the updated plugin. The process gets the same plugin environment as a plugin pane (`HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_ID` and `HERDR_PLUGIN_ENTRYPOINT_ID`) and starts in the plugin's root unless `cwd` is set. A plugin panel does not start, and logs a warning, when the plugin is not installed, is disabled, has no pane with that id, or does not support this platform.
+
+Every panel process has `HERDR_PANEL_ID` set to its `id`, so a program can tell it is drawing into a sidebar panel rather than a pane.
+
+Each panel is one process shared by every attached client. It is not a pane: it does not appear in pane or workspace listings, is not offered to agent detection, and is not saved in the session. An entry with a duplicate `id` or a missing `id` is skipped with a config warning, and so is one with an empty `command` and no `plugin`, one that sets both `command` and `plugin`, and one that sets only one of `plugin` and `entrypoint`. The other panels still start.
+
+Config reload starts panels whose `id` is new, stops panels whose `id` was removed, and restarts panels whose `command`, `plugin`, `entrypoint` or `cwd` changed. Unchanged panels keep running. When a panel's process exits, the panel stays listed as exited until it is restarted. Panels are started again, not carried over, when the server is replaced by a live handoff.
 
 ## Remote attach
 
