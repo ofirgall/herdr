@@ -36,6 +36,66 @@ impl App {
             .collect();
     }
 
+    /// Resolve a plugin panel to the command its plugin pane runs now. Errors
+    /// say why the panel cannot start: the plugin is missing, disabled or has
+    /// no such pane, or the pane does not run on this platform.
+    pub(crate) fn resolve_plugin_panel_launch(
+        &mut self,
+        plugin_ref: &crate::app::state::PanelPluginRef,
+        cwd: Option<std::path::PathBuf>,
+    ) -> Result<crate::app::state::PanelLaunch, String> {
+        if let Err(err) = self.refresh_installed_plugins() {
+            return Err(format!("plugin registry could not be loaded: {err}"));
+        }
+        let plugin_id = normalize_plugin_id(&plugin_ref.plugin_id)
+            .ok_or_else(|| format!("invalid plugin id \"{}\"", plugin_ref.plugin_id))?;
+        let plugin = self
+            .state
+            .installed_plugins
+            .get(&plugin_id)
+            .cloned()
+            .ok_or_else(|| format!("plugin {plugin_id} is not installed"))?;
+        if !plugin_manifest_available(&plugin) {
+            return Err(format!("plugin {plugin_id} manifest is unavailable"));
+        }
+        if !plugin.enabled {
+            return Err(format!("plugin {plugin_id} is disabled"));
+        }
+        let pane = plugin
+            .panes
+            .iter()
+            .find(|pane| pane.id == plugin_ref.entrypoint)
+            .ok_or_else(|| {
+                format!(
+                    "plugin {plugin_id} has no pane entrypoint '{}'",
+                    plugin_ref.entrypoint
+                )
+            })?;
+        ensure_platform_supported(
+            effective_platforms(&pane.platforms, &plugin.platforms),
+            "plugin pane",
+        )
+        .map_err(|(_, message)| message)?;
+        let plugin_root = std::path::PathBuf::from(&plugin.plugin_root);
+        let mut argv = pane.command.clone();
+        let Some(program) = argv.first_mut() else {
+            return Err(format!(
+                "plugin {plugin_id} pane '{}' has no command",
+                pane.id
+            ));
+        };
+        *program = crate::plugin_command::program_for_cwd(program, &plugin_root)
+            .display()
+            .to_string();
+        let cwd = cwd.unwrap_or(plugin_root);
+        let mut env = Vec::new();
+        crate::platform::set_default_plugin_pane_pwd(&mut env, &cwd);
+        env.extend(
+            panes::plugin_entrypoint_env(&plugin, &pane.id).map_err(|(_, message)| message)?,
+        );
+        Ok(crate::app::state::PanelLaunch { argv, cwd, env })
+    }
+
     fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
         if !self.policy.persist_plugin_registry {
             return Ok(());

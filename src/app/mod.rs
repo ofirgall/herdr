@@ -105,7 +105,7 @@ impl AppPolicy {
 
 #[cfg(test)]
 pub(crate) type TestPanelRuntimeFactory = Box<
-    dyn FnMut(&state::PanelSpec, u16, u16) -> io::Result<crate::terminal::TerminalRuntime> + Send,
+    dyn FnMut(&state::PanelLaunch, u16, u16) -> io::Result<crate::terminal::TerminalRuntime> + Send,
 >;
 
 pub struct App {

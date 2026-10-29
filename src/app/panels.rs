@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 use crate::api::schema::{PanelInfo, PanelRestartParams, PanelRunState, ResponseResult};
 use crate::app::api::responses::{encode_error, encode_success};
-use crate::app::state::{PanelSource, PanelSpec, PanelState, PanelStatus};
+use crate::app::state::{
+    PanelLaunch, PanelPluginRef, PanelSource, PanelSpec, PanelState, PanelStatus,
+};
 use crate::app::App;
 use crate::config::PanelConfig;
 use crate::layout::PaneId;
@@ -20,6 +22,9 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 /// Size a panel terminal starts with, until a client reports the real one.
 pub(crate) const PANEL_DEFAULT_COLS: u16 = 80;
 pub(crate) const PANEL_DEFAULT_ROWS: u16 = 24;
+/// Set in every panel process to the panel's id, so a program can tell it is
+/// drawing into a sidebar panel rather than a pane.
+pub(crate) const PANEL_ID_ENV_VAR: &str = "HERDR_PANEL_ID";
 
 /// What a config reload does to the running panels, by id.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -35,9 +40,23 @@ fn panel_not_found_message(id: &str) -> String {
 }
 
 pub(crate) fn panel_spec_from_config(config: &PanelConfig) -> PanelSpec {
+    let plugin =
+        config
+            .plugin
+            .clone()
+            .zip(config.entrypoint.clone())
+            .map(|(plugin_id, entrypoint)| PanelPluginRef {
+                plugin_id,
+                entrypoint,
+            });
     PanelSpec {
-        argv: config.command.clone(),
+        argv: if plugin.is_some() {
+            Vec::new()
+        } else {
+            config.command.clone()
+        },
         cwd: config.cwd.clone(),
+        plugin,
     }
 }
 
@@ -276,16 +295,12 @@ impl App {
     ) -> std::io::Result<PanelState> {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
-        let cwd = spec
-            .cwd
-            .as_deref()
-            .map(|cwd| crate::worktree::expand_tilde_path(&cwd.to_string_lossy()))
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        let runtime = self.spawn_panel_runtime(pane_id, &spec, &cwd, cols, rows)?;
+        let launch = self.resolve_panel_launch(id, &spec)?;
+        let runtime = self.spawn_panel_runtime(pane_id, &launch, cols, rows)?;
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         self.state.terminals.insert(
             terminal_id.clone(),
-            TerminalState::new(terminal_id.clone(), cwd).with_launch_argv(spec.argv.clone()),
+            TerminalState::new(terminal_id.clone(), launch.cwd).with_launch_argv(launch.argv),
         );
         Ok(PanelState {
             id: id.to_string(),
@@ -299,27 +314,51 @@ impl App {
         })
     }
 
+    /// What this start of panel `id` runs. A plugin panel looks its plugin
+    /// pane up now, so it fails here when the plugin is missing or disabled.
+    fn resolve_panel_launch(&mut self, id: &str, spec: &PanelSpec) -> std::io::Result<PanelLaunch> {
+        let cwd = spec
+            .cwd
+            .as_deref()
+            .map(|cwd| crate::worktree::expand_tilde_path(&cwd.to_string_lossy()));
+        let mut launch = match &spec.plugin {
+            Some(plugin) => self
+                .resolve_plugin_panel_launch(plugin, cwd)
+                .map_err(std::io::Error::other)?,
+            None => PanelLaunch {
+                argv: spec.argv.clone(),
+                cwd: cwd.unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+                }),
+                env: Vec::new(),
+            },
+        };
+        launch
+            .env
+            .push((PANEL_ID_ENV_VAR.to_string(), id.to_string()));
+        Ok(launch)
+    }
+
     /// The one place that starts a panel process. Tests replace it through
     /// `test_panel_runtime_factory`.
     fn spawn_panel_runtime(
         &mut self,
         pane_id: PaneId,
-        spec: &PanelSpec,
-        cwd: &std::path::Path,
+        launch: &PanelLaunch,
         cols: u16,
         rows: u16,
     ) -> std::io::Result<TerminalRuntime> {
         #[cfg(test)]
         if let Some(factory) = self.test_panel_runtime_factory.as_mut() {
-            return factory(spec, cols, rows);
+            return factory(launch, cols, rows);
         }
-        let launch_env = PaneLaunchEnv::from_extra(Vec::new()).without_pane_identity();
+        let launch_env = PaneLaunchEnv::from_extra(launch.env.clone()).without_pane_identity();
         TerminalRuntime::spawn_argv_command(
             pane_id,
             rows,
             cols,
-            cwd.to_path_buf(),
-            &spec.argv,
+            launch.cwd.clone(),
+            &launch.argv,
             &launch_env,
             crate::pane::AgentDetection::Disabled,
             self.state.pane_scrollback_limit_bytes,
@@ -337,7 +376,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    type SpawnLog = Arc<Mutex<Vec<Vec<String>>>>;
+    type SpawnLog = Arc<Mutex<Vec<PanelLaunch>>>;
 
     fn test_app() -> (App, SpawnLog) {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -350,11 +389,11 @@ mod tests {
         );
         let log: SpawnLog = Arc::default();
         let factory_log = log.clone();
-        app.test_panel_runtime_factory = Some(Box::new(move |spec, cols, rows| {
-            if spec.argv.first().is_some_and(|program| program == "fail") {
+        app.test_panel_runtime_factory = Some(Box::new(move |launch, cols, rows| {
+            if launch.argv.first().is_some_and(|program| program == "fail") {
                 return Err(std::io::Error::other("boom"));
             }
-            factory_log.lock().unwrap().push(spec.argv.clone());
+            factory_log.lock().unwrap().push(launch.clone());
             Ok(TerminalRuntime::test_with_screen_bytes(cols, rows, b""))
         }));
         (app, log)
@@ -365,6 +404,8 @@ mod tests {
             id: id.to_string(),
             command: argv.iter().map(|word| word.to_string()).collect(),
             cwd: None,
+            plugin: None,
+            entrypoint: None,
         }
     }
 
@@ -618,6 +659,161 @@ mod tests {
             PanelStatus::Exited(_)
         ));
         assert!(app.find_pane(pane_id).is_none());
+    }
+
+    fn plugin_entry(id: &str, plugin: &str, entrypoint: &str) -> PanelConfig {
+        PanelConfig {
+            id: id.to_string(),
+            command: Vec::new(),
+            cwd: None,
+            plugin: Some(plugin.to_string()),
+            entrypoint: Some(entrypoint.to_string()),
+        }
+    }
+
+    fn env_value<'a>(launch: &'a PanelLaunch, key: &str) -> Option<&'a str> {
+        launch
+            .env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Register an installed plugin with one `board` pane running `bun bin/board.ts`.
+    fn install_board_plugin(app: &mut App, name: &str, enabled: bool) -> PathBuf {
+        let plugin_root =
+            std::env::temp_dir().join(format!("herdr-panel-plugin-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&plugin_root).unwrap();
+        let manifest_path = plugin_root.join("herdr-plugin.toml");
+        std::fs::write(&manifest_path, "id = 'example.board'\n").unwrap();
+        app.state.installed_plugins.insert(
+            "example.board".into(),
+            crate::api::schema::InstalledPluginInfo {
+                plugin_id: "example.board".into(),
+                name: "board".into(),
+                version: "0.1.0".into(),
+                min_herdr_version: "0.7.0".into(),
+                description: None,
+                manifest_path: manifest_path.display().to_string(),
+                plugin_root: plugin_root.display().to_string(),
+                enabled,
+                platforms: None,
+                build: Vec::new(),
+                startup: Vec::new(),
+                actions: Vec::new(),
+                events: Vec::new(),
+                panes: vec![crate::api::schema::PluginManifestPane {
+                    id: "board".into(),
+                    title: "board".into(),
+                    description: None,
+                    platforms: None,
+                    placement: crate::api::schema::PluginPanePlacement::Split,
+                    width: None,
+                    height: None,
+                    command: vec!["bun".into(), "bin/board.ts".into()],
+                }],
+                link_handlers: Vec::new(),
+                source: crate::api::schema::PluginSourceInfo::default(),
+                warnings: Vec::new(),
+            },
+        );
+        plugin_root
+    }
+
+    #[tokio::test]
+    async fn plugin_panel_runs_the_plugin_pane_with_plugin_env() {
+        let (mut app, log) = test_app();
+        let plugin_root = install_board_plugin(&mut app, "env", true);
+
+        let diagnostics = app.reconcile_panels(&[plugin_entry("prs", "example.board", "board")]);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let launches = log.lock().unwrap().clone();
+        assert_eq!(launches.len(), 1);
+        let launch = &launches[0];
+        assert_eq!(launch.argv, vec!["bun", "bin/board.ts"]);
+        assert_eq!(launch.cwd, plugin_root);
+        assert_eq!(env_value(launch, "HERDR_PLUGIN_ID"), Some("example.board"));
+        assert_eq!(
+            env_value(launch, "HERDR_PLUGIN_ENTRYPOINT_ID"),
+            Some("board")
+        );
+        assert_eq!(
+            env_value(launch, "HERDR_PLUGIN_ROOT"),
+            Some(plugin_root.to_string_lossy().as_ref())
+        );
+        assert!(env_value(launch, "HERDR_PLUGIN_CONFIG_DIR").is_some());
+        assert!(env_value(launch, "HERDR_PLUGIN_STATE_DIR").is_some());
+        assert_eq!(env_value(launch, PANEL_ID_ENV_VAR), Some("prs"));
+        assert_eq!(
+            panel(&app, "prs").spec.plugin.as_ref().unwrap().entrypoint,
+            "board"
+        );
+        app.state.assert_invariants_for_test();
+        let _ = std::fs::remove_dir_all(plugin_root);
+    }
+
+    #[tokio::test]
+    async fn plugin_panel_cwd_overrides_the_plugin_root() {
+        let (mut app, log) = test_app();
+        let plugin_root = install_board_plugin(&mut app, "cwd", true);
+        let mut entry = plugin_entry("prs", "example.board", "board");
+        entry.cwd = Some(PathBuf::from("/tmp"));
+
+        app.reconcile_panels(&[entry]);
+
+        assert_eq!(log.lock().unwrap()[0].cwd, PathBuf::from("/tmp"));
+        let _ = std::fs::remove_dir_all(plugin_root);
+    }
+
+    #[tokio::test]
+    async fn plugin_panel_that_cannot_resolve_is_reported_and_others_start() {
+        let (mut app, log) = test_app();
+        let plugin_root = install_board_plugin(&mut app, "unresolved", false);
+
+        let diagnostics = app.reconcile_panels(&[
+            plugin_entry("disabled", "example.board", "board"),
+            plugin_entry("missing", "example.nope", "board"),
+            plugin_entry("no-pane", "example.board", "nope"),
+            entry("ok", &["gh"]),
+        ]);
+
+        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+        assert!(diagnostics.iter().any(|d| d.contains("disabled")));
+        assert!(diagnostics.iter().any(|d| d.contains("not installed")));
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.contains("no-pane") && d.contains("disabled")));
+        assert_eq!(app.state.panels.len(), 1);
+        assert_eq!(log.lock().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(plugin_root);
+    }
+
+    #[tokio::test]
+    async fn command_panels_get_their_panel_id_in_the_environment() {
+        let (mut app, log) = test_app();
+
+        app.reconcile_panels(&[entry("logs", &["tail"])]);
+
+        let launches = log.lock().unwrap().clone();
+        assert_eq!(env_value(&launches[0], PANEL_ID_ENV_VAR), Some("logs"));
+        assert!(env_value(&launches[0], "HERDR_PLUGIN_ID").is_none());
+    }
+
+    #[tokio::test]
+    async fn switching_a_panel_from_command_to_plugin_respawns_it() {
+        let (mut app, log) = test_app();
+        let plugin_root = install_board_plugin(&mut app, "switch", true);
+        app.reconcile_panels(&[entry("prs", &["gh", "dash"])]);
+        log.lock().unwrap().clear();
+
+        app.reconcile_panels(&[plugin_entry("prs", "example.board", "board")]);
+
+        let launches = log.lock().unwrap().clone();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].argv, vec!["bun", "bin/board.ts"]);
+        let _ = std::fs::remove_dir_all(plugin_root);
     }
 
     fn api(app: &mut App, method: crate::api::schema::Method) -> serde_json::Value {

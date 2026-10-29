@@ -974,6 +974,53 @@ command = ["gh", "dash"]
     }
 
     #[test]
+    fn load_live_config_accepts_plugin_panels_and_rejects_mixed_entries() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[panels]]
+id = "board"
+plugin = "herdr-pr-board"
+entrypoint = "board"
+
+[[panels]]
+id = "both"
+command = ["gh"]
+plugin = "p"
+entrypoint = "e"
+
+[[panels]]
+id = "no-entry"
+plugin = "p"
+
+[[panels]]
+id = "no-plugin"
+entrypoint = "e"
+"#,
+        )
+        .unwrap();
+
+        let panels = loaded.config.valid_panels();
+        assert_eq!(panels.len(), 1);
+        assert_eq!(panels[0].id, "board");
+        assert_eq!(panels[0].plugin.as_deref(), Some("herdr-pr-board"));
+        assert_eq!(panels[0].entrypoint.as_deref(), Some("board"));
+        assert_eq!(loaded.diagnostics.len(), 3, "{:?}", loaded.diagnostics);
+        assert!(loaded
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("both") && d.contains("both command and plugin")));
+        assert!(loaded
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("no-entry") && d.contains("without entrypoint")));
+        assert!(loaded
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("no-plugin") && d.contains("without plugin")));
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
     fn load_live_config_reports_malformed_panels_as_invalid_section() {
         let loaded = load_live_config_from_str(
             r#"

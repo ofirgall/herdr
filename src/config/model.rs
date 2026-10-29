@@ -425,16 +425,23 @@ pub struct Config {
 pub struct PanelConfig {
     /// Unique panel id, referenced as `panel:<id>` by sidebar sections.
     pub id: String,
-    /// Program and arguments to run. Must not be empty.
+    /// Program and arguments to run. Required unless `plugin` is set.
     pub command: Vec<String>,
-    /// Working directory for the process. Default: the server's working directory.
+    /// Working directory for the process. Default: the server's working
+    /// directory, or the plugin's root for a plugin panel.
     pub cwd: Option<std::path::PathBuf>,
+    /// Run a plugin's pane instead of `command`: the installed plugin's id.
+    pub plugin: Option<String>,
+    /// The `[[panes]]` entry id in that plugin's manifest. Required with `plugin`.
+    pub entrypoint: Option<String>,
 }
 
 /// Split `[[panels]]` entries into the valid ones and warnings for the rest.
 ///
-/// An entry is rejected when its id is empty, its command is empty (or starts
-/// with an empty program), or its id is shared with another entry. All entries
+/// An entry is rejected when its id is empty, when it has neither a command
+/// (or one that starts with an empty program) nor a plugin, when it has both,
+/// when a plugin has no entrypoint or an entrypoint has no plugin, or when its
+/// id is shared with another entry. All entries
 /// that share an id are rejected, because there is no way to tell which one the
 /// user meant.
 pub(crate) fn validate_panels(panels: &[PanelConfig]) -> (Vec<PanelConfig>, Vec<String>) {
@@ -454,6 +461,36 @@ pub(crate) fn validate_panels(panels: &[PanelConfig]) -> (Vec<PanelConfig>, Vec<
                 ));
             }
             continue;
+        }
+        let plugin = panel.plugin.as_deref().filter(|id| !id.is_empty());
+        let entrypoint = panel.entrypoint.as_deref().filter(|id| !id.is_empty());
+        match (plugin, entrypoint) {
+            (Some(_), Some(_)) if !panel.command.is_empty() => {
+                diagnostics.push(format!(
+                    "panels \"{}\" sets both command and plugin; ignoring panel",
+                    panel.id
+                ));
+                continue;
+            }
+            (Some(_), Some(_)) => {
+                valid.push(panel.clone());
+                continue;
+            }
+            (Some(_), None) => {
+                diagnostics.push(format!(
+                    "panels \"{}\" sets plugin without entrypoint; ignoring panel",
+                    panel.id
+                ));
+                continue;
+            }
+            (None, Some(_)) => {
+                diagnostics.push(format!(
+                    "panels \"{}\" sets entrypoint without plugin; ignoring panel",
+                    panel.id
+                ));
+                continue;
+            }
+            (None, None) => {}
         }
         if panel
             .command

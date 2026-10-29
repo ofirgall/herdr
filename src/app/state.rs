@@ -22,12 +22,33 @@ pub(crate) struct PopupPaneState {
     pub height: Option<crate::popup_size::PopupSize>,
 }
 
-/// What a server-owned panel runs. Kept apart from [`PanelState`] so other
-/// panel sources (for example plugins) can later share the same runtime.
+/// What a server-owned panel runs, as configured. Kept apart from
+/// [`PanelState`] so a reload can compare it with the config entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PanelSpec {
+    /// The command, for a command panel. Empty for a plugin panel.
     pub argv: Vec<String>,
     pub cwd: Option<std::path::PathBuf>,
+    /// The plugin pane this panel runs, for a plugin panel. Resolved to a
+    /// command each time the panel starts, so a plugin update is picked up by
+    /// the next restart.
+    pub plugin: Option<PanelPluginRef>,
+}
+
+/// A plugin's `[[panes]]` entry, named by plugin id and entrypoint id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PanelPluginRef {
+    pub plugin_id: String,
+    pub entrypoint: String,
+}
+
+/// What one start of a panel process runs: the resolved command, working
+/// directory and extra environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PanelLaunch {
+    pub argv: Vec<String>,
+    pub cwd: std::path::PathBuf,
+    pub env: Vec<(String, String)>,
 }
 
 /// Where a panel was declared.
@@ -1246,8 +1267,8 @@ impl AppState {
                 panel.pane_id
             );
             assert!(
-                !panel.spec.argv.is_empty(),
-                "panel {} must have a command",
+                !panel.spec.argv.is_empty() || panel.spec.plugin.is_some(),
+                "panel {} must have a command or a plugin pane",
                 panel.id
             );
             if let Some(popup) = &self.popup_pane {
@@ -1495,6 +1516,7 @@ mod tests {
                 spec: PanelSpec {
                     argv: vec!["gh".into(), "dash".into()],
                     cwd: None,
+                    plugin: None,
                 },
                 status: PanelStatus::Running,
                 cols: 80,

@@ -255,27 +255,9 @@ impl App {
         crate::platform::set_default_plugin_pane_pwd(&mut env, cwd);
         let context_json = serde_json::to_string(&context)
             .map_err(|err| ("invalid_plugin_context".to_string(), err.to_string()))?;
-        super::env::ensure_plugin_user_dirs(plugin)
-            .map_err(|err| ("plugin_user_dir_create_failed".to_string(), err.to_string()))?;
         env.retain(|(key, _)| !plugin_pane_protected_env_key(key));
-        env.extend(super::env::plugin_path_env(plugin));
-        env.push((
-            crate::api::SOCKET_PATH_ENV_VAR.to_string(),
-            crate::api::socket_path().display().to_string(),
-        ));
-        env.push(("HERDR_ENV".to_string(), "1".to_string()));
-        env.push(("HERDR_PLUGIN_ID".to_string(), plugin.plugin_id.clone()));
-        env.push((
-            "HERDR_PLUGIN_ENTRYPOINT_ID".to_string(),
-            entrypoint.to_string(),
-        ));
+        env.extend(plugin_entrypoint_env(plugin, entrypoint)?);
         env.push(("HERDR_PLUGIN_CONTEXT_JSON".to_string(), context_json));
-        if let Ok(current_exe) = crate::platform::launch_executable() {
-            env.push((
-                "HERDR_BIN_PATH".to_string(),
-                current_exe.display().to_string(),
-            ));
-        }
         Ok(env)
     }
 
@@ -351,6 +333,36 @@ impl App {
         let pane_id = self.state.workspaces.get(ws_idx)?.focused_pane_id()?;
         self.public_pane_id(ws_idx, pane_id)
     }
+}
+
+/// The environment every process started from a plugin's `[[panes]]` entry
+/// gets: the plugin's paths, the server socket, and which entrypoint it is.
+/// Creates the plugin's config and state directories.
+pub(super) fn plugin_entrypoint_env(
+    plugin: &InstalledPluginInfo,
+    entrypoint: &str,
+) -> Result<Vec<(String, String)>, (String, String)> {
+    let mut env = Vec::new();
+    super::env::ensure_plugin_user_dirs(plugin)
+        .map_err(|err| ("plugin_user_dir_create_failed".to_string(), err.to_string()))?;
+    env.extend(super::env::plugin_path_env(plugin));
+    env.push((
+        crate::api::SOCKET_PATH_ENV_VAR.to_string(),
+        crate::api::socket_path().display().to_string(),
+    ));
+    env.push(("HERDR_ENV".to_string(), "1".to_string()));
+    env.push(("HERDR_PLUGIN_ID".to_string(), plugin.plugin_id.clone()));
+    env.push((
+        "HERDR_PLUGIN_ENTRYPOINT_ID".to_string(),
+        entrypoint.to_string(),
+    ));
+    if let Ok(current_exe) = crate::platform::launch_executable() {
+        env.push((
+            "HERDR_BIN_PATH".to_string(),
+            current_exe.display().to_string(),
+        ));
+    }
+    Ok(env)
 }
 
 fn plugin_pane_protected_env_key(key: &str) -> bool {
