@@ -3,6 +3,7 @@
 pub mod endpoint;
 pub(crate) mod pane_extended_mouse;
 pub(crate) mod render_ansi;
+pub(crate) mod shell_window_size;
 pub(crate) mod surface_delta;
 pub(crate) mod surface_reuse;
 pub(crate) mod surface_scroll;

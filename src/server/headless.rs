@@ -2261,6 +2261,39 @@ impl HeadlessServer {
                 self.resize_shell_tab_if_controller(client_id, true);
                 true
             }
+            ServerEvent::ClientShellWindowSize {
+                client_id,
+                cols,
+                rows,
+            } => {
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    return false;
+                };
+                if !matches!(client.mode, ClientConnectionMode::ClientShell)
+                    || client.shell_window_size == Some((cols, rows))
+                {
+                    return false;
+                }
+                client.shell_window_size = Some((cols, rows));
+                if !client.shell_surface_active {
+                    return false;
+                }
+                client.request_repaint();
+                let popup_area = client.popup_area();
+                let cell_size = if client.cell_size.is_known() {
+                    client.cell_size
+                } else {
+                    crate::kitty_graphics::HostCellSize::default()
+                };
+                if self.popup_owner_tab_id.is_some()
+                    && self.popup_owner_tab_id == self.shell_tab_id_for_client(client_id)
+                {
+                    let _ = crate::server::client_shell::resize_popup_runtime(
+                        &self.app, popup_area, cell_size,
+                    );
+                }
+                true
+            }
             ServerEvent::ClientShellHostTheme { client_id, update } => {
                 let Some(client) = self.clients.get_mut(&client_id) else {
                     return false;
@@ -3105,11 +3138,12 @@ impl HeadlessServer {
             );
             return changed | (deferred_changed && !read_only);
         }
-        if self.foreground_client_id.is_some_and(|client_id| {
-            self.clients
-                .get(&client_id)
-                .is_some_and(|client| matches!(client.mode, ClientConnectionMode::ClientShell))
-        }) {
+        let foreground_shell = self
+            .foreground_client_id
+            .and_then(|client_id| self.clients.get(&client_id))
+            .filter(|client| matches!(client.mode, ClientConnectionMode::ClientShell));
+        self.app.state.popup_area = foreground_shell.map(|client| client.popup_area());
+        if foreground_shell.is_some() {
             self.app.state.view.terminal_area =
                 Rect::new(0, 0, self.effective_size.0, self.effective_size.1);
         }

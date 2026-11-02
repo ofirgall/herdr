@@ -137,10 +137,12 @@ impl App {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
         let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
-        let terminal_area = if self.state.view.terminal_area.width >= 4
-            && self.state.view.terminal_area.height >= 4
-        {
-            self.state.view.terminal_area
+        let popup_area = self
+            .state
+            .popup_area
+            .unwrap_or(self.state.view.terminal_area);
+        let terminal_area = if popup_area.width >= 4 && popup_area.height >= 4 {
+            popup_area
         } else {
             let (cols, rows) = self.state.headless_size;
             ratatui::layout::Rect::new(0, 0, cols, rows)

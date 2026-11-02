@@ -562,9 +562,20 @@ impl ClientShellState {
         if let Some(popup) = surface.popup.as_deref() {
             let width = popup.width.map(client_popup_size);
             let height = popup.height.map(client_popup_size);
-            if let Some(geometry) =
+            // Servers that size the popup against the reported host window send a frame
+            // matching window geometry; older servers size it against the pane surface.
+            let window_geometry = crate::popup_size::resolve_popup_geometry(
+                width,
+                height,
+                Rect::new(0, 0, cols, rows),
+            )
+            .filter(|geometry| {
+                geometry.inner.width == popup.frame.width
+                    && geometry.inner.height == popup.frame.height
+            });
+            if let Some(geometry) = window_geometry.or_else(|| {
                 crate::popup_size::resolve_popup_geometry(width, height, layout.pane_surface)
-            {
+            }) {
                 occlusion.start_popup(geometry.outer);
                 let mut composed = frame.to_ratatui_buffer()?;
                 let block = ratatui::widgets::Block::default()

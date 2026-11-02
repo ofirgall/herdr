@@ -87,6 +87,7 @@ pub(crate) struct EndpointRegistry {
     connections: HashMap<ClientEndpointId, EndpointConnection>,
     failures: Vec<EndpointTransportFailure>,
     last_health_tick: Instant,
+    window_size: Option<crate::protocol::shell_window_size::ShellWindowSize>,
 }
 
 impl EndpointRegistry {
@@ -97,6 +98,40 @@ impl EndpointRegistry {
             connections: HashMap::new(),
             failures: Vec::new(),
             last_health_tick: Instant::now(),
+            window_size: None,
+        }
+    }
+
+    /// Record the host window size and report changes to every endpoint that sizes its
+    /// popup against it. Newly inserted endpoints receive the last recorded size.
+    pub(crate) fn set_window_size(&mut self, cols: u16, rows: u16) {
+        let size = crate::protocol::shell_window_size::ShellWindowSize { cols, rows };
+        if self.window_size == Some(size) {
+            return;
+        }
+        self.window_size = Some(size);
+        let endpoint_ids = self.connections.keys().cloned().collect::<Vec<_>>();
+        for endpoint_id in endpoint_ids {
+            self.send_window_size(&endpoint_id);
+        }
+    }
+
+    fn send_window_size(&mut self, endpoint_id: &ClientEndpointId) {
+        let Some(size) = self.window_size else {
+            return;
+        };
+        if !self.connections.get(endpoint_id).is_some_and(|connection| {
+            connection
+                .negotiation
+                .supports_capability(crate::protocol::shell_window_size::CAPABILITY)
+        }) {
+            return;
+        }
+        match crate::protocol::shell_window_size::message(size) {
+            Ok(message) => {
+                let _ = self.send_to(endpoint_id, &message);
+            }
+            Err(error) => tracing::warn!(%error, "failed to encode shell window size"),
         }
     }
 
@@ -157,7 +192,7 @@ impl EndpointRegistry {
         let health = (!endpoint_id.is_local() && negotiation.supports_health_check())
             .then(|| EndpointHealth::new(Instant::now()));
         if let Some(mut previous) = self.connections.insert(
-            endpoint_id,
+            endpoint_id.clone(),
             EndpointConnection {
                 transport: Box::new(transport),
                 generation,
@@ -168,6 +203,7 @@ impl EndpointRegistry {
         ) {
             previous.transport.disconnect();
         }
+        self.send_window_size(&endpoint_id);
     }
 
     pub(crate) fn accepts(&self, endpoint_id: &ClientEndpointId, generation: u64) -> bool {
@@ -512,6 +548,70 @@ mod tests {
         assert!(registry.connection(&ClientEndpointId::Local).is_some());
         assert!(sent.lock().unwrap().is_empty());
         assert!(registry.take_failures().is_empty());
+    }
+
+    #[test]
+    fn window_size_reaches_only_endpoints_advertising_the_capability() {
+        let window_sizes = |sent: &Arc<Mutex<Vec<ClientMessage>>>| {
+            sent.lock()
+                .unwrap()
+                .iter()
+                .filter_map(|message| match message {
+                    ClientMessage::EndpointControl { kind, data }
+                        if kind == crate::protocol::shell_window_size::MESSAGE_KIND =>
+                    {
+                        crate::protocol::shell_window_size::decode(data).ok()
+                    }
+                    _ => None,
+                })
+                .map(|size| (size.cols, size.rows))
+                .collect::<Vec<_>>()
+        };
+        let supported = || {
+            EndpointNegotiation::new(
+                Vec::new(),
+                vec![crate::protocol::shell_window_size::CAPABILITY.into()],
+            )
+        };
+        let local_sent = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = EndpointRegistry::new(
+            FakeTransport {
+                sent: local_sent.clone(),
+                error: None,
+            },
+            1,
+            supported(),
+        );
+        let legacy_sent = Arc::new(Mutex::new(Vec::new()));
+        registry.insert(
+            ClientEndpointId::Ssh(profile()),
+            FakeTransport {
+                sent: legacy_sent.clone(),
+                error: None,
+            },
+            2,
+            negotiation(),
+            false,
+        );
+
+        registry.set_window_size(120, 40);
+        registry.set_window_size(120, 40);
+        registry.set_window_size(90, 30);
+        assert_eq!(window_sizes(&local_sent), vec![(120, 40), (90, 30)]);
+        assert!(legacy_sent.lock().unwrap().is_empty());
+
+        let reconnected_sent = Arc::new(Mutex::new(Vec::new()));
+        registry.insert(
+            ClientEndpointId::Local,
+            FakeTransport {
+                sent: reconnected_sent.clone(),
+                error: None,
+            },
+            3,
+            supported(),
+            false,
+        );
+        assert_eq!(window_sizes(&reconnected_sent), vec![(90, 30)]);
     }
 
     #[test]

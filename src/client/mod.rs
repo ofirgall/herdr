@@ -642,6 +642,9 @@ async fn run_client_loop(
     } else {
         endpoint::EndpointRegistry::empty()
     };
+    if state.shell.is_some() {
+        write_stream.set_window_size(cols, rows);
+    }
     let mut supervisors =
         endpoint::EndpointSupervisors::new(&endpoint_catalog.ssh, std::time::Instant::now());
     if federated {
@@ -1322,6 +1325,9 @@ async fn run_client_loop(
                 if let Some(shell) = state.shell.as_mut() {
                     shell.set_graphics_cell_size(cell_width_px, cell_height_px);
                     shell.invalidate_pane_surface();
+                }
+                if state.shell.is_some() {
+                    write_stream.set_window_size(new_cols, new_rows);
                 }
                 let msg = if let Some(shell) = &state.shell {
                     client_shell_resize_message(

@@ -3135,6 +3135,75 @@ async fn client_shell_streams_and_targets_popup_terminal_content() {
 }
 
 #[tokio::test]
+async fn client_shell_popup_is_sized_against_the_reported_window() {
+    let mut server = test_headless_server();
+    let _pane_input = install_focused_test_runtime(&mut server, b"base-pane");
+    let popup_runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 12, b"");
+    let (_, popup_terminal_id) = server.app.install_test_popup_runtime(popup_runtime);
+
+    let (writer, control_rx, render_rx) = test_client_writer();
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
+            surface_scroll: false,
+            surface_underline_color: false,
+            client_id: 12,
+            surface_cols: 80,
+            surface_rows: 23,
+            cell_width_px: 10,
+            cell_height_px: 20,
+            pixel_mouse: false,
+            direct_graphics: false,
+            endpoint_keybindings: false,
+            mouse_capture: false,
+            surface_active: true,
+            writer,
+        })
+    );
+    let _snapshot = client_shell_snapshot(&control_rx);
+    let popup_size = |server: &HeadlessServer| {
+        server
+            .app
+            .terminal_runtimes
+            .get(&popup_terminal_id)
+            .expect("popup runtime")
+            .current_size()
+    };
+
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellWindowSize {
+            client_id: 12,
+            cols: 106,
+            rows: 24,
+        })
+    );
+    assert_eq!(popup_size(&server), (10, 50));
+    assert!(
+        !server.handle_server_event(ServerEvent::ClientShellWindowSize {
+            client_id: 12,
+            cols: 106,
+            rows: 24,
+        })
+    );
+
+    assert!(server.handle_server_event(ServerEvent::ClientShellResize {
+        client_id: 12,
+        surface_cols: 100,
+        surface_rows: 23,
+        cell_width_px: 10,
+        cell_height_px: 20,
+        pixel_mouse: false,
+    }));
+    assert_eq!(popup_size(&server), (10, 50));
+
+    server.render_and_stream();
+    let surface = recv_pane_surface(&render_rx, "window-sized popup");
+    let popup = surface.popup.as_deref().expect("popup terminal surface");
+    assert_eq!((popup.frame.width, popup.frame.height), (50, 10));
+}
+
+#[tokio::test]
 async fn terminal_popup_is_visible_and_modal_only_on_its_owning_tab() {
     let mut server = test_headless_server();
     let mut workspace = crate::workspace::Workspace::test_new("tab-popup");

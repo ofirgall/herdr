@@ -500,6 +500,12 @@ pub(crate) enum ServerEvent {
         cell_height_px: u32,
         pixel_mouse: bool,
     },
+    /// A client-owned shell reported its full host window size.
+    ClientShellWindowSize {
+        client_id: u64,
+        cols: u16,
+        rows: u16,
+    },
     /// A client-owned shell delivered semantic input to one stable pane target.
     ClientShellPaneInput {
         client_id: u64,
@@ -1364,6 +1370,26 @@ fn client_read_loop_with_endpoint_controls(
                         debug!(client_id, %error, "ignoring pane extended mouse");
                         continue;
                     }
+                }
+            }
+            ClientMessage::EndpointControl { kind, data }
+                if kind == crate::protocol::shell_window_size::MESSAGE_KIND =>
+            {
+                let size = match crate::protocol::shell_window_size::decode(&data) {
+                    Ok(size) => size,
+                    Err(error) => {
+                        debug!(client_id, %error, "ignoring shell window size");
+                        continue;
+                    }
+                };
+                if let Some(reason) = client_shell_geometry_error(size.into(), 0, 0) {
+                    debug!(client_id, %reason, "ignoring shell window size");
+                    continue;
+                }
+                ServerEvent::ClientShellWindowSize {
+                    client_id,
+                    cols: size.cols,
+                    rows: size.rows,
                 }
             }
             ClientMessage::EndpointControl { kind, data } => {
@@ -2444,6 +2470,43 @@ mod tests {
                 cell_width_px: 8,
                 cell_height_px: 16,
                 pixel_mouse: true,
+            }
+        ));
+
+        protocol::write_message(&mut client_stream, &ClientMessage::Detach).expect("write detach");
+        assert!(matches!(
+            recv_server_event(&mut server_event_rx, "detach event"),
+            ServerEvent::ClientDetach { client_id: 7 }
+        ));
+        handle
+            .join()
+            .expect("read thread join")
+            .expect("read thread result");
+    }
+
+    #[test]
+    fn client_read_loop_forwards_valid_shell_window_sizes_only() {
+        let (mut client_stream, server_stream, _path) = local_stream_pair("client-read-window");
+        let (server_event_tx, mut server_event_rx) = mpsc::channel(4);
+        let should_quit = Arc::new(AtomicBool::new(false));
+        let read_quit = should_quit.clone();
+        let handle = std::thread::spawn(move || {
+            client_read_loop(server_stream, 7, &server_event_tx, &read_quit)
+        });
+
+        for (cols, rows) in [(0, 20), (5000, 20), (120, 40)] {
+            let message = crate::protocol::shell_window_size::message(
+                crate::protocol::shell_window_size::ShellWindowSize { cols, rows },
+            )
+            .expect("encode window size");
+            protocol::write_message(&mut client_stream, &message).expect("write window size");
+        }
+        assert!(matches!(
+            recv_server_event(&mut server_event_rx, "shell window size"),
+            ServerEvent::ClientShellWindowSize {
+                client_id: 7,
+                cols: 120,
+                rows: 40,
             }
         ));
 

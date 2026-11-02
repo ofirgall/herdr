@@ -571,6 +571,7 @@ impl HeadlessServer {
             return false;
         };
         let (cols, rows) = client.terminal_size;
+        let popup_area = client.popup_area();
         let cell_size = if client.cell_size.is_known() {
             client.cell_size
         } else {
@@ -605,7 +606,7 @@ impl HeadlessServer {
             .as_deref()
             .is_some_and(|owner| self.tab_id_for_target(target).as_deref() == Some(owner))
         {
-            let _ = resize_popup_runtime(&self.app, Rect::new(0, 0, cols, rows), cell_size);
+            let _ = resize_popup_runtime(&self.app, popup_area, cell_size);
         }
         true
     }

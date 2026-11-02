@@ -135,6 +135,8 @@ pub(crate) struct ClientConnection {
     pub(crate) mode: ClientConnectionMode,
     /// The client's terminal size after clamping.
     pub(crate) terminal_size: (u16, u16),
+    /// Full host window size reported by a client-owned shell, which sizes the session popup.
+    pub(crate) shell_window_size: Option<(u16, u16)>,
     /// Pixel size of one client terminal cell.
     pub(crate) cell_size: crate::kitty_graphics::HostCellSize,
     /// Monotonic activity stamp used to choose the fallback foreground client.
@@ -226,6 +228,7 @@ impl ClientConnection {
         Self {
             mode,
             terminal_size,
+            shell_window_size: None,
             cell_size,
             last_activity,
             render_state: ClientRenderState::new(render_encoding),
@@ -261,6 +264,13 @@ impl ClientConnection {
 
     pub(crate) fn request_repaint(&mut self) {
         self.render_state.request_repaint();
+    }
+
+    /// Area that sizes the session popup: the full host window when reported, else the
+    /// pane surface.
+    pub(crate) fn popup_area(&self) -> ratatui::layout::Rect {
+        let (cols, rows) = self.shell_window_size.unwrap_or(self.terminal_size);
+        ratatui::layout::Rect::new(0, 0, cols, rows)
     }
 
     pub(crate) fn request_recompute(&mut self) {

@@ -288,11 +288,12 @@ pub(super) fn render_pane_surface(
     target: Option<crate::ui::TabSurfaceTarget>,
     area: Rect,
     resize_panes: bool,
-    show_popup: bool,
+    popup_area: Option<Rect>,
     cell_size: crate::kitty_graphics::HostCellSize,
     graphics_delivery: &crate::kitty_graphics::surface::DeliveryCache,
     client_id: u64,
 ) -> Result<RenderedPaneSurface, SurfaceRenderDeferred> {
+    let show_popup = popup_area.is_some();
     let layout = crate::ui::compute_tab_surface_for(
         &app.state,
         &app.terminal_runtimes,
@@ -436,9 +437,8 @@ pub(super) fn render_pane_surface(
             })
         })
         .collect();
-    let popup = show_popup
-        .then(|| render_popup_surface(app, area, resize_panes, cell_size))
-        .flatten();
+    let popup = popup_area
+        .and_then(|popup_area| render_popup_surface(app, popup_area, resize_panes, cell_size));
     let (graphics, next_graphics_delivery, graphics_sources) =
         crate::server::client_shell_graphics::collect(
             app,

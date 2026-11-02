@@ -573,6 +573,11 @@ impl HeadlessServer {
             let shell_target = self.shell_target_for_client(client_id);
             let shell_tab_id = self.shell_tab_id_for_client(client_id);
             let shell_shows_popup = shell_tab_id.as_deref() == self.popup_owner_tab_id.as_deref();
+            let shell_popup_area = shell_shows_popup.then(|| {
+                self.clients
+                    .get(&client_id)
+                    .map_or(area, |client| client.popup_area())
+            });
             let shell_graphics_delivery = self
                 .clients
                 .get(&client_id)
@@ -595,7 +600,7 @@ impl HeadlessServer {
                     shell_target,
                     area,
                     false,
-                    shell_shows_popup,
+                    shell_popup_area,
                     render_cell_size,
                     &shell_graphics_delivery,
                     client_id,

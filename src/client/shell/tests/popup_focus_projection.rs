@@ -206,6 +206,62 @@ fn client_composes_popup_terminal_content_inside_client_owned_chrome() {
     );
 }
 
+fn surface_with_percent_popup(area: Rect) -> PaneSurfaceFrame {
+    let mut surface = surface_with_popup();
+    let geometry = crate::popup_size::resolve_popup_geometry(
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        area,
+    )
+    .expect("popup geometry");
+    let popup = surface.popup.as_mut().expect("popup surface");
+    popup.width = Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    popup.height = Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    popup.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::empty(Rect::new(0, 0, geometry.inner.width, geometry.inner.height)),
+        None,
+        &[],
+    );
+    surface
+}
+
+#[test]
+fn window_sized_popup_keeps_its_place_when_the_sidebar_collapses() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface_with_percent_popup(Rect::new(0, 0, 106, 20)));
+
+    state.compose(106, 20).expect("expanded sidebar frame");
+    let expanded = state.hits.popup.as_ref().expect("popup hit").rect;
+    state.sidebar_collapsed = true;
+    state.compose(106, 20).expect("collapsed sidebar frame");
+    let collapsed = state.hits.popup.as_ref().expect("popup hit").rect;
+
+    assert_eq!(expanded, Rect::new(26, 5, 53, 10));
+    assert_eq!(collapsed, expanded);
+}
+
+#[test]
+fn pane_sized_popup_from_older_servers_stays_inside_the_pane_surface() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let pane_surface = state.layout(106, 20).pane_surface;
+    assert!(pane_surface.x > 0, "sidebar should offset the pane surface");
+    state.set_pane_surface(surface_with_percent_popup(pane_surface));
+
+    state.compose(106, 20).expect("popup frame");
+    let expected = crate::popup_size::resolve_popup_geometry(
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        pane_surface,
+    )
+    .expect("pane geometry");
+    assert_eq!(
+        state.hits.popup.as_ref().expect("popup hit").rect,
+        expected.outer
+    );
+}
+
 #[test]
 fn popup_owns_keys_text_paste_and_mouse_before_shell_controls() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
