@@ -21,6 +21,43 @@ fn retain_detached_process_after_wait(
     }
 }
 
+/// Retired terminals finish process teardown away from the event loop. Keep
+/// completion receivers so server exit still waits for every cleanup worker.
+#[derive(Default)]
+pub(super) struct TerminalShutdowns {
+    pending: Vec<std::sync::mpsc::Receiver<()>>,
+}
+
+impl TerminalShutdowns {
+    fn spawn(&mut self, shutdown: impl FnOnce() + Send + 'static) {
+        self.pending
+            .retain(|done| matches!(done.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        let spawned = crate::thread_spawn::spawn_named_with(
+            "herdr-terminal-shutdown",
+            (shutdown, done),
+            |(shutdown, _done)| shutdown(),
+        );
+        match spawned {
+            Ok(()) => self.pending.push(finished),
+            Err(((shutdown, _done), err)) => {
+                tracing::warn!(err = %err, "failed to start terminal cleanup worker; cleaning up inline");
+                shutdown();
+            }
+        }
+    }
+}
+
+impl Drop for TerminalShutdowns {
+    fn drop(&mut self) {
+        for done in self.pending.drain(..) {
+            // Disconnect means the worker has finished (or unwound). Its sender
+            // stays alive until shutdown has dropped the terminal runtime.
+            let _ = done.recv();
+        }
+    }
+}
+
 impl App {
     pub(crate) fn reap_finished_detached_processes(&mut self) {
         self.detached_process_children
@@ -29,7 +66,7 @@ impl App {
 
     pub(crate) fn shutdown_terminal_runtime(&mut self, terminal_id: crate::terminal::TerminalId) {
         if let Some(runtime) = self.terminal_runtimes.remove(&terminal_id) {
-            runtime.shutdown();
+            self.terminal_shutdowns.spawn(move || runtime.shutdown());
         }
     }
 
@@ -215,6 +252,73 @@ impl App {
 mod tests {
     use super::*;
     use crate::workspace::Workspace;
+
+    #[test]
+    fn terminal_shutdown_runs_off_thread_and_owner_waits_for_cleanup() {
+        let caller = std::thread::current().id();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let mut shutdowns = TerminalShutdowns::default();
+        shutdowns.spawn(move || {
+            started_tx.send(std::thread::current().id()).unwrap();
+            release_rx.recv().unwrap();
+            finished_tx.send(()).unwrap();
+        });
+        assert_ne!(
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            caller
+        );
+        assert!(finished_rx.try_recv().is_err());
+        assert_eq!(shutdowns.pending.len(), 1);
+
+        // Releasing cleanup from another thread lets owner destruction join it;
+        // there is no performance threshold in this synchronization test.
+        let release = std::thread::spawn(move || release_tx.send(()).unwrap());
+        drop(shutdowns);
+        finished_rx.try_recv().expect("owner waited for cleanup");
+        release.join().unwrap();
+    }
+
+    #[test]
+    fn terminal_shutdown_falls_back_inline_when_worker_cannot_start() {
+        let caller = std::thread::current().id();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let mut shutdowns = TerminalShutdowns::default();
+        crate::thread_spawn::test_hook::fail_next_spawns(1);
+        shutdowns.spawn(move || done_tx.send(std::thread::current().id()).unwrap());
+        assert_eq!(done_rx.try_recv().unwrap(), caller);
+        assert!(shutdowns.pending.is_empty());
+    }
+
+    #[test]
+    fn terminal_shutdown_reaps_finished_workers() {
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let mut shutdowns = TerminalShutdowns::default();
+        shutdowns.spawn(move || drop(done_tx));
+        done_rx.recv_timeout(Duration::from_secs(5)).unwrap_err();
+        // The worker's completion sender is released just after the closure's
+        // captures, so use the same completion channel as owner destruction.
+        shutdowns.pending[0]
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_err();
+        shutdowns.spawn(|| {});
+        assert_eq!(shutdowns.pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn terminal_shutdown_removes_runtime_and_closes_input() {
+        let (mut app, _) = test_app_with_pane();
+        let terminal_id = crate::terminal::TerminalId::alloc();
+        let (runtime, mut input) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        app.shutdown_terminal_runtime(terminal_id.clone());
+        assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+        assert!(tokio::time::timeout(Duration::from_secs(5), input.recv())
+            .await
+            .expect("cleanup closes terminal input")
+            .is_none());
+    }
 
     #[test]
     fn hidden_render_attempt_keeps_presentation_cadence_available() {
