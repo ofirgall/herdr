@@ -5,7 +5,7 @@ impl ClientContextMenuOverlay {
         use ClientContextMenuAction as Action;
 
         let item = |label, action| ClientContextMenuItem { label, action };
-        match &self.target {
+        let mut items = match &self.target {
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
             }
@@ -79,7 +79,22 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+        };
+        if let ClientContextMenuTarget::Workspace {
+            agents_expanded: Some(expanded),
+            ..
+        } = &self.target
+        {
+            items.push(item(
+                if *expanded {
+                    "Hide agents"
+                } else {
+                    "Show agents"
+                },
+                Action::ToggleAgents,
+            ));
         }
+        items
     }
 }
 
@@ -108,6 +123,10 @@ impl ClientShellState {
         let collapsed = worktree.is_some_and(|worktree| {
             self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
         });
+        let agents_expanded = (self.config.spaces.agents != crate::config::SpaceAgentsMode::Off
+            && self.endpoints.len() == 1
+            && self.workspace_has_agents(&workspace_id))
+        .then(|| self.space_agents_expanded(&self.active_endpoint_id, &workspace_id));
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
                 workspace_id,
@@ -116,6 +135,7 @@ impl ClientShellState {
                 has_worktree_children,
                 close_group,
                 collapsed,
+                agents_expanded,
             },
             x,
             y,
@@ -274,6 +294,11 @@ impl ClientShellState {
                     self.toggle_collapsed_group(&endpoint_id, key);
                     self.persist_chrome_preferences(outcome);
                 }
+            }
+            ClientContextMenuAction::ToggleAgents => {
+                let endpoint_id = self.active_endpoint_id.clone();
+                self.toggle_space_agents(&endpoint_id, &workspace_id);
+                self.persist_chrome_preferences(outcome);
             }
             _ => {}
         }

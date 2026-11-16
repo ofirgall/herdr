@@ -1,5 +1,12 @@
+mod metadata;
 mod rules;
 
+pub use metadata::RawSpaceMetadataEntry;
+#[cfg(test)]
+pub(crate) use metadata::MAX_METADATA_TOKEN_KEY_LEN;
+pub(crate) use metadata::{
+    is_valid_metadata_token_key, normalize_metadata_token_value, SpaceMetadata,
+};
 pub use rules::SidebarTokenRule;
 
 use std::collections::BTreeMap;
@@ -425,6 +432,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentsSidebarConfig {
+    /// Whether the agents section is shown in the sidebar.
+    pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: AgentSidebarRows,
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
@@ -443,6 +452,7 @@ impl AgentsSidebarConfig {
 impl Default for AgentsSidebarConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             rows: vec![
                 vec![
                     AgentSidebarToken::StateIcon,
@@ -461,20 +471,79 @@ impl Default for AgentsSidebarConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SpacesSidebarConfig {
+    /// Whether the spaces section is shown in the sidebar.
+    pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
     pub row_gap: u16,
+    /// Whether space rows render their aggregate agent status (`state_icon`
+    /// and `state_text`). Agent children keep their own status either way.
+    pub show_status: bool,
+    /// Default visibility of each space's agents as child entries.
+    pub agents: SpaceAgentsMode,
+    /// Row layout of an agent child entry; reuses the agent token vocabulary.
+    #[serde(deserialize_with = "deserialize_sidebar_rows")]
+    pub agent_rows: AgentSidebarRows,
+    /// Static per-space tokens matched by label glob or path prefix.
+    pub metadata: Vec<RawSpaceMetadataEntry>,
+    /// Validated form of `metadata`, filled by [`Self::compile_metadata`].
+    #[serde(skip)]
+    pub(crate) compiled_metadata: SpaceMetadata,
+}
+
+/// Whether spaces show their agents as indented children by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpaceAgentsMode {
+    /// No children and no per-space toggle.
+    #[default]
+    Off,
+    /// Children are hidden until a space is expanded.
+    Collapsed,
+    /// Children are shown until a space is collapsed.
+    Expanded,
+}
+
+impl SpaceAgentsMode {
+    /// Effective visibility of one space's children given a user override.
+    pub(crate) fn expanded(self, override_expanded: Option<bool>) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Collapsed => override_expanded.unwrap_or(false),
+            Self::Expanded => override_expanded.unwrap_or(true),
+        }
+    }
 }
 
 impl Default for SpacesSidebarConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             rows: vec![
                 vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            show_status: true,
+            agents: SpaceAgentsMode::Off,
+            agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],
+            metadata: Vec::new(),
+            compiled_metadata: SpaceMetadata::default(),
         }
+    }
+}
+
+impl SpacesSidebarConfig {
+    /// Diagnostics for ignored or truncated metadata entries.
+    pub(crate) fn metadata_diagnostics(&self) -> Vec<String> {
+        metadata::compile(&self.metadata).1
+    }
+
+    /// Validates `metadata` into `compiled_metadata`, returning diagnostics.
+    pub(crate) fn compile_metadata(&mut self) -> Vec<String> {
+        let (compiled, diagnostics) = metadata::compile(&self.metadata);
+        self.compiled_metadata = compiled;
+        diagnostics
     }
 }
 
@@ -485,9 +554,158 @@ pub struct SidebarConfig {
     pub spaces: SpacesSidebarConfig,
 }
 
+impl SidebarConfig {
+    /// True when the config disables every sidebar section.
+    pub fn all_sections_disabled(&self) -> bool {
+        !self.spaces.enabled && !self.agents.enabled
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documented_metadata_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.spaces]
+rows = [["workspace", "$env"], ["$owner"]]
+
+[[ui.sidebar.spaces.metadata]]
+match = { label = "api-*" }
+tokens = { env = "staging", owner = "platform" }
+
+[[ui.sidebar.spaces.metadata]]
+match = { path = "~/work/herdr" }
+tokens = { env = "dev" }
+"#,
+        )
+        .unwrap();
+        let spaces = &config.ui.sidebar.spaces;
+        assert_eq!(spaces.metadata.len(), 2);
+        assert_eq!(spaces.metadata[0].matcher.label.as_deref(), Some("api-*"));
+        assert_eq!(spaces.metadata[1].tokens["env"], "dev");
+        assert!(spaces.metadata_diagnostics().is_empty());
+        assert!(config.collect_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn documented_sections_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            "[ui.sidebar.spaces]\nenabled = true\n\n[ui.sidebar.agents]\nenabled = false\n",
+        )
+        .unwrap();
+        assert!(config.ui.sidebar.spaces.enabled);
+        assert!(!config.ui.sidebar.agents.enabled);
+        assert!(!config.ui.sidebar.all_sections_disabled());
+    }
+
+    #[test]
+    fn sections_are_enabled_by_default_and_parse_enabled_false() {
+        let config = SidebarConfig::default();
+        assert!(config.spaces.enabled && config.agents.enabled);
+        assert!(!config.all_sections_disabled());
+
+        let agents: AgentsSidebarConfig = toml::from_str("enabled = false").unwrap();
+        assert!(!agents.enabled);
+        assert_eq!(agents.rows, AgentsSidebarConfig::default().rows);
+        let spaces: SpacesSidebarConfig = toml::from_str("enabled = false\nrow_gap = 1").unwrap();
+        assert!(!spaces.enabled);
+        assert_eq!(spaces.row_gap, 1);
+
+        let both: SidebarConfig =
+            toml::from_str("[agents]\nenabled = false\n[spaces]\nenabled = false").unwrap();
+        assert!(both.all_sections_disabled());
+        let round: SidebarConfig = toml::from_str(&toml::to_string(&both).unwrap()).unwrap();
+        assert_eq!(round, both);
+    }
+
+    #[test]
+    fn space_agents_default_to_off_with_state_icon_and_tab_rows() {
+        let spaces = SpacesSidebarConfig::default();
+        assert_eq!(spaces.agents, SpaceAgentsMode::Off);
+        assert_eq!(
+            spaces.agent_rows,
+            vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]]
+        );
+        let parsed: SpacesSidebarConfig = toml::from_str("row_gap = 1").unwrap();
+        assert_eq!(parsed.agents, SpaceAgentsMode::Off);
+        assert_eq!(parsed.agent_rows, spaces.agent_rows);
+    }
+
+    #[test]
+    fn space_agents_parse_modes_and_custom_rows() {
+        for (value, mode) in [
+            ("off", SpaceAgentsMode::Off),
+            ("collapsed", SpaceAgentsMode::Collapsed),
+            ("expanded", SpaceAgentsMode::Expanded),
+        ] {
+            let spaces: SpacesSidebarConfig =
+                toml::from_str(&format!("agents = \"{value}\"")).unwrap();
+            assert_eq!(spaces.agents, mode);
+        }
+        let spaces: SpacesSidebarConfig = toml::from_str(
+            "agents = \"expanded\"\nagent_rows = [[\"state_icon\", \"tab\", \"agent\"], [\"$task\"]]",
+        )
+        .unwrap();
+        assert_eq!(spaces.agent_rows.len(), 2);
+        assert_eq!(
+            spaces.agent_rows[1],
+            vec![AgentSidebarToken::Custom("task".into())]
+        );
+        let round: SpacesSidebarConfig =
+            toml::from_str(&toml::to_string(&spaces).unwrap()).unwrap();
+        assert_eq!(round, spaces);
+    }
+
+    #[test]
+    fn space_agents_reject_unknown_modes_and_oversized_rows() {
+        for value in ["\"always\"", "true", "\"Expanded\""] {
+            assert!(
+                toml::from_str::<SpacesSidebarConfig>(&format!("agents = {value}")).is_err(),
+                "accepted {value}"
+            );
+        }
+        let too_many_rows = std::iter::repeat_n("[\"tab\"]", MAX_SIDEBAR_ROWS + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            toml::from_str::<SpacesSidebarConfig>(&format!("agent_rows = [{too_many_rows}]"))
+                .is_err()
+        );
+        let too_many_tokens = std::iter::repeat_n("\"tab\"", MAX_SIDEBAR_TOKENS_PER_ROW + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(toml::from_str::<SpacesSidebarConfig>(&format!(
+            "agent_rows = [[{too_many_tokens}]]"
+        ))
+        .is_err());
+        assert!(toml::from_str::<SpacesSidebarConfig>("agent_rows = [[\"bogus\"]]").is_err());
+    }
+
+    #[test]
+    fn documented_space_agents_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            "[ui.sidebar.spaces]\nagents = \"expanded\"\nagent_rows = [\n  [\"state_icon\", \"tab\"],\n]\n",
+        )
+        .unwrap();
+        assert_eq!(config.ui.sidebar.spaces.agents, SpaceAgentsMode::Expanded);
+        assert_eq!(
+            config.ui.sidebar.spaces.agent_rows,
+            SpacesSidebarConfig::default().agent_rows
+        );
+    }
+
+    #[test]
+    fn space_agents_mode_resolves_effective_expansion() {
+        use SpaceAgentsMode::*;
+        assert!(!Off.expanded(Some(true)));
+        assert!(!Collapsed.expanded(None));
+        assert!(Collapsed.expanded(Some(true)));
+        assert!(Expanded.expanded(None));
+        assert!(!Expanded.expanded(Some(false)));
+    }
 
     #[test]
     fn defaults_match_the_compact_agent_and_existing_space_layouts() {

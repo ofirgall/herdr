@@ -55,6 +55,7 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    top_rule: bool,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -62,6 +63,7 @@ pub(super) fn render_agent_panel(
         area,
         snapshot.agent_view_label.as_deref(),
         config,
+        top_rule,
         hits,
     ) {
         return;
@@ -78,6 +80,7 @@ pub(super) fn render_agent_panel(
             .map(|_| " no matching agents"),
         config,
         agent_scroll,
+        top_rule,
         hits,
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
@@ -92,26 +95,32 @@ pub(super) fn render_agent_panel_header(
     area: Rect,
     agent_view_label: Option<&str>,
     config: &ClientShellConfig,
+    top_rule: bool,
     hits: &mut ShellHitMap,
 ) -> bool {
     if area.height == 0 {
         return false;
     }
-    put_text(
-        buffer,
-        area.x,
-        area.y,
-        area.width,
-        &"─".repeat(area.width as usize),
-        Style::default().fg(config.palette.surface_dim),
-    );
-    if area.height < 2 {
+    // The rule is the divider against the spaces section; without a spaces
+    // section above, the header starts on the first row instead.
+    let title_y = area.y + u16::from(top_rule);
+    if top_rule {
+        put_text(
+            buffer,
+            area.x,
+            area.y,
+            area.width,
+            &"─".repeat(area.width as usize),
+            Style::default().fg(config.palette.surface_dim),
+        );
+    }
+    if area.height < 1 + u16::from(top_rule) {
         return false;
     }
     put_text(
         buffer,
         area.x,
-        area.y + 1,
+        title_y,
         area.width,
         " agents",
         Style::default()
@@ -125,7 +134,7 @@ pub(super) fn render_agent_panel_header(
     let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
-        area.y + 1,
+        title_y,
         sort_width,
         1,
     );
@@ -158,15 +167,17 @@ pub(super) fn render_agent_list<T>(
     empty_message: Option<&str>,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    top_rule: bool,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
+    let header_rows = 2 + u16::from(top_rule);
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        area.y.saturating_add(header_rows),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(header_rows),
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {
@@ -276,44 +287,19 @@ pub(super) fn agent_row(
     let tab_label = tab
         .filter(|tab| tab_count > 1 || tab.custom_label)
         .map(|tab| tab.label.as_str());
-    let agent_label = agent
-        .display_agent
-        .as_deref()
-        .or(agent.name.as_deref())
-        .or(agent.agent.as_deref())
-        .or(agent.title.as_deref());
-    let labels = agent
-        .state_labels
-        .iter()
-        .cloned()
-        .collect::<HashMap<_, _>>();
-    let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
-    let state_text = labels
-        .get(status_text(agent.agent_status))
-        .map(String::as_str)
-        .unwrap_or_else(|| sidebar_status_text(agent.agent_status));
-    let canonical_agent = agent
-        .agent
-        .as_deref()
-        .and_then(crate::detect::parse_agent_label);
-    let rows = crate::ui::sidebar_agent_rows(
-        &config.agents,
-        crate::ui::AgentTokenContext {
-            machine,
-            workspace: &workspace.label,
-            tab: tab_label,
-            pane: agent
-                .title
+    let rows = resolve_agent_rows(
+        config.agents.rows_for_agent(
+            agent
+                .agent
                 .as_deref()
-                .or_else(|| pane.and_then(|pane| pane.label.as_deref())),
-            agent_label,
-            agent_index,
-            terminal_title: agent.terminal_title.as_deref(),
-            terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
-            canonical_agent,
-            tokens: &tokens,
-        },
-        state_text,
+                .and_then(crate::detect::parse_agent_label),
+        ),
+        agent,
+        &workspace.label,
+        tab_label,
+        pane.and_then(|pane| pane.label.as_deref()),
+        machine,
+        agent_index,
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
@@ -321,6 +307,48 @@ pub(super) fn agent_row(
         focused: agent.focused,
         rows,
     })
+}
+
+/// Resolves one agent's token `rows` from its snapshot entry. `pane_label` is
+/// the fallback for the `pane` token when the agent reports no title.
+pub(super) fn resolve_agent_rows(
+    rows: &[Vec<crate::config::AgentSidebarToken>],
+    agent: &crate::protocol::ClientShellAgent,
+    workspace_label: &str,
+    tab_label: Option<&str>,
+    pane_label: Option<&str>,
+    machine: Option<&str>,
+    agent_index: usize,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
+    let agent_label = agent
+        .display_agent
+        .as_deref()
+        .or(agent.name.as_deref())
+        .or(agent.agent.as_deref())
+        .or(agent.title.as_deref());
+    let state_text = agent
+        .state_labels
+        .iter()
+        .rev()
+        .find(|(status, _)| status == status_text(agent.agent_status))
+        .map(|(_, label)| label.as_str())
+        .unwrap_or_else(|| sidebar_status_text(agent.agent_status));
+    let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
+    crate::ui::sidebar_agent_rows(
+        rows,
+        crate::ui::AgentTokenContext {
+            machine,
+            workspace: workspace_label,
+            tab: tab_label,
+            pane: agent.title.as_deref().or(pane_label),
+            agent_label,
+            agent_index,
+            terminal_title: agent.terminal_title.as_deref(),
+            terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
+            tokens: &tokens,
+        },
+        state_text,
+    )
 }
 
 pub(super) fn render_agent_row(
@@ -390,7 +418,7 @@ fn display_width(text: &str) -> usize {
     unicode_width::UnicodeWidthStr::width(text)
 }
 
-fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str {
+pub(super) fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str {
     use crate::api::schema::AgentStatus;
     match status {
         AgentStatus::Blocked => "blocked",

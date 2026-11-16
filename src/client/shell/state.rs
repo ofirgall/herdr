@@ -95,6 +95,8 @@ pub(super) struct ShellHitMap {
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
+    /// Agent children nested under spaces: `(rect, pane_id)`.
+    pub(super) space_agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
@@ -238,6 +240,10 @@ pub(super) struct WorkspaceHit {
     pub(super) workspace_id: String,
     pub(super) indented: bool,
     pub(super) group_toggle: Option<(Rect, String)>,
+    /// Toggle that shows or hides this space's agent children.
+    pub(super) agent_toggle: Option<Rect>,
+    /// Rows of agent children drawn directly below `rect`, part of the same list item.
+    pub(super) child_rows: u16,
 }
 
 #[derive(Debug)]
@@ -517,6 +523,7 @@ pub(super) enum ClientContextMenuAction {
     OpenWorktree,
     RemoveWorktree,
     ToggleGroup,
+    ToggleAgents,
     NewTab,
     RenamePane,
     ClearPaneName,
@@ -537,6 +544,8 @@ pub(super) enum ClientContextMenuTarget {
         has_worktree_children: bool,
         close_group: bool,
         collapsed: bool,
+        /// `Some(expanded)` when the space can show agent children.
+        agents_expanded: Option<bool>,
     },
     Tab {
         tab_id: String,
@@ -883,6 +892,8 @@ pub(crate) struct ClientShellState {
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
+    /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
+    pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
@@ -1032,6 +1043,23 @@ impl ClientShellState {
                 .or_default()
                 .extend(saved.collapsed_groups);
         }
+        let mut space_agent_overrides = HashMap::<ClientEndpointId, HashMap<String, bool>>::new();
+        for saved in preferences.space_agent_overrides {
+            let endpoint_id = match saved.profile_id {
+                None => ClientEndpointId::Local,
+                Some(profile_id) => {
+                    let Ok(profile_id) = crate::client::endpoint::ProfileId::parse(profile_id)
+                    else {
+                        continue;
+                    };
+                    ClientEndpointId::Ssh(profile_id)
+                }
+            };
+            space_agent_overrides
+                .entry(endpoint_id)
+                .or_default()
+                .insert(saved.workspace_id, saved.expanded);
+        }
         Self {
             machine_diagnostics: Default::default(),
             config,
@@ -1059,6 +1087,7 @@ impl ClientShellState {
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
+            space_agent_overrides,
             workspace_scroll: 0,
             agent_scroll: 0,
             pending_agent_reveal: None,

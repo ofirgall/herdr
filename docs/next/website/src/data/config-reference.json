@@ -1133,6 +1133,12 @@
           "description": "Tab color for the idle state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's green."
         },
         {
+          "key": "ui.sidebar.agents.enabled",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",
@@ -1151,6 +1157,35 @@
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
         },
         {
+          "key": "ui.sidebar.spaces.agent_rows",
+          "type": "list of token rows",
+          "default": "[[\"state_icon\", \"tab\"]]",
+          "description": "Layout of each agent shown under its Space when ui.sidebar.spaces.agents is not \"off\". Accepts the same tokens, styles, and rules as ui.sidebar.agents.rows; state_icon and state_text show that agent's own status. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.spaces.agents",
+          "type": "enum",
+          "default": "\"off\"",
+          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered.",
+          "values": [
+            "off",
+            "collapsed",
+            "expanded"
+          ]
+        },
+        {
+          "key": "ui.sidebar.spaces.enabled",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the Spaces section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
+        },
+        {
+          "key": "ui.sidebar.spaces.metadata",
+          "type": "list of tables",
+          "default": "[]",
+          "description": "Static $name tokens for Spaces. Each entry has match = { label = \"glob\" } or match = { path = \"dir\" } and a tokens table of strings. Matching entries apply in order, later entries win, and values reported with herdr workspace report-metadata override them. At most 64 entries and 16 tokens per entry."
+        },
+        {
           "key": "ui.sidebar.spaces.row_gap",
           "type": "integer",
           "default": "0",
@@ -1161,6 +1196,12 @@
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
           "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.spaces.show_status",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show each Space's aggregate agent status (the state_icon and state_text tokens) in Space rows. Agents shown under a Space keep their own status either way."
         },
         {
           "key": "ui.accent",

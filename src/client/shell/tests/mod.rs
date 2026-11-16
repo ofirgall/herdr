@@ -5,6 +5,8 @@ use crate::protocol::{
     PaneSurfaceSplit, PaneSurfaceSplitDirection, SurfaceRect,
 };
 use crossterm::event::MouseEvent;
+mod space_agents;
+mod space_metadata;
 mod text_editing;
 
 pub(super) fn snapshot() -> ClientShellSnapshot {
@@ -261,6 +263,7 @@ mod link_hover;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod sidebar_sections;
 mod startup_overlays;
 
 #[test]

@@ -1,7 +1,4 @@
-use crate::config::{
-    AgentSidebarToken, AgentsSidebarConfig, SidebarTokenStyle, SpaceSidebarToken,
-    SpacesSidebarConfig,
-};
+use crate::config::{AgentSidebarToken, SidebarTokenStyle, SpaceSidebarToken, SpacesSidebarConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedToken {
@@ -63,18 +60,17 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) agent_index: usize,
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
-    pub(crate) canonical_agent: Option<crate::detect::Agent>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
 }
 
+/// Resolves one agent's token `rows`; callers choose the row set (per-agent
+/// overrides for the agents panel, `agent_rows` for space children).
 pub(crate) fn agent_rows(
-    config: &AgentsSidebarConfig,
+    rows: &[Vec<AgentSidebarToken>],
     context: AgentTokenContext<'_>,
     state_text: &str,
 ) -> Vec<Vec<ResolvedToken>> {
-    config
-        .rows_for_agent(context.canonical_agent)
-        .iter()
+    rows.iter()
         .filter_map(|row| {
             let resolved = row
                 .iter()
@@ -149,10 +145,13 @@ pub(crate) fn space_rows(
                 .filter_map(|configured| {
                     let (token, style) = configured.parts();
                     let kind = match token {
-                        SpaceSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
-                        SpaceSidebarToken::StateText => {
+                        SpaceSidebarToken::StateIcon if config.show_status => {
+                            Some(ResolvedTokenKind::StateIcon)
+                        }
+                        SpaceSidebarToken::StateText if config.show_status => {
                             Some(ResolvedTokenKind::StateText(context.state_text.to_string()))
                         }
+                        SpaceSidebarToken::StateIcon | SpaceSidebarToken::StateText => None,
                         SpaceSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
                         }
@@ -190,7 +189,7 @@ pub(crate) fn separator(_previous: &ResolvedToken, _current: &ResolvedToken) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AgentSidebarToken, SpaceSidebarToken};
+    use crate::config::{AgentSidebarToken, AgentsSidebarConfig, SpaceSidebarToken};
 
     struct Entry {
         workspace: String,
@@ -216,6 +215,12 @@ mod tests {
         }
     }
 
+    impl Entry {
+        fn rows<'a>(&self, config: &'a AgentsSidebarConfig) -> &'a [Vec<AgentSidebarToken>] {
+            config.rows_for_agent(self.canonical_agent)
+        }
+    }
+
     fn context(entry: &Entry) -> AgentTokenContext<'_> {
         AgentTokenContext {
             machine: None,
@@ -226,7 +231,6 @@ mod tests {
             agent_index: 0,
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
-            canonical_agent: entry.canonical_agent,
             tokens: &entry.tokens,
         }
     }
@@ -244,7 +248,7 @@ rows = [["state_icon", { token = "machine", fg = "#fff", bold = true, dim = true
         ] {
             let mut context = context(&entry);
             context.machine = Some(machine);
-            let rows = agent_rows(&config, context, "working");
+            let rows = agent_rows(entry.rows(&config), context, "working");
             assert_eq!(rows.len(), 1);
             assert_eq!(
                 rows[0][0],
@@ -259,7 +263,10 @@ rows = [["state_icon", { token = "machine", fg = "#fff", bold = true, dim = true
             assert_eq!(token.style.bold, Some(bold));
             assert_eq!(token.style.dim, Some(dim));
         }
-        assert_eq!(agent_rows(&config, context(&entry), "working")[0].len(), 1);
+        assert_eq!(
+            agent_rows(entry.rows(&config), context(&entry), "working")[0].len(),
+            1
+        );
     }
 
     #[test]
@@ -270,7 +277,7 @@ rows = [[{ token = "workspace", rules = [{ equals = "long-workspace-name", fg = 
 "##).unwrap();
         let mut entry = entry();
         entry.workspace = "long-workspace-name".into();
-        let rows = agent_rows(&config, context(&entry), "working");
+        let rows = agent_rows(entry.rows(&config), context(&entry), "working");
         let theme = Style::default()
             .fg(Color::Blue)
             .add_modifier(Modifier::BOLD | Modifier::DIM);
@@ -320,7 +327,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
             ("90%", None, None),
         ] {
             entry.tokens.insert("load".into(), value.into());
-            let rows = agent_rows(&config.agents, context(&entry), "working");
+            let rows = agent_rows(entry.rows(&config.agents), context(&entry), "working");
             assert_eq!(rows[0][0].kind, ResolvedTokenKind::Custom(value.into()));
             assert_eq!(rows[0][0].style.bold, bold);
             assert_eq!(rows[0][0].style.dim, dim);
@@ -359,7 +366,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         for (machine, count) in [("Local", 1), ("Remote", 2)] {
             let mut ctx = context(&entry);
             ctx.machine = Some(machine);
-            let rows = agent_rows(&config.agents, ctx, "working");
+            let rows = agent_rows(entry.rows(&config.agents), ctx, "working");
             assert_eq!(rows[0].len(), count);
             assert_eq!(
                 rows[0].last().unwrap().kind,
@@ -370,7 +377,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         for (value, count) in [("20", 1), ("90", 2)] {
             entry.tokens.insert("load".into(), value.into());
             assert_eq!(
-                agent_rows(&config.agents, context(&entry), "working").len(),
+                agent_rows(entry.rows(&config.agents), context(&entry), "working").len(),
                 count
             );
             let rows = space_rows(
@@ -395,7 +402,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 "rows = [[{{ token = 'agent', rules = [{{ equals = 'pi', {first} }}, {{ contains = '', hide = true }}] }}]]"
             )).unwrap();
             let entry = entry();
-            let rows = agent_rows(&config, context(&entry), "working");
+            let rows = agent_rows(entry.rows(&config), context(&entry), "working");
             assert_eq!(rows[0][0].kind, ResolvedTokenKind::Agent("pi".into()));
         }
     }
@@ -415,7 +422,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
             ..Default::default()
         };
 
-        let rows = agent_rows(&config, context(&entry), "working");
+        let rows = agent_rows(entry.rows(&config), context(&entry), "working");
 
         assert_eq!(rows.len(), 2);
         assert_eq!(
@@ -442,7 +449,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         };
 
         assert_eq!(
-            agent_rows(&config, context(&entry), "working"),
+            agent_rows(entry.rows(&config), context(&entry), "working"),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
                 "repo".into()
             ))]]
@@ -451,7 +458,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         let mut remote_context = context(&entry);
         remote_context.machine = Some("Build");
         assert_eq!(
-            agent_rows(&config, remote_context, "working"),
+            agent_rows(entry.rows(&config), remote_context, "working"),
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::Machine("Build".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Workspace("repo".into())),
@@ -474,7 +481,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         };
 
         assert_eq!(
-            agent_rows(&config, context(&entry), "deep in the mines"),
+            agent_rows(entry.rows(&config), context(&entry), "deep in the mines"),
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::StateText("deep in the mines".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("reviewing auth".into())),
@@ -500,7 +507,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         };
 
         assert_eq!(
-            agent_rows(&config, context(&entry), "working"),
+            agent_rows(entry.rows(&config), context(&entry), "working"),
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("⠋ raw title".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("raw title".into())),
@@ -521,7 +528,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         };
         let mut context = context(&entry);
         context.agent_index = 11;
-        let rows = agent_rows(&config, context, "working");
+        let rows = agent_rows(entry.rows(&config), context, "working");
         assert_eq!(
             rows,
             vec![vec![
@@ -563,7 +570,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         pi.agent_label = Some("renamed pi".into());
 
         assert_eq!(
-            agent_rows(&config, context(&pi), "working"),
+            agent_rows(pi.rows(&config), context(&pi), "working"),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
                 "renamed pi".into()
             ))]]
@@ -571,7 +578,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
 
         pi.canonical_agent = None;
         assert_eq!(
-            agent_rows(&config, context(&pi), "working"),
+            agent_rows(pi.rows(&config), context(&pi), "working"),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
                 "repo".into()
             ))]]
@@ -623,6 +630,36 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
             ),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Custom(
                 "2 changes".into()
+            ))]]
+        );
+    }
+
+    #[test]
+    fn show_status_false_hides_space_status_tokens_only() {
+        let config = SpacesSidebarConfig {
+            rows: vec![vec![
+                SpaceSidebarToken::StateIcon,
+                SpaceSidebarToken::Workspace,
+                SpaceSidebarToken::StateText,
+            ]],
+            show_status: false,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            space_rows(
+                &config,
+                SpaceTokenContext {
+                    workspace: "repo",
+                    branch: None,
+                    state_text: "working",
+                    ahead_behind: None,
+                    tokens: &std::collections::HashMap::new(),
+                    suppress_git_details: false,
+                },
+            ),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                "repo".into()
             ))]]
         );
     }

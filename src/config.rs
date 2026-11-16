@@ -29,7 +29,7 @@ pub use self::{
         ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
+        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle, SpaceAgentsMode,
         SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
@@ -39,6 +39,9 @@ pub use self::{
 };
 
 pub(crate) use self::keybinds::parse_key_combo;
+#[cfg(test)]
+pub(crate) use self::sidebar::MAX_METADATA_TOKEN_KEY_LEN;
+pub(crate) use self::sidebar::{is_valid_metadata_token_key, normalize_metadata_token_value};
 pub(crate) use self::write::{update_file_at, write_edit, ConfigEdit};
 pub(crate) use self::{
     io::upsert_top_level_bool,
@@ -122,6 +125,8 @@ impl Config {
             .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
+            .chain(self.all_sidebar_sections_disabled_diagnostic())
+            .chain(self.ui.sidebar.spaces.metadata_diagnostics())
             .chain(self.invalid_headless_size_diagnostic())
             .collect()
     }
@@ -140,6 +145,12 @@ impl Config {
                 "server.headless_cols and server.headless_rows must be greater than zero (got {}x{})",
                 self.server.headless_cols, self.server.headless_rows
             )
+        })
+    }
+
+    pub(crate) fn all_sidebar_sections_disabled_diagnostic(&self) -> Option<String> {
+        self.ui.sidebar.all_sections_disabled().then(|| {
+            "ui.sidebar.spaces.enabled and ui.sidebar.agents.enabled are both false; showing both sections".to_owned()
         })
     }
 

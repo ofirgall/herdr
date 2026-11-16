@@ -1908,6 +1908,32 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_updates_static_space_metadata() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-space-metadata");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+
+        std::fs::write(
+            &path,
+            "[[ui.sidebar.spaces.metadata]]\nmatch = { label = \"api-*\" }\ntokens = { env = \"dev\" }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            app.reload_config().status,
+            crate::config::ConfigReloadStatus::Applied
+        );
+        assert_eq!(app.state.sidebar_spaces.metadata.len(), 1);
+        assert_eq!(app.state.sidebar_spaces.metadata[0].tokens["env"], "dev");
+
+        std::fs::write(&path, "").unwrap();
+        app.reload_config();
+        assert!(app.state.sidebar_spaces.metadata.is_empty());
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+    }
+
+    #[test]
     fn reload_config_updates_sidebar_token_rows() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-sidebar-tokens");

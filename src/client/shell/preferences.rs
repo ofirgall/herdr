@@ -14,6 +14,16 @@ pub(super) struct ClientRemoteCollapsedGroups {
     pub(super) collapsed_groups: Vec<String>,
 }
 
+/// A user's per-space choice to show or hide that space's agent children.
+/// `profile_id` is `None` for the local endpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub(super) struct ClientSpaceAgentOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) profile_id: Option<String>,
+    pub(super) workspace_id: String,
+    pub(super) expanded: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct ClientChromePreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,6 +38,8 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) space_agent_overrides: Vec<ClientSpaceAgentOverride>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {
@@ -120,6 +132,39 @@ mod tests {
 
         assert_eq!(preferences.collapsed_groups, ["/repo"]);
         assert!(preferences.remote_collapsed_groups.is_empty());
+    }
+
+    #[test]
+    fn legacy_preferences_default_space_agent_overrides() {
+        let preferences: ClientChromePreferences =
+            serde_json::from_str(r#"{"sidebar_width":30,"collapsed_groups":["/repo"]}"#)
+                .expect("legacy client chrome preferences");
+        assert!(preferences.space_agent_overrides.is_empty());
+    }
+
+    #[test]
+    fn space_agent_overrides_round_trip() {
+        let preferences = ClientChromePreferences {
+            space_agent_overrides: vec![
+                ClientSpaceAgentOverride {
+                    profile_id: None,
+                    workspace_id: "ws_1".into(),
+                    expanded: false,
+                },
+                ClientSpaceAgentOverride {
+                    profile_id: Some("dev".into()),
+                    workspace_id: "ws_2".into(),
+                    expanded: true,
+                },
+            ],
+            ..ClientChromePreferences::default()
+        };
+        let json = serde_json::to_string(&preferences).unwrap();
+        let loaded: ClientChromePreferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            loaded.space_agent_overrides,
+            preferences.space_agent_overrides
+        );
     }
 
     #[test]

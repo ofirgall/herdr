@@ -57,6 +57,7 @@ pub(super) fn render_expanded(
         area,
         agent_view_label,
         config,
+        true,
         hits,
     ) {
         return;
@@ -69,6 +70,7 @@ pub(super) fn render_expanded(
         agent_view_label.map(|_| " no matching agents"),
         config,
         agent_scroll,
+        true,
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {

@@ -47,10 +47,30 @@ fn sidebar_section_heights(total_height: u16, split_ratio: f32) -> (u16, u16) {
     )
 }
 
-pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, Rect) {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+/// Content rect of the expanded sidebar (the area minus the resize-handle column).
+pub(crate) fn sidebar_content_rect(area: Rect) -> Rect {
+    Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+}
+
+/// Splits the expanded sidebar into `(spaces, agents)` section rects.
+///
+/// A disabled section gets `Rect::default()`; a single enabled section gets the
+/// whole content rect. The saved `split_ratio` only applies when both are enabled.
+pub(crate) fn expanded_sidebar_sections(
+    area: Rect,
+    split_ratio: f32,
+    spaces_enabled: bool,
+    agents_enabled: bool,
+) -> (Rect, Rect) {
+    let content = sidebar_content_rect(area);
     if content.is_empty() {
         return (Rect::default(), Rect::default());
+    }
+    match (spaces_enabled, agents_enabled) {
+        (false, false) => return (Rect::default(), Rect::default()),
+        (true, false) => return (content, Rect::default()),
+        (false, true) => return (Rect::default(), content),
+        (true, true) => {}
     }
 
     let (workspace_height, detail_height) = sidebar_section_heights(content.height, split_ratio);
@@ -65,9 +85,15 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
     )
 }
 
-pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
-    if content.width == 0 || content.height < 6 {
+/// Draggable divider row between the sections; empty unless both are enabled.
+pub(crate) fn sidebar_section_divider_rect(
+    area: Rect,
+    split_ratio: f32,
+    spaces_enabled: bool,
+    agents_enabled: bool,
+) -> Rect {
+    let content = sidebar_content_rect(area);
+    if !(spaces_enabled && agents_enabled) || content.width == 0 || content.height < 6 {
         return Rect::default();
     }
 
@@ -298,4 +324,57 @@ fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) 
         };
     }
     style
+}
+
+#[cfg(test)]
+mod section_geometry_tests {
+    use super::*;
+
+    const AREA: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 31,
+        height: 20,
+    };
+
+    #[test]
+    fn both_enabled_matches_the_saved_split() {
+        let (spaces, agents) = expanded_sidebar_sections(AREA, 0.5, true, true);
+        assert_eq!(spaces, Rect::new(0, 0, 30, 10));
+        assert_eq!(agents, Rect::new(0, 10, 30, 10));
+        assert_eq!(
+            sidebar_section_divider_rect(AREA, 0.5, true, true),
+            Rect::new(0, 10, 30, 1)
+        );
+    }
+
+    #[test]
+    fn single_section_takes_the_whole_content_rect_and_has_no_divider() {
+        let content = Rect::new(0, 0, 30, 20);
+        for split in [0.2, 0.5, 0.9] {
+            assert_eq!(
+                expanded_sidebar_sections(AREA, split, true, false),
+                (content, Rect::default())
+            );
+            assert_eq!(
+                expanded_sidebar_sections(AREA, split, false, true),
+                (Rect::default(), content)
+            );
+            assert!(sidebar_section_divider_rect(AREA, split, true, false).is_empty());
+            assert!(sidebar_section_divider_rect(AREA, split, false, true).is_empty());
+        }
+    }
+
+    #[test]
+    fn no_enabled_section_or_empty_area_yields_nothing() {
+        assert_eq!(
+            expanded_sidebar_sections(AREA, 0.5, false, false),
+            (Rect::default(), Rect::default())
+        );
+        assert!(sidebar_section_divider_rect(AREA, 0.5, false, false).is_empty());
+        assert_eq!(
+            expanded_sidebar_sections(Rect::default(), 0.5, true, false),
+            (Rect::default(), Rect::default())
+        );
+    }
 }

@@ -24,12 +24,32 @@ pub(in crate::client::shell) fn workspace_active_background(
     }
 }
 
+/// Collapsed sidebar geometry as `(spaces, divider_y, agents)`.
+///
+/// A disabled section gets `Rect::default()` and the divider is dropped. A lone
+/// spaces section keeps the bottom row free for the expand toggle; a lone
+/// agents section is returned whole (its renderer already reserves that row).
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
     area: Rect,
+    spaces_enabled: bool,
+    agents_enabled: bool,
 ) -> (Rect, Option<u16>, Rect) {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+    let content = crate::ui::sidebar_content_rect(area);
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
+    }
+    match (spaces_enabled, agents_enabled) {
+        (false, false) => return (Rect::default(), None, Rect::default()),
+        (true, false) => {
+            let height = content.height.saturating_sub(1);
+            return (
+                Rect::new(content.x, content.y, content.width, height),
+                None,
+                Rect::default(),
+            );
+        }
+        (false, true) => return (Rect::default(), None, content),
+        (true, true) => {}
     }
     if content.height < 7 {
         return (content, None, Rect::default());
@@ -56,7 +76,8 @@ pub(crate) fn render_collapsed_sidebar(
     let selection_background = workspace_selection_background(palette);
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
     render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) =
+        collapsed_sidebar_sections(area, config.spaces.enabled, config.agents.enabled);
     for (index, workspace) in snapshot
         .workspaces
         .iter()
@@ -107,6 +128,8 @@ pub(crate) fn render_collapsed_sidebar(
             workspace_id: workspace.workspace_id.clone(),
             indented: false,
             group_toggle: None,
+            agent_toggle: None,
+            child_rows: 0,
         });
     }
 
@@ -170,11 +193,12 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.agents.push((rect, pane_id));
     }
-    hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
+    let toggle_content = crate::ui::sidebar_content_rect(area);
+    hits.sidebar_toggle = if area.is_empty() || toggle_content.width == 0 {
         Rect::default()
     } else {
         Rect::new(
-            workspace_area.x + workspace_area.width / 2,
+            toggle_content.x + toggle_content.width / 2,
             area.bottom().saturating_sub(1),
             1,
             1,
@@ -211,10 +235,84 @@ pub(crate) fn render_sidebar(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
-    hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let spaces_enabled = config.spaces.enabled;
+    let agents_enabled = config.agents.enabled;
+    let (workspace_area, detail_area) = crate::ui::expanded_sidebar_sections(
+        area,
+        state.sidebar_section_split,
+        spaces_enabled,
+        agents_enabled,
+    );
+    hits.sidebar_section_divider = crate::ui::sidebar_section_divider_rect(
+        area,
+        state.sidebar_section_split,
+        spaces_enabled,
+        agents_enabled,
+    );
+    if spaces_enabled {
+        render_spaces_section(buffer, workspace_area, snapshot, config, state, hits);
+    }
+    // The footer sits on the bottom row of the spaces section, or of the whole
+    // sidebar content when only one section is shown. In the latter case that
+    // row is shared with the `«` toggle, so the footer leaves two columns free.
+    let content = crate::ui::sidebar_content_rect(area);
+    let (footer_area, agents_area) = if spaces_enabled && agents_enabled {
+        (workspace_area, detail_area)
+    } else {
+        let agents_area = Rect::new(
+            detail_area.x,
+            detail_area.y,
+            detail_area.width,
+            detail_area.height.saturating_sub(1),
+        );
+        (
+            Rect::new(
+                content.x,
+                content.y,
+                content.width.saturating_sub(2),
+                content.height,
+            ),
+            agents_area,
+        )
+    };
+    render_sidebar_footer(buffer, footer_area, snapshot, config, hits);
+    if agents_enabled {
+        super::render_agent_panel(
+            buffer,
+            agents_area,
+            snapshot,
+            config,
+            state.agent_scroll,
+            spaces_enabled,
+            hits,
+        );
+    }
+
+    hits.sidebar_toggle = Rect::new(
+        area.right().saturating_sub(2),
+        area.bottom().saturating_sub(1),
+        u16::from(area.width > 1),
+        u16::from(area.height > 0),
+    );
+    put_text(
+        buffer,
+        hits.sidebar_toggle.x,
+        hits.sidebar_toggle.y,
+        hits.sidebar_toggle.width,
+        "«",
+        Style::default().fg(palette.overlay0),
+    );
+}
+
+fn render_spaces_section(
+    buffer: &mut Buffer,
+    workspace_area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    state: &mut ShellRenderState<'_>,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
     put_text(
         buffer,
         workspace_area.x,
@@ -227,6 +325,45 @@ pub(crate) fn render_sidebar(
     );
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
+    // Children are a presentation of the spaces list: one entry per space whose
+    // agents are expanded, resolved once per frame.
+    let agent_mode = config.spaces.agents;
+    let agent_index = (agent_mode != crate::config::SpaceAgentsMode::Off)
+        .then(|| super::space_agents::SpaceAgentIndex::new(snapshot));
+    let space_has_agents = |workspace_id: &str| {
+        agent_index
+            .as_ref()
+            .is_some_and(|index| !index.agents(workspace_id).is_empty())
+    };
+    let space_expanded = |workspace_id: &str| {
+        agent_mode.expanded(
+            state
+                .space_agent_overrides
+                .and_then(|overrides| overrides.get(workspace_id))
+                .copied(),
+        )
+    };
+    let children = entries
+        .iter()
+        .map(|entry| {
+            let workspace = snapshot.workspaces.get(entry.index)?;
+            let index = agent_index.as_ref()?;
+            space_expanded(&workspace.workspace_id)
+                .then(|| index.children(workspace, config))
+                .filter(|children| !children.is_empty())
+        })
+        .collect::<Vec<_>>();
+    let child_heights = children
+        .iter()
+        .map(|children| {
+            children.as_ref().map_or(0, |children| {
+                children
+                    .iter()
+                    .map(|child| usize::from(child.height()))
+                    .sum::<usize>()
+            })
+        })
+        .collect::<Vec<_>>();
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -238,7 +375,8 @@ pub(crate) fn render_sidebar(
     hits.workspace_body = body;
     let row_heights = entries
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(entry_position, entry)| {
             snapshot
                 .workspaces
                 .get(entry.index)
@@ -251,6 +389,7 @@ pub(crate) fn render_sidebar(
                     )
                     .len()
                     .max(1)
+                    .saturating_add(child_heights[entry_position])
                     .min(u16::MAX as usize) as u16
                 })
                 .unwrap_or(1)
@@ -305,11 +444,19 @@ pub(crate) fn render_sidebar(
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
         let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
-        let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+        let space_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+        // A space and its children are one list item, so they are placed or
+        // skipped together.
+        let row_height = (rows
+            .len()
+            .max(1)
+            .saturating_add(child_heights[entry_position]))
+        .min(u16::MAX as usize)
+        .min(usize::from(body.height)) as u16;
         if y.saturating_add(row_height) > body.bottom() {
             break;
         }
-        let rect = Rect::new(body.x, y, content_width, row_height);
+        let rect = Rect::new(body.x, y, content_width, space_height);
         let selected = state.selected_workspace_id.is_some_and(|target| {
             target.matches(state.active_endpoint_id, &workspace.workspace_id)
         });
@@ -342,12 +489,36 @@ pub(crate) fn render_sidebar(
             state.collapsed_groups,
             palette,
         );
+        let agent_toggle = space_has_agents(&workspace.workspace_id).then(|| {
+            super::space_agents::render_agent_toggle(
+                buffer,
+                rect,
+                group_toggle.is_some(),
+                space_expanded(&workspace.workspace_id),
+                palette,
+            )
+        });
+        let child_rows = row_height - space_height;
+        if let Some(children) = children[entry_position].as_deref() {
+            super::space_agents::render_children(
+                buffer,
+                Rect::new(body.x, y + space_height, content_width, child_rows),
+                if entry.indented { 6 } else { 1 },
+                entry.indented,
+                entry.indented && !entry.last_child,
+                children,
+                config,
+                hits,
+            );
+        }
         hits.workspaces.push(WorkspaceHit {
             rect,
             endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
             indented: entry.indented,
             group_toggle,
+            agent_toggle,
+            child_rows,
         });
         let gap = entries
             .get(entry_position + 1)
@@ -374,7 +545,17 @@ pub(crate) fn render_sidebar(
             Style::default().fg(palette.accent),
         );
     }
+}
 
+/// Draws the `new` / `menu` controls on the bottom row of `area`.
+pub(in crate::client::shell) fn render_sidebar_footer(
+    buffer: &mut Buffer,
+    workspace_area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
     let footer_y = workspace_area.bottom().saturating_sub(1);
     if config.mouse_capture {
         hits.new_workspace = Rect::new(
@@ -429,30 +610,6 @@ pub(crate) fn render_sidebar(
             );
         }
     }
-
-    super::render_agent_panel(
-        buffer,
-        detail_area,
-        snapshot,
-        config,
-        state.agent_scroll,
-        hits,
-    );
-
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
-    );
 }
 
 pub(crate) fn workspace_entries(
@@ -675,7 +832,16 @@ pub(in crate::client::shell) fn workspace_rows(
     } else {
         &workspace.label
     };
-    let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
+    // Static metadata first, then API-reported tokens so the API wins.
+    let mut token_values = HashMap::with_capacity(workspace.tokens.len());
+    if !config.compiled_metadata.is_empty() {
+        config.compiled_metadata.apply(
+            &workspace.label,
+            &workspace.new_workspace_cwd,
+            &mut token_values,
+        );
+    }
+    token_values.extend(workspace.tokens.iter().cloned());
     crate::ui::sidebar_space_rows(
         config,
         crate::ui::SpaceTokenContext {

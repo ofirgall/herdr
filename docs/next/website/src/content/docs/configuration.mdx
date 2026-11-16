@@ -383,6 +383,48 @@ done = "#58cbe1"
 idle = "#9eda26"
 ```
 
+### Sidebar sections
+
+The expanded sidebar shows a spaces section above an agents section. Hide either one with `enabled`; both default to `true`:
+
+```toml
+[ui.sidebar.spaces]
+enabled = true
+
+[ui.sidebar.agents]
+enabled = false
+```
+
+A hidden section is not drawn in the expanded or collapsed sidebar and has no click targets. When one section is hidden, the other takes the whole sidebar height, and the divider between the sections disappears. Your saved split is kept and applies again once both sections are enabled. The `new` and `menu` controls and the collapse toggle stay available: with the spaces section hidden, `new` and `menu` appear on the bottom row of the sidebar.
+
+Hiding both sections is not allowed. Herdr reports a config warning naming both options and shows both sections. Changes take effect on config reload.
+
+### Agents under spaces
+
+Spaces can list their own agents as indented child entries. Set `agents` under `[ui.sidebar.spaces]` to `"off"` (the default), `"collapsed"`, or `"expanded"`, and optionally change the child layout with `agent_rows`:
+
+```toml
+[ui.sidebar.spaces]
+agents = "expanded"
+agent_rows = [
+  ["state_icon", "tab"],
+]
+```
+
+With `"off"` the sidebar looks exactly as before. With `"collapsed"` or `"expanded"`, each space that has agents shows a `▾` (children shown) or `▸` (children hidden) toggle at the right edge of its first row, one column left of the worktree group toggle when both apply. The mode sets the default for every space. Clicking the toggle, or choosing "Hide agents" / "Show agents" in the space's context menu, flips only that space and does not change the focused space. Each choice is remembered per machine and space across restarts, and forgotten when the space is closed.
+
+Each child shows one agent. Children are ordered by tab, then by the agents' order within the tab, and are not affected by an agent view filter. `agent_rows` accepts the same tokens, inline styles, `rules`, and limits as `[ui.sidebar.agents] rows`, and defaults to `[["state_icon", "tab"]]`. `state_icon` and `state_text` show that agent's own status, not the space's rolled-up status. The `tab` token always shows the tab's name, even when the space has a single unnamed tab. Clicking a child focuses that agent's space, tab, and pane.
+
+A space and its children form one list item: they scroll together, and `row_gap` applies between spaces, not between a space and its children. Children of spaces hidden by a collapsed worktree group are hidden too. Children appear only in the expanded sidebar of a single machine; the collapsed sidebar and the multi-machine sidebar are unchanged.
+
+When each agent shows its own status under its space, the space's rolled-up status can be redundant. Set `show_status = false` to hide the `state_icon` and `state_text` tokens on space rows; agent children keep their own status:
+
+```toml
+[ui.sidebar.spaces]
+agents = "expanded"
+show_status = false
+```
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:
@@ -499,6 +541,27 @@ herdr pane report-metadata <pane_id> \
 ```
 
 Use `herdr workspace report-metadata` in the same way for custom Space tokens. Unreported custom tokens disappear.
+
+Declare fixed Space tokens in config with `[[ui.sidebar.spaces.metadata]]`, so scripts do not have to report them every session:
+
+```toml
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace", "$env"], ["branch", "git_status"]]
+
+[[ui.sidebar.spaces.metadata]]
+match = { label = "api-*" }
+tokens = { env = "staging", owner = "platform" }
+
+[[ui.sidebar.spaces.metadata]]
+match = { path = "~/work/herdr" }
+tokens = { env = "dev" }
+```
+
+Each entry has a `match` table with exactly one of `label` or `path`, and a `tokens` table of string values. `label` is a case-sensitive glob against the Space label, where `*` matches any run of characters and `?` matches one. `path` is a directory prefix, with `~` expanded, matched by whole path components against the Space's current working directory: `~/work/herdr` matches `~/work/herdr/src` but not `~/work/herdr-old`. The working directory follows the Space's active tab.
+
+Static tokens work anywhere a `$name` token works in Space rows, including styles, `rules`, and `hide`, for Spaces from every connected machine. Keys follow the same rules as reported metadata keys (ASCII letters, digits, `_`, `-`; up to 32 characters). Values are trimmed, stripped of control characters, and cut to 80 characters; empty values are ignored. A config may hold up to 64 entries with up to 16 tokens each; extra entries and tokens are ignored with a diagnostic, and so is any entry with an invalid key or a `match` that does not set exactly one of `label` and `path`. The rest of the config still loads.
+
+All matching entries apply in order, and later entries override earlier ones for the same key. A value reported with `herdr workspace report-metadata` always overrides the static value for that Space and key. When the reported value is cleared or expires, the static value shows again. Static metadata is client-side presentation only: the server does not store it and workspace API queries do not return it. Changes apply on config reload.
 
 Metadata reporters provide values only; styling stays in the local sidebar configuration. See [CLI reference: report metadata](/docs/cli-reference/#panes) for limits, clearing, sequencing, and expiry.
 
