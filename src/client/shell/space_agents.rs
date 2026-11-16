@@ -152,15 +152,14 @@ pub(super) fn render_agent_toggle(
 
 /// Draws the children of one space inside `area` (the rows directly below the
 /// space) and records one hit per child. `space_indent` is the column where the
-/// space's first-row content starts. `in_tree` marks children of a linked
-/// worktree: their focus highlight starts after the tree marker column.
+/// space's first-row content starts. A focused child's highlight starts one
+/// column before its status, leaving the tree connectors on the plain sidebar.
 /// `tree_rail` continues the group's `│` connector through the children of a
 /// linked worktree that has siblings below it, so the tree stays unbroken.
 pub(super) fn render_children(
     buffer: &mut Buffer,
     area: Rect,
     space_indent: u16,
-    in_tree: bool,
     tree_rail: bool,
     children: &[SpaceAgentChild],
     config: &ClientShellConfig,
@@ -176,10 +175,11 @@ pub(super) fn render_children(
         let rect = Rect::new(area.x, y, area.width, height);
         hits.space_agents.push((rect, child.pane_id.clone()));
         if child.focused {
-            // Keep the tree marker column unhighlighted, like the connector glyphs.
-            let marker = if in_tree { TREE_MARKER_WIDTH } else { 0 }.min(area.width);
+            let start = (space_indent + CHILD_INDENT)
+                .saturating_sub(1)
+                .min(area.width);
             buffer.set_style(
-                Rect::new(area.x + marker, y, area.width - marker, height),
+                Rect::new(area.x + start, y, area.width - start, height),
                 Style::default().bg(palette.active_row_bg),
             );
         }

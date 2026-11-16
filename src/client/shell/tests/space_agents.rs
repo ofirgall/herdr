@@ -560,7 +560,7 @@ fn children_of_the_last_linked_worktree_draw_no_tree_rail() {
 }
 
 #[test]
-fn focused_child_highlight_starts_after_the_tree_marker() {
+fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
     let mut snapshot = agents_snapshot();
     for (index, linked) in [(0, false), (1, true), (2, true)] {
         snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
@@ -582,17 +582,18 @@ fn focused_child_highlight_starts_after_the_tree_marker() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    for x in child.x..child.x + 4 {
+    // Tree rail at column 3, status icon at column 8: the highlight starts at 7.
+    assert_eq!(buffer[(child.x + 3, child.y)].symbol(), "│");
+    for x in child.x..child.x + 7 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    assert_eq!(buffer[(child.x + 3, child.y)].symbol(), "│");
-    for x in child.x + 4..child.right() {
+    for x in child.x + 7..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
 
 #[test]
-fn focused_child_of_a_top_level_space_highlights_the_whole_row() {
+fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
     let mut snapshot = agents_snapshot();
     snapshot.agents[0].focused = true;
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
@@ -605,11 +606,12 @@ fn focused_child_of_a_top_level_space_highlights_the_whole_row() {
         .expect("child hit")
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
-    for x in child.x..child.right() {
-        assert_eq!(
-            buffer[(x, child.y)].bg,
-            state.config.palette.active_row_bg,
-            "column {x}"
-        );
+    let highlight = state.config.palette.active_row_bg;
+    // Status icon at column 3: the highlight starts at 2.
+    for x in child.x..child.x + 2 {
+        assert_ne!(buffer[(x, child.y)].bg, highlight, "indent column {x}");
+    }
+    for x in child.x + 2..child.right() {
+        assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }

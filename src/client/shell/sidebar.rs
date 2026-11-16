@@ -504,7 +504,6 @@ fn render_spaces_section(
                 buffer,
                 Rect::new(body.x, y + space_height, content_width, child_rows),
                 if entry.indented { 6 } else { 1 },
-                entry.indented,
                 entry.indented && !entry.last_child,
                 children,
                 config,
