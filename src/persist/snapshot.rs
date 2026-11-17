@@ -57,6 +57,9 @@ pub struct WorkspaceSnapshot {
     pub identity_cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
+    /// Excluded from numbered jump keys.
+    #[serde(default)]
+    pub skip_index: bool,
     #[serde(default)]
     pub public_pane_numbers: HashMap<u32, usize>,
     #[serde(default)]
@@ -169,6 +172,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
             custom_name: snap.custom_name,
             identity_cwd,
             worktree_space: None,
+            skip_index: false,
             public_pane_numbers: HashMap::new(),
             next_public_pane_number: 0,
             public_tab_numbers: Vec::new(),
@@ -307,6 +311,7 @@ fn capture_workspace(
         custom_name: ws.custom_name.clone(),
         identity_cwd,
         worktree_space: ws.worktree_space.clone(),
+        skip_index: ws.skip_index,
         public_pane_numbers: ws
             .public_pane_numbers
             .iter()
@@ -728,6 +733,7 @@ mod tests {
                 custom_name: Some("pi-mono".to_string()),
                 identity_cwd: PathBuf::from("/home/can/Projects/herdr"),
                 worktree_space: None,
+                skip_index: false,
                 public_pane_numbers: HashMap::from([(0, 1), (1, 2)]),
                 next_public_pane_number: 3,
                 public_tab_numbers: vec![1],
@@ -909,6 +915,28 @@ mod tests {
         assert_eq!(workspace.active_tab, second_tab);
         assert_eq!(workspace.tabs[0].custom_name.as_deref(), Some("main"));
         assert_eq!(workspace.tabs[1].custom_name.as_deref(), Some("logs"));
+    }
+
+    #[test]
+    fn skip_index_round_trips_and_defaults_to_false_for_old_sessions() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        state.workspaces[1].skip_index = true;
+
+        let snapshot = capture_from_state(&state);
+        assert!(!snapshot.workspaces[0].skip_index);
+        assert!(snapshot.workspaces[1].skip_index);
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+        assert!(!restored.workspaces[0].skip_index);
+        assert!(restored.workspaces[1].skip_index);
+
+        // A session written before the field existed restores as not skipped.
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        for workspace in value["workspaces"].as_array_mut().unwrap() {
+            workspace.as_object_mut().unwrap().remove("skip_index");
+        }
+        let old = parse_snapshot(&value.to_string()).unwrap();
+        assert!(old.workspaces.iter().all(|ws| !ws.skip_index));
     }
 
     #[test]
@@ -1429,6 +1457,7 @@ mod tests {
                 custom_name: Some("fallback test".to_string()),
                 identity_cwd: PathBuf::from("/tmp"),
                 worktree_space: None,
+                skip_index: false,
                 public_pane_numbers: HashMap::new(),
                 next_public_pane_number: 0,
                 public_tab_numbers: Vec::new(),

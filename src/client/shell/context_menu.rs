@@ -94,6 +94,16 @@ impl ClientContextMenuOverlay {
                 Action::ToggleAgents,
             ));
         }
+        if let ClientContextMenuTarget::Workspace { skip_index, .. } = &self.target {
+            items.push(item(
+                if *skip_index {
+                    "Use jump number"
+                } else {
+                    "Skip jump number"
+                },
+                Action::ToggleSkipIndex,
+            ));
+        }
         items
     }
 }
@@ -136,6 +146,7 @@ impl ClientShellState {
                 close_group,
                 collapsed,
                 agents_expanded,
+                skip_index: workspace.skip_index,
             },
             x,
             y,
@@ -299,6 +310,26 @@ impl ClientShellState {
                 let endpoint_id = self.active_endpoint_id.clone();
                 self.toggle_space_agents(&endpoint_id, &workspace_id);
                 self.persist_chrome_preferences(outcome);
+            }
+            ClientContextMenuAction::ToggleSkipIndex => {
+                let skip = self
+                    .snapshot
+                    .as_deref()
+                    .and_then(|snapshot| {
+                        snapshot
+                            .workspaces
+                            .iter()
+                            .find(|workspace| workspace.workspace_id == workspace_id)
+                    })
+                    .map(|workspace| !workspace.skip_index);
+                if let Some(skip) = skip {
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::WorkspaceSetSkipIndex(
+                            crate::api::schema::WorkspaceSetSkipIndexParams { workspace_id, skip },
+                        ),
+                        outcome,
+                    );
+                }
             }
             _ => {}
         }

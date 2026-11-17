@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceReportMetadataParams, WorkspaceSetSkipIndexParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -122,6 +122,35 @@ impl App {
                 label: params.label,
             },
         });
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
+    pub(super) fn handle_workspace_set_skip_index(
+        &mut self,
+        id: String,
+        params: WorkspaceSetSkipIndexParams,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let Some(ws) = self.state.workspaces.get_mut(index) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        if ws.skip_index != params.skip {
+            ws.skip_index = params.skip;
+            self.schedule_session_save();
+            let workspace = self.workspace_info(index);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+        }
 
         encode_success(
             id,
@@ -1046,6 +1075,77 @@ mod tests {
         assert!(info.links.is_empty());
         let json = serde_json::to_value(&info).unwrap();
         assert!(json.get("links").is_none());
+    }
+
+    fn skip_index_app() -> (App, crate::api::EventHub) {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        (app, event_hub)
+    }
+
+    fn set_skip_index(app: &mut App, workspace_id: &str, skip: bool) -> String {
+        app.handle_workspace_set_skip_index(
+            "req".into(),
+            WorkspaceSetSkipIndexParams {
+                workspace_id: workspace_id.into(),
+                skip,
+            },
+        )
+    }
+
+    fn workspace_updated_events(event_hub: &crate::api::EventHub) -> usize {
+        event_hub
+            .events_after(0)
+            .iter()
+            .filter(|(_, event)| matches!(&event.data, EventData::WorkspaceUpdated { .. }))
+            .count()
+    }
+
+    #[test]
+    fn workspace_set_skip_index_sets_clears_and_emits_only_on_change() {
+        let (mut app, event_hub) = skip_index_app();
+        let workspace_id = app.public_workspace_id(0);
+        assert!(!app.workspace_info(0).skip_index);
+
+        let response = set_skip_index(&mut app, &workspace_id, true);
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceInfo { ref workspace } if workspace.skip_index
+        ));
+        assert!(app.state.workspaces[0].skip_index);
+        assert_eq!(workspace_updated_events(&event_hub), 1);
+        assert!(event_hub.events_after(0).iter().any(|(_, event)| matches!(
+            &event.data,
+            EventData::WorkspaceUpdated { workspace } if workspace.skip_index
+        )));
+
+        // Setting the same value again is a no-op without an event.
+        set_skip_index(&mut app, &workspace_id, true);
+        assert_eq!(workspace_updated_events(&event_hub), 1);
+
+        set_skip_index(&mut app, &workspace_id, false);
+        assert!(!app.state.workspaces[0].skip_index);
+        assert_eq!(workspace_updated_events(&event_hub), 2);
+        let json = serde_json::to_value(app.workspace_info(0)).unwrap();
+        assert!(json.get("skip_index").is_none());
+    }
+
+    #[test]
+    fn workspace_set_skip_index_rejects_unknown_workspace() {
+        let (mut app, event_hub) = skip_index_app();
+        let response = set_skip_index(&mut app, "missing", true);
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "workspace_not_found");
+        assert_eq!(workspace_updated_events(&event_hub), 0);
     }
 
     #[test]

@@ -160,9 +160,12 @@ herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [
 herdr workspace get <workspace_id>
 herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
+herdr workspace set-skip-index <workspace_id> <true|false>
 herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--link NAME=URL] [--seq N] [--ttl-ms N]
 herdr workspace close <workspace_id> [--group]
 ```
+
+`set-skip-index` excludes a workspace from numbered jump keys (`switch_workspace`, navigate-mode digits) so the remaining spaces are renumbered; `false` includes it again. Previous and next workspace navigation still visit it. Setting the current value changes nothing and emits no event.
 
 Create a workspace without stealing focus:
 

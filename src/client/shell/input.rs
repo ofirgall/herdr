@@ -810,16 +810,15 @@ impl ClientShellState {
             return;
         }
 
-        if let Some(index) = ('1'..='9').position(|digit| {
+        // Digits '1'..='9' are jump numbers 1..=9 and '0' is number 10.
+        if let Some(index) = ('1'..='9').chain(['0']).position(|digit| {
             crate::config::terminal_key_matches_combo(
                 key,
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
             let valid = self.snapshot.as_deref().is_some_and(|snapshot| {
-                self.navigation_workspace_entries(snapshot)
-                    .get(index)
-                    .is_some()
+                self.jump_target_workspace_id(snapshot, index + 1).is_some()
             });
             if valid {
                 self.mode = ClientShellMode::Terminal;
@@ -979,8 +978,7 @@ impl ClientShellState {
         match binding {
             KeybindMatch::Action(KeybindAction::SwitchWorkspace(index)) => {
                 self.snapshot.as_deref().is_some_and(|snapshot| {
-                    self.navigation_workspace_entries(snapshot)
-                        .get(*index)
+                    self.jump_target_workspace_id(snapshot, *index + 1)
                         .is_some()
                 })
             }

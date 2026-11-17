@@ -70,9 +70,19 @@ pub(crate) fn render_collapsed_sidebar(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     selected_workspace_id: Option<&str>,
+    collapsed_groups: &HashSet<String>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
+    // Jump numbers follow the navigation entries; the collapsed list draws
+    // every space in snapshot order, so map them back by snapshot index.
+    let mut jump_digits = vec![None; snapshot.workspaces.len()];
+    let entries = workspace_entries(snapshot, collapsed_groups);
+    for (entry, number) in entries.iter().zip(space_jump_numbers(&entries, snapshot)) {
+        if let Some(slot) = jump_digits.get_mut(entry.index) {
+            *slot = number.map(JumpNumber::digit);
+        }
+    }
     let selection_background = workspace_selection_background(palette);
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
     render_sidebar_background(buffer, area, palette);
@@ -110,7 +120,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect.x,
             rect.y,
             rect.width.min(2),
-            &format!("{:<2}", index + 1),
+            &format!("{:<2}", jump_digits[index].unwrap_or(' ')),
             number_style,
         );
         let status = workspace.agent_status;
@@ -325,6 +335,8 @@ fn render_spaces_section(
     );
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
+    // One pass per frame, aligned with `entries`.
+    let jump_numbers = space_jump_numbers(&entries, snapshot);
     // Children are a presentation of the spaces list: one entry per space whose
     // agents are expanded, resolved once per frame.
     let agent_mode = config.spaces.agents;
@@ -385,6 +397,7 @@ fn render_spaces_section(
                         workspace,
                         displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
                         entry.indented,
+                        jump_numbers[entry_position].map(JumpNumber::digit),
                         &config.spaces,
                     )
                     .len()
@@ -443,7 +456,13 @@ fn render_spaces_section(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
+        let rows = workspace_rows(
+            workspace,
+            status,
+            entry.indented,
+            jump_numbers[entry_position].map(JumpNumber::digit),
+            &config.spaces,
+        );
         let space_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         // A space and its children are one list item, so they are placed or
         // skipped together.
@@ -610,6 +629,73 @@ pub(in crate::client::shell) fn render_sidebar_footer(
             );
         }
     }
+}
+
+/// Jump number of a space: `1`..=`10`, shown as `1`..`9` and `0`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JumpNumber(u8);
+
+impl JumpNumber {
+    pub(crate) const MAX: usize = 10;
+
+    /// `number` is one-based; `0` and values past `MAX` have no jump number.
+    pub(crate) fn new(number: usize) -> Option<Self> {
+        (1..=Self::MAX)
+            .contains(&number)
+            .then_some(Self(number as u8))
+    }
+
+    pub(crate) fn number(self) -> usize {
+        usize::from(self.0)
+    }
+
+    /// The key character: `'1'`..`'9'`, and `'0'` for the tenth number.
+    pub(crate) fn digit(self) -> char {
+        char::from(b'0' + self.0 % 10)
+    }
+}
+
+/// Jump numbers for `entries`, one pass: spaces flagged `skip_index` get none,
+/// the rest are numbered in order up to `JumpNumber::MAX`.
+pub(crate) fn space_jump_numbers(
+    entries: &[WorkspaceEntry],
+    snapshot: &ClientShellSnapshot,
+) -> Vec<Option<JumpNumber>> {
+    let mut next = 1;
+    entries
+        .iter()
+        .map(|entry| {
+            let skipped = snapshot
+                .workspaces
+                .get(entry.index)
+                .is_none_or(|workspace| workspace.skip_index);
+            if skipped {
+                return None;
+            }
+            let number = JumpNumber::new(next);
+            next += 1;
+            number
+        })
+        .collect()
+}
+
+/// The entry that jump number `number` (one-based) reaches.
+pub(crate) fn entry_for_jump_number(
+    entries: &[WorkspaceEntry],
+    snapshot: &ClientShellSnapshot,
+    number: usize,
+) -> Option<WorkspaceEntry> {
+    let number = JumpNumber::new(number)?.number();
+    entries
+        .iter()
+        .filter(|entry| {
+            snapshot
+                .workspaces
+                .get(entry.index)
+                .is_some_and(|workspace| !workspace.skip_index)
+        })
+        .nth(number - 1)
+        .copied()
 }
 
 pub(crate) fn workspace_entries(
@@ -821,6 +907,7 @@ pub(in crate::client::shell) fn workspace_rows(
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
     indented: bool,
+    jump_number: Option<char>,
     config: &SpacesSidebarConfig,
 ) -> Vec<Vec<crate::ui::ResolvedToken>> {
     let label = if indented && !workspace.custom_label {
@@ -837,6 +924,7 @@ pub(in crate::client::shell) fn workspace_rows(
         config,
         crate::ui::SpaceTokenContext {
             workspace: label,
+            jump_number,
             branch: workspace.branch.as_deref(),
             state_text: status_text(status),
             ahead_behind: workspace.git_ahead_behind,

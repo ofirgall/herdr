@@ -1122,6 +1122,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "skip_index": {
+              "description": "Excluded from numbered jump keys. Omitted when false.",
+              "type": "boolean"
+            },
             "tab_count": {
               "format": "uint",
               "minimum": 0,
@@ -4562,6 +4566,22 @@
           ],
           "type": "object"
         },
+        "WorkspaceSetSkipIndexParams": {
+          "properties": {
+            "skip": {
+              "description": "True excludes the space from numbered jump keys.",
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "skip"
+          ],
+          "type": "object"
+        },
         "WorkspaceTarget": {
           "properties": {
             "workspace_id": {
@@ -6355,6 +6375,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PluginPaneCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.set_skip_index",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSetSkipIndexParams"
             }
           },
           "required": [
@@ -10682,6 +10718,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "skip_index": {
+              "description": "Excluded from numbered jump keys. Omitted when false.",
+              "type": "boolean"
             },
             "tab_count": {
               "format": "uint",

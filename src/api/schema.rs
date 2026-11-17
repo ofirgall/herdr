@@ -145,6 +145,7 @@ operations::define_operations! {
     PluginPaneOpen(PluginPaneOpenParams) => "plugin.pane.open", true, false;
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
+    WorkspaceSetSkipIndex(WorkspaceSetSkipIndexParams) => "workspace.set_skip_index", true, true;
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use clap::{Arg, ArgMatches, Command};
 
 use crate::api::schema::workspaces::{
     WorkspaceCloseProjection, WorkspaceCreateProjection, WorkspaceMetadataProjection,
-    WorkspaceRenameProjection,
+    WorkspaceRenameProjection, WorkspaceSetSkipIndexProjection,
 };
 use crate::api::schema::{EmptyParams, Method, Request, WorkspaceTarget};
 
@@ -17,6 +17,18 @@ pub(crate) fn workspace_id() -> Input<String> {
         *slot = super::normalize_workspace_id(value);
         Ok(())
     })
+}
+
+pub(crate) fn skip_flag() -> Input<bool> {
+    Input::positional("skip", 1, |slot, value| {
+        *slot = match value {
+            "true" => true,
+            "false" => false,
+            _ => return Err(ParseError::Usage("skip must be true or false".into())),
+        };
+        Ok(())
+    })
+    .value_name("true|false")
 }
 
 pub(crate) fn label() -> Input<String> {
@@ -134,7 +146,7 @@ impl Leaf {
     }
 }
 
-pub(crate) const LEAVES: [Leaf; 7] = [
+pub(crate) const LEAVES: [Leaf; 8] = [
     Leaf {
         name: "list",
         about: "List workspaces",
@@ -181,6 +193,17 @@ pub(crate) const LEAVES: [Leaf; 7] = [
         arguments: WorkspaceRenameProjection::arguments,
         method: |matches| {
             WorkspaceRenameProjection::from_matches(matches).map(Method::WorkspaceRename)
+        },
+    },
+    Leaf {
+        name: "set-skip-index",
+        about: "Exclude a workspace from numbered jump keys, or include it again",
+        id: "cli:workspace:set-skip-index",
+        quiet: false,
+        arguments: WorkspaceSetSkipIndexProjection::arguments,
+        method: |matches| {
+            WorkspaceSetSkipIndexProjection::from_matches(matches)
+                .map(Method::WorkspaceSetSkipIndex)
         },
     },
     Leaf {
@@ -280,6 +303,26 @@ mod tests {
             .get_arguments()
             .any(|arg| arg.get_long() == Some("group") && arg.is_hide_set()));
         command().debug_assert();
+    }
+
+    #[test]
+    fn workspace_set_skip_index_parses_a_boolean_operand() {
+        assert_eq!(
+            serde_json::to_value(request("set-skip-index", &["w:7", "true"]).unwrap()).unwrap(),
+            serde_json::json!({
+                "id": "cli:workspace:set-skip-index", "method": "workspace.set_skip_index",
+                "params": {"workspace_id": "w:7", "skip": true}
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(request("set-skip-index", &["w:7", "false"]).unwrap()).unwrap(),
+            serde_json::json!({
+                "id": "cli:workspace:set-skip-index", "method": "workspace.set_skip_index",
+                "params": {"workspace_id": "w:7", "skip": false}
+            })
+        );
+        assert!(request("set-skip-index", &["w:7", "maybe"]).is_err());
+        assert!(request("set-skip-index", &["w:7"]).is_err());
     }
 
     #[test]

@@ -402,6 +402,7 @@ impl App {
             agent_status: pane_agent_status(agg_state, seen),
             tokens: ws.metadata_tokens.values(),
             links: ws.metadata_tokens.links(),
+            skip_index: ws.skip_index,
             worktree: ws
                 .worktree_space()
                 .map(|space| crate::api::schema::WorkspaceWorktreeInfo {

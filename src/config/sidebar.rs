@@ -127,6 +127,7 @@ pub enum AgentSidebarToken {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpaceSidebarToken {
+    Index,
     StateIcon,
     StateText,
     Workspace,
@@ -289,6 +290,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
 
 fn space_token_name(token: &SpaceSidebarToken) -> String {
     match token {
+        SpaceSidebarToken::Index => "index".into(),
         SpaceSidebarToken::StateIcon => "state_icon".into(),
         SpaceSidebarToken::StateText => "state_text".into(),
         SpaceSidebarToken::Workspace => "workspace".into(),
@@ -386,6 +388,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
         let token = parse_sidebar_token(
             value,
             &[
+                ("index", Self::Index),
                 ("state_icon", Self::StateIcon),
                 ("state_text", Self::StateText),
                 ("workspace", Self::Workspace),

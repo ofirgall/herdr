@@ -90,6 +90,7 @@ pub(super) fn snapshot_with_completions(
                 git_ahead_behind: state.git_ahead_behind(),
                 tokens,
                 token_links,
+                skip_index: workspace.skip_index,
                 worktree: workspace
                     .worktree
                     .map(|worktree| protocol::ClientShellWorktree {

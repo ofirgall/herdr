@@ -18,9 +18,14 @@ pub(crate) enum ResolvedTokenKind {
     Pane(String),
     Agent(String),
     AgentIndex(usize),
+    /// Jump-number key character of a space.
+    Index(char),
     TerminalTitle(String),
     Branch(String),
-    GitStatus { ahead: usize, behind: usize },
+    GitStatus {
+        ahead: usize,
+        behind: usize,
+    },
     Custom(String),
 }
 
@@ -36,7 +41,7 @@ impl ResolvedTokenKind {
             | Self::TerminalTitle(value)
             | Self::Branch(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::AgentIndex(_) | Self::GitStatus { .. } => None,
+            Self::StateIcon | Self::AgentIndex(_) | Self::Index(_) | Self::GitStatus { .. } => None,
         }
     }
 }
@@ -142,6 +147,8 @@ pub(crate) fn agent_rows(
 
 pub(crate) struct SpaceTokenContext<'a> {
     pub(crate) workspace: &'a str,
+    /// Jump-number key character, `None` for a space without a number.
+    pub(crate) jump_number: Option<char>,
     pub(crate) branch: Option<&'a str>,
     pub(crate) state_text: &'a str,
     pub(crate) ahead_behind: Option<(usize, usize)>,
@@ -165,6 +172,9 @@ pub(crate) fn space_rows(
                     let (token, style) = configured.parts();
                     let mut custom_link = None;
                     let kind = match token {
+                        SpaceSidebarToken::Index => {
+                            context.jump_number.map(ResolvedTokenKind::Index)
+                        }
                         SpaceSidebarToken::StateIcon if config.show_status => {
                             Some(ResolvedTokenKind::StateIcon)
                         }
@@ -194,9 +204,14 @@ pub(crate) fn space_rows(
                         }
                         SpaceSidebarToken::Styled { .. } => None,
                     }?;
-                    let style = kind
-                        .text_value()
-                        .map_or(Some(style), |value| configured.style_for_value(value))?;
+                    let style = match &kind {
+                        ResolvedTokenKind::Index(digit) => {
+                            configured.style_for_value(digit.encode_utf8(&mut [0; 4]))?
+                        }
+                        _ => kind
+                            .text_value()
+                            .map_or(Some(style), |value| configured.style_for_value(value))?,
+                    };
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
@@ -368,6 +383,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                 &config.spaces,
                 SpaceTokenContext {
                     workspace: "repo",
+                    jump_number: None,
                     branch: None,
                     state_text: "working",
                     ahead_behind: None,
@@ -418,6 +434,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config.spaces,
                 SpaceTokenContext {
                     workspace: "repo",
+                    jump_number: None,
                     branch: None,
                     state_text: "working",
                     ahead_behind: None,
@@ -629,6 +646,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config,
                 SpaceTokenContext {
                     workspace: "feature",
+                    jump_number: None,
                     branch: Some("worktree/feature"),
                     state_text: "idle",
                     ahead_behind: Some((2, 1)),
@@ -645,6 +663,43 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
     }
 
     #[test]
+    fn index_token_resolves_to_the_jump_number_and_is_elided_without_one() {
+        let config = SpacesSidebarConfig {
+            rows: vec![vec![SpaceSidebarToken::Index, SpaceSidebarToken::Workspace]],
+            ..Default::default()
+        };
+        let tokens = std::collections::HashMap::new();
+        let resolve = |jump_number| {
+            space_rows(
+                &config,
+                SpaceTokenContext {
+                    workspace: "repo",
+                    jump_number,
+                    branch: None,
+                    state_text: "idle",
+                    ahead_behind: None,
+                    tokens: &tokens,
+                    links: &[],
+                    suppress_git_details: false,
+                },
+            )
+        };
+        assert_eq!(
+            resolve(Some('0')),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Index('0')),
+                ResolvedToken::unstyled(ResolvedTokenKind::Workspace("repo".into())),
+            ]]
+        );
+        assert_eq!(
+            resolve(None),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                "repo".into()
+            ))]]
+        );
+    }
+
+    #[test]
     fn workspace_custom_token_can_replace_git_specific_details() {
         let tokens = std::collections::HashMap::from([("jj_status".into(), "2 changes".into())]);
         let config = SpacesSidebarConfig {
@@ -657,6 +712,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config,
                 SpaceTokenContext {
                     workspace: "repo",
+                    jump_number: None,
                     branch: None,
                     state_text: "idle",
                     ahead_behind: None,
@@ -688,6 +744,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config,
                 SpaceTokenContext {
                     workspace: "repo",
+                    jump_number: None,
                     branch: None,
                     state_text: "working",
                     ahead_behind: None,
@@ -736,6 +793,7 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
                 &config.spaces,
                 SpaceTokenContext {
                     workspace: "repo",
+                    jump_number: None,
                     branch: None,
                     state_text: "idle",
                     ahead_behind: None,

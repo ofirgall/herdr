@@ -40,6 +40,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             git_ahead_behind: None,
             tokens: Vec::new(),
             token_links: Default::default(),
+            skip_index: false,
             worktree: None,
             focused: true,
             agent_status: AgentStatus::Idle,

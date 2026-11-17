@@ -47,6 +47,16 @@ cli_params! {
     }
 }
 
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceSetSkipIndexParams => WorkspaceSetSkipIndexProjection {
+        pub workspace_id: String => Field::new(String::new())
+            .input(bindings::workspace_id().value_name("WORKSPACE_ID")),
+        /// True excludes the space from numbered jump keys.
+        pub skip: bool => Field::new(false).input(bindings::skip_flag()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceMoveParams {
     pub workspace_id: String,
@@ -99,6 +109,9 @@ pub struct WorkspaceInfo {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[schemars(schema_with = "super::common::metadata_link_values_schema")]
     pub links: HashMap<String, String>,
+    /// Excluded from numbered jump keys. Omitted when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_index: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorkspaceWorktreeInfo>,
 }

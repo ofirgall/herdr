@@ -836,6 +836,12 @@
           "description": "Resize the focused pane toward the right. Unset by default."
         },
         {
+          "key": "keys.toggle_space_index",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Skip or restore the focused space in jump numbers. Unset by default. The same toggle is in the space context menu."
+        },
+        {
           "key": "keys.toggle_sidebar",
           "type": "keybinding",
           "default": "\"prefix+b\"",
@@ -1195,7 +1201,7 @@
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. At most 16 rows and 16 tokens per row."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one. At most 16 rows and 16 tokens per row."
         },
         {
           "key": "ui.sidebar.spaces.show_status",

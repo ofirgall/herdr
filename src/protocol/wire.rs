@@ -1062,6 +1062,9 @@ pub struct ClientShellWorkspace {
     /// Web links of the tokens that have one, sorted like `tokens`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_links: Vec<(String, String)>,
+    /// Excluded from numbered jump keys. Omitted from JSON when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_index: bool,
     pub worktree: Option<ClientShellWorktree>,
     pub focused: bool,
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
@@ -2872,8 +2875,9 @@ mod tests {
                 git_ahead_behind: None,
                 tokens: vec![("pr".into(), "#1".into())],
                 // The legacy bincode path cannot skip fields, so this roundtrip
-                // carries a populated value. JSON skips it when empty.
+                // carries populated values. JSON skips them when empty or false.
                 token_links: vec![("pr".into(), "https://example.com/1".into())],
+                skip_index: true,
                 worktree: None,
                 focused: true,
                 agent_status: crate::api::schema::AgentStatus::Idle,
@@ -3755,6 +3759,36 @@ mod tests {
             self.pos += to_read;
             Ok(to_read)
         }
+    }
+
+    #[test]
+    fn client_shell_skip_index_is_present_only_when_true() {
+        let json = serde_json::json!({
+            "workspace_id": "w1",
+            "active_tab_id": "w1:t1",
+            "new_workspace_cwd": "/tmp",
+            "number": 1,
+            "label": "shell",
+            "custom_label": false,
+            "branch": null,
+            "git_ahead_behind": null,
+            "tokens": [],
+            "worktree": null,
+            "focused": true,
+            "agent_status": "idle",
+        });
+        let workspace: ClientShellWorkspace = serde_json::from_value(json.clone()).unwrap();
+        assert!(!workspace.skip_index);
+        assert!(serde_json::to_value(&workspace)
+            .unwrap()
+            .get("skip_index")
+            .is_none());
+
+        let mut skipped = json;
+        skipped["skip_index"] = serde_json::json!(true);
+        let workspace: ClientShellWorkspace = serde_json::from_value(skipped.clone()).unwrap();
+        assert!(workspace.skip_index);
+        assert_eq!(serde_json::to_value(&workspace).unwrap(), skipped);
     }
 
     #[test]

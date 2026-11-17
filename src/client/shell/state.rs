@@ -537,6 +537,7 @@ pub(super) enum ClientContextMenuAction {
     RemoveWorktree,
     ToggleGroup,
     ToggleAgents,
+    ToggleSkipIndex,
     NewTab,
     RenamePane,
     ClearPaneName,
@@ -559,6 +560,7 @@ pub(super) enum ClientContextMenuTarget {
         collapsed: bool,
         /// `Some(expanded)` when the space can show agent children.
         agents_expanded: Option<bool>,
+        skip_index: bool,
     },
     Tab {
         tab_id: String,
@@ -1246,6 +1248,17 @@ impl ClientShellState {
                     .unwrap_or(&empty_collapsed_groups),
             )
         }
+    }
+
+    /// Workspace id reached by one-based jump number `number`, if any.
+    pub(super) fn jump_target_workspace_id(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        number: usize,
+    ) -> Option<String> {
+        let entries = self.navigation_workspace_entries(snapshot);
+        let entry = render::entry_for_jump_number(&entries, snapshot, number)?;
+        Some(snapshot.workspaces.get(entry.index)?.workspace_id.clone())
     }
 
     pub(super) fn reveal_workspace(&mut self, workspace_id: &str) {

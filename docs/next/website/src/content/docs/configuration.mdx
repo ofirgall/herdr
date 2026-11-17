@@ -185,6 +185,22 @@ switch_workspace = "prefix+shift+1..9"
 focus_agent = "prefix+alt+1..9"
 ```
 
+`switch_workspace` also accepts `0..9`, which binds `1`-`9` and a tenth key on `0`, and a single binding on `0`:
+
+```toml
+[keys]
+switch_workspace = "ctrl+0..9"
+```
+
+Spaces can be left out of the numbering. `toggle_space_index` is unbound by default and skips or restores the focused space; the space context menu offers the same as "Skip jump number" / "Use jump number". The setting is stored in the session, so every client sees the same numbers, and previous/next workspace still visit skipped spaces. Use the `index` space token to show the numbers in the sidebar; the collapsed sidebar always shows them.
+
+```toml
+[keys]
+toggle_space_index = "prefix+i"
+```
+
+`1..9` never binds `0`. `switch_tab` and `focus_agent` only accept `1..9`; a `0` binding there is reported as an indexed-keybinding diagnostic and disabled. In navigate mode the plain `0` key also selects the tenth space.
+
 The legacy `[keys.indexed]` table is still parsed for compatibility, but new configs should prefer the explicit action fields.
 
 ## Custom command keybindings
@@ -461,6 +477,7 @@ Agent rows accept these built-in tokens:
 
 Space rows accept these built-in tokens:
 
+- `index` — the space's jump number: `1` to `9`, then `0` for the tenth. It is hidden for spaces without a number (skipped spaces and the eleventh and later spaces). It is not in the default rows.
 - `state_icon` — colored icon for the space's rolled-up agent state.
 - `state_text` — text for the rolled-up agent state.
 - `workspace` — workspace name.
