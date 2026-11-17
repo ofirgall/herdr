@@ -31,6 +31,8 @@ pub(crate) enum ResolvedTokenKind {
         behind: usize,
     },
     Custom(String),
+    /// Flexible gap that pushes the tokens after it to the right edge.
+    Spacer,
 }
 
 impl ResolvedTokenKind {
@@ -45,9 +47,11 @@ impl ResolvedTokenKind {
             | Self::TerminalTitle(value)
             | Self::Branch(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::AgentIndex(_) | Self::Index { .. } | Self::GitStatus { .. } => {
-                None
-            }
+            Self::StateIcon
+            | Self::AgentIndex(_)
+            | Self::Index { .. }
+            | Self::GitStatus { .. }
+            | Self::Spacer => None,
         }
     }
 }
@@ -152,6 +156,7 @@ pub(crate) fn agent_rows(
                                 .cloned()
                                 .map(ResolvedTokenKind::Custom)
                         }
+                        AgentSidebarToken::Spacer => Some(ResolvedTokenKind::Spacer),
                         AgentSidebarToken::Styled { .. } => None,
                     }?;
                     let style = kind
@@ -160,7 +165,7 @@ pub(crate) fn agent_rows(
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
-            (!resolved.is_empty()).then_some(resolved)
+            finish_row(resolved)
         })
         .collect()
 }
@@ -302,6 +307,7 @@ pub(crate) fn space_rows(
                                 .cloned()
                                 .map(ResolvedTokenKind::Custom)
                         }
+                        SpaceSidebarToken::Spacer => Some(ResolvedTokenKind::Spacer),
                         SpaceSidebarToken::Styled { .. } => None,
                     }?;
                     let style = match &kind {
@@ -319,9 +325,25 @@ pub(crate) fn space_rows(
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
-            (!resolved.is_empty()).then_some(resolved)
+            finish_row(resolved)
         })
         .collect()
+}
+
+/// Keeps only the first spacer of a row and drops a row with nothing but
+/// spacers, so an alignment marker never keeps an otherwise empty row alive.
+fn finish_row(mut resolved: Vec<ResolvedToken>) -> Option<Vec<ResolvedToken>> {
+    let mut seen_spacer = false;
+    resolved.retain(|token| {
+        if !matches!(token.kind, ResolvedTokenKind::Spacer) {
+            return true;
+        }
+        !std::mem::replace(&mut seen_spacer, true)
+    });
+    resolved
+        .iter()
+        .any(|token| !matches!(token.kind, ResolvedTokenKind::Spacer))
+        .then_some(resolved)
 }
 
 fn custom_link_for(links: &[(String, String)], name: &str) -> Option<String> {
@@ -331,8 +353,15 @@ fn custom_link_for(links: &[(String, String)], name: &str) -> Option<String> {
         .map(|(_, url)| url.clone())
 }
 
-pub(crate) fn separator(_previous: &ResolvedToken, _current: &ResolvedToken) -> &'static str {
-    " "
+/// Text between two adjacent visible tokens. A spacer supplies its own gap.
+pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
+    if matches!(previous.kind, ResolvedTokenKind::Spacer)
+        || matches!(current.kind, ResolvedTokenKind::Spacer)
+    {
+        ""
+    } else {
+        " "
+    }
 }
 
 #[cfg(test)]
@@ -1077,5 +1106,22 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
         assert_eq!(resolve("[{}] ", "1| zsh", 1), "1| zsh");
         assert_eq!(resolve("{}| ", "2| zsh", 1), "2| zsh");
         assert_eq!(resolve("{}| ", "2| ", 2), "2| ");
+    }
+
+    #[test]
+    fn rows_keep_one_spacer_and_drop_spacer_only_rows() {
+        let spacer = || ResolvedToken::unstyled(ResolvedTokenKind::Spacer);
+        let custom = || ResolvedToken::unstyled(ResolvedTokenKind::Custom("x".into()));
+        let row = finish_row(vec![custom(), spacer(), custom(), spacer(), custom()])
+            .expect("row with content");
+        assert_eq!(
+            row.iter()
+                .filter(|token| matches!(token.kind, ResolvedTokenKind::Spacer))
+                .count(),
+            1
+        );
+        assert_eq!(row.len(), 4);
+        assert!(finish_row(vec![spacer(), spacer()]).is_none());
+        assert!(finish_row(Vec::new()).is_none());
     }
 }

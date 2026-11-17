@@ -190,6 +190,8 @@ pub(crate) fn resolved_token_spans_with_links(
 struct TokenLayout {
     visible: Vec<usize>,
     budgets: Vec<usize>,
+    /// Columns available to the row; a spacer fills what the tokens leave.
+    max_width: usize,
 }
 
 /// Columns a linked token occupies in a rendered row, relative to the first
@@ -213,6 +215,8 @@ fn layout_tokens(
             ResolvedTokenKind::StateIcon => display_width(state_icon_text),
             ResolvedTokenKind::AgentIndex(index) => display_width(&(index + 1).to_string()),
             ResolvedTokenKind::Index { text, .. } => display_width(text),
+            // At least one column between the left and right-aligned tokens.
+            ResolvedTokenKind::Spacer => 1,
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
@@ -310,6 +314,7 @@ fn layout_tokens(
     TokenLayout {
         visible: visible_indices,
         budgets,
+        max_width,
     }
 }
 
@@ -330,7 +335,11 @@ fn emit_token_spans(
     let TokenLayout {
         visible: visible_indices,
         budgets,
+        max_width,
     } = layout;
+    // Span and token index of the row's spacer, widened once every token's
+    // width is known.
+    let mut spacer = None;
     for (position, index) in visible_indices.iter().copied().enumerate() {
         let token = &resolved[index];
         if position > 0 {
@@ -406,6 +415,10 @@ fn emit_token_spans(
                     ));
                 }
             }
+            ResolvedTokenKind::Spacer => {
+                spacer = Some((spans.len(), index));
+                spans.push(Span::raw(" "));
+            }
             ResolvedTokenKind::TerminalTitle(text) | ResolvedTokenKind::Custom(text) => {
                 spans.push(Span::styled(
                     truncate_end(text, budgets[index]),
@@ -430,6 +443,21 @@ fn emit_token_spans(
                 start: width_of(&spans[..first_span]),
                 width: width_of(&spans[first_span..]),
             });
+        }
+    }
+    if let Some((span, spacer_index)) = spacer {
+        let used = spans
+            .iter()
+            .map(|span| display_width(&span.content))
+            .sum::<usize>();
+        let extra = max_width.saturating_sub(used);
+        if extra > 0 {
+            spans[span] = Span::raw(" ".repeat(1 + extra));
+            for column in &mut columns {
+                if column.index > spacer_index {
+                    column.start += extra;
+                }
+            }
         }
     }
     (spans, columns)
@@ -644,6 +672,40 @@ mod token_link_layout_tests {
             }]
         );
         assert!(underlined(&spans).is_empty());
+    }
+
+    #[test]
+    fn spacer_pushes_the_following_tokens_to_the_right_edge() {
+        let row = vec![
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Spacer, false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+            token(ResolvedTokenKind::Custom("ci".into()), true),
+        ];
+        let (spans, columns) = linked(&row, 20);
+        assert_eq!(text(&spans), "repo        #7009 ci");
+        assert_eq!(
+            columns,
+            vec![
+                TokenColumns {
+                    index: 2,
+                    start: 12,
+                    width: 5
+                },
+                TokenColumns {
+                    index: 3,
+                    start: 18,
+                    width: 2
+                },
+            ]
+        );
+        // Too narrow: the spacer keeps one column and text tokens shrink as
+        // they do in any row.
+        let (spans, _) = linked(&row, 12);
+        assert_eq!(text(&spans), "repo #70… ci");
+        // Without room to spare the spacer is a single column.
+        let (spans, _) = linked(&row, 13);
+        assert_eq!(text(&spans), "repo #7009 ci");
     }
 
     #[test]
