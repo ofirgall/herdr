@@ -889,6 +889,37 @@ pub struct PullRequestsSidebarConfig {
     /// Whether the pull requests section is shown. It shares the lower part of
     /// the sidebar with the agents section, below it when both are enabled.
     pub enabled: bool,
+    /// `#rrggbb` or `#rgb` colors of the status glyphs and pull request
+    /// numbers; an unset one uses the theme palette.
+    pub colors: PullRequestColorsConfig,
+}
+
+/// Each color names the herdr-pr-tracker token it matches (`$pr_<name>`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PullRequestColorsConfig {
+    /// Merge conflict glyph. Default: theme `red`.
+    pub conflict: Option<SidebarTokenColor>,
+    /// Approved review glyph. Default: theme `green`.
+    pub approved: Option<SidebarTokenColor>,
+    /// Changes requested glyph. Default: theme `red`.
+    pub changes: Option<SidebarTokenColor>,
+    /// Review required glyph. Default: theme `blue`.
+    pub review: Option<SidebarTokenColor>,
+    /// Unresolved human review threads. Default: theme `yellow`.
+    pub human_threads: Option<SidebarTokenColor>,
+    /// Unresolved bot review threads. Default: theme `yellow`.
+    pub bot_threads: Option<SidebarTokenColor>,
+    /// Passing checks glyph and count. Default: theme `green`.
+    pub ci_pass: Option<SidebarTokenColor>,
+    /// Failing checks glyph. Default: theme `red`.
+    pub ci_fail: Option<SidebarTokenColor>,
+    /// Running checks glyph. Default: theme `peach`.
+    pub ci_run: Option<SidebarTokenColor>,
+    /// Merge queue mark. Default: theme `peach`.
+    pub queued: Option<SidebarTokenColor>,
+    /// Pull request number. Default: theme `overlay1`.
+    pub id: Option<SidebarTokenColor>,
 }
 
 #[cfg(test)]

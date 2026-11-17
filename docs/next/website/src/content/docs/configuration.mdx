@@ -132,6 +132,23 @@ The server polls every watched repository in one `gh api graphql` request, so th
 
 Clicking a heading opens the repository's pull requests on GitHub, and clicking a line opens that pull request, using the `ui.sidebar.token_link_click` mode. A pull request with checks ends with a `▸` at the right edge: clicking it, or the checks glyph beside it, lists the failing and running checks (GitHub Actions jobs and commit statuses) under the pull request, each opening its run, followed by a line counting the passed and skipped ones that opens the pull request's checks page. Click again to fold the list. Counts cover every check, while the failing and running checks listed come from the first 100 the head commit reports. When a poll fails, the heading shows `⚠` with the error below it, and the last listed pull requests stay until a poll succeeds. Up to 32 repositories can be watched.
 
+The status glyphs use the theme palette. Set colors under `[ui.sidebar.pull_requests.colors]` to change each one; the keys match the herdr-pr-tracker plugin's `$pr_*` tokens:
+
+```toml
+[ui.sidebar.pull_requests.colors]
+conflict = "#f38ba8"       # default: theme red
+approved = "#a6e3a1"       # green
+changes = "#f38ba8"        # red
+review = "#89b4fa"         # blue
+human_threads = "#f9e2af"  # yellow
+bot_threads = "#f9e2af"    # yellow
+ci_pass = "#a6e3a1"        # green; also the passed checks count
+ci_fail = "#f38ba8"        # red
+ci_run = "#f8921a"         # peach
+queued = "#f8921a"         # peach
+id = "#5c6fae"             # overlay1; the pull request number
+```
+
 ## Remote attach
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.

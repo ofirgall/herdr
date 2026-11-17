@@ -231,7 +231,9 @@ def collect_entries(model: Model, struct_name: str = ROOT_STRUCT, prefix: str = 
     for struct_field in model.structs[struct_name]:
         dotted = f"{prefix}{struct_field.name}"
         inner, is_vec = strip_wrappers(struct_field.rust_type)
-        if inner in model.structs:
+        # A struct without public fields (a color, say) has its own serde
+        # format and is a single value.
+        if model.structs.get(inner):
             if dotted in SKIPPED_SUBTREES:
                 continue
             if is_vec:

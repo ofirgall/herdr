@@ -1217,6 +1217,72 @@
           "description": "Show the Pull requests section, listing the open pull requests of the [[pull_requests.repos]] repositories, in the lower part of the expanded sidebar. With the agents section also enabled, the two split it evenly."
         },
         {
+          "key": "ui.sidebar.pull_requests.colors.conflict",
+          "type": "string",
+          "default": "unset",
+          "description": "Merge conflict glyph. A #rrggbb or #rgb color; unset uses the theme's red. Named after the herdr-pr-tracker token $pr_conflict."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.approved",
+          "type": "string",
+          "default": "unset",
+          "description": "Approved review glyph. A #rrggbb or #rgb color; unset uses the theme's green. Named after the herdr-pr-tracker token $pr_approved."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.changes",
+          "type": "string",
+          "default": "unset",
+          "description": "Changes requested glyph. A #rrggbb or #rgb color; unset uses the theme's red. Named after the herdr-pr-tracker token $pr_changes."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.review",
+          "type": "string",
+          "default": "unset",
+          "description": "Review required glyph. A #rrggbb or #rgb color; unset uses the theme's blue. Named after the herdr-pr-tracker token $pr_review."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.human_threads",
+          "type": "string",
+          "default": "unset",
+          "description": "Unresolved human review threads. A #rrggbb or #rgb color; unset uses the theme's yellow. Named after the herdr-pr-tracker token $pr_human_threads."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.bot_threads",
+          "type": "string",
+          "default": "unset",
+          "description": "Unresolved bot review threads. A #rrggbb or #rgb color; unset uses the theme's yellow. Named after the herdr-pr-tracker token $pr_bot_threads."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.ci_pass",
+          "type": "string",
+          "default": "unset",
+          "description": "Passing checks glyph and count. A #rrggbb or #rgb color; unset uses the theme's green. Named after the herdr-pr-tracker token $pr_ci_pass."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.ci_fail",
+          "type": "string",
+          "default": "unset",
+          "description": "Failing checks glyph. A #rrggbb or #rgb color; unset uses the theme's red. Named after the herdr-pr-tracker token $pr_ci_fail."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.ci_run",
+          "type": "string",
+          "default": "unset",
+          "description": "Running checks glyph. A #rrggbb or #rgb color; unset uses the theme's peach. Named after the herdr-pr-tracker token $pr_ci_run."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.queued",
+          "type": "string",
+          "default": "unset",
+          "description": "Merge queue mark. A #rrggbb or #rgb color; unset uses the theme's peach. Named after the herdr-pr-tracker token $pr_queued."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.id",
+          "type": "string",
+          "default": "unset",
+          "description": "Pull request number. A #rrggbb or #rgb color; unset uses the theme's overlay1. Named after the herdr-pr-tracker token $pr_id."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

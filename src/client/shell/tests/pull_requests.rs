@@ -289,3 +289,53 @@ fn the_toggle_lists_a_pull_requests_checks_failing_first() {
     assert!(rows[busy].ends_with("▸│"), "{}", rows[busy]);
     assert!(!rows.join("\n").contains("lint"));
 }
+
+#[test]
+fn configured_colors_override_the_palette() {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.enabled = false;
+    config.ui.sidebar.pull_requests = toml::from_str(
+        r##"
+        enabled = true
+        [colors]
+        approved = "#a6e3a1"
+        human_threads = "#f9e2af"
+        ci_fail = "#f38ba8"
+        id = "#5c6fae"
+        "##,
+    )
+    .expect("pull requests sidebar config");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snapshot = snapshot();
+    snapshot.pull_requests = repos();
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("composed frame");
+    let sidebar = Rect::new(0, 0, 26, 30);
+    let fg = |needle: &str| {
+        let (x, y) = cell_symbol_position(&frame, sidebar, needle);
+        frame.cells[(y * frame.width + x) as usize].fg
+    };
+    let rgb = |r, g, b| crate::protocol::color_to_u32(ratatui::style::Color::Rgb(r, g, b));
+    assert_eq!(fg("\u{F0008}"), rgb(0xa6, 0xe3, 0xa1));
+    assert_eq!(fg("\u{F017A}"), rgb(0xf9, 0xe2, 0xaf));
+    assert_eq!(fg("\u{F530}"), rgb(0xf3, 0x8b, 0xa8));
+    assert_eq!(fg("#7214"), rgb(0x5c, 0x6f, 0xae));
+    // Unset colors keep the palette.
+    let mut conflicted = repos();
+    conflicted[0].pull_requests[0].conflict = true;
+    state.set_snapshot(Box::new(ClientShellSnapshot {
+        pull_requests: conflicted,
+        ..snapshot_copy(&state)
+    }));
+    let frame = state.compose(106, 30).expect("composed frame");
+    let (x, y) = cell_symbol_position(&frame, sidebar, "\u{F182B}");
+    assert_eq!(
+        frame.cells[(y * frame.width + x) as usize].fg,
+        crate::protocol::color_to_u32(state.config.palette.red)
+    );
+}
+
+fn snapshot_copy(state: &ClientShellState) -> ClientShellSnapshot {
+    state.snapshot.as_deref().expect("snapshot").clone()
+}

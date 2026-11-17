@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -261,7 +261,8 @@ fn render_pull_request(
     config: &ClientShellConfig,
 ) -> Option<Rect> {
     let palette = &config.palette;
-    let mut status = status_spans(pr, palette);
+    let colors = PullRequestColors::new(config);
+    let mut status = status_spans(pr, &colors);
     let status_width = status
         .iter()
         .map(|span| span.content.width())
@@ -273,7 +274,8 @@ fn render_pull_request(
     } else {
         None
     };
-    let number = format!("{}#{}", marker.unwrap_or_default(), pr.number);
+    let marker = marker.unwrap_or_default();
+    let number = format!("{marker}#{}", pr.number);
     let toggle_width = if has_checks(pr) { TOGGLE_WIDTH } else { 0 };
     let width = usize::from(row.width.saturating_sub(PR_INDENT)).saturating_sub(toggle_width);
     let left_budget = width.saturating_sub(status_width + usize::from(status_width > 0));
@@ -292,13 +294,15 @@ fn render_pull_request(
     } else {
         Modifier::empty()
     };
-    let mut spans = vec![
-        Span::raw(" ".repeat(usize::from(PR_INDENT))),
-        Span::styled(
-            number,
-            Style::default().fg(palette.overlay1).add_modifier(dim),
-        ),
-    ];
+    let id_style = Style::default().fg(colors.id).add_modifier(dim);
+    let mut spans = vec![Span::raw(" ".repeat(usize::from(PR_INDENT)))];
+    match number.strip_prefix(marker).filter(|_| pr.queued) {
+        Some(id) => {
+            spans.push(Span::styled(marker, Style::default().fg(colors.queued)));
+            spans.push(Span::styled(id.to_owned(), id_style));
+        }
+        None => spans.push(Span::styled(number, id_style)),
+    }
     if !branch.is_empty() {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
@@ -356,7 +360,7 @@ fn render_check_summary(
     if counts.passed > 0 {
         push(
             format!("{CI_PASS} {}", counts.passed),
-            Style::default().fg(palette.green),
+            Style::default().fg(PullRequestColors::new(config).ci_pass),
         );
     }
     if counts.skipped > 0 {
@@ -388,22 +392,23 @@ fn render_check(
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
+    let colors = PullRequestColors::new(config);
     let (glyph, glyph_style, name_style) = match check.outcome {
         ClientShellPullRequestChecks::Pass => (
             CI_PASS,
-            Style::default().fg(palette.green),
+            Style::default().fg(colors.ci_pass),
             Style::default().fg(palette.subtext0),
         ),
         ClientShellPullRequestChecks::Fail => (
             CI_FAIL,
             Style::default()
-                .fg(palette.red)
+                .fg(colors.ci_fail)
                 .add_modifier(Modifier::BOLD),
             Style::default().fg(palette.text),
         ),
         ClientShellPullRequestChecks::Pending => (
             CI_PENDING,
-            Style::default().fg(palette.peach),
+            Style::default().fg(colors.ci_run),
             Style::default().fg(palette.subtext0),
         ),
         ClientShellPullRequestChecks::None | ClientShellPullRequestChecks::Unknown => {
@@ -424,55 +429,95 @@ fn render_check(
     Paragraph::new(line).render(row, buffer);
 }
 
+/// `[ui.sidebar.pull_requests.colors]` over the theme palette.
+struct PullRequestColors {
+    conflict: Color,
+    approved: Color,
+    changes: Color,
+    review: Color,
+    human_threads: Color,
+    bot_threads: Color,
+    ci_pass: Color,
+    ci_fail: Color,
+    ci_run: Color,
+    queued: Color,
+    id: Color,
+}
+
+impl PullRequestColors {
+    fn new(config: &ClientShellConfig) -> Self {
+        let palette = &config.palette;
+        let colors = &config.pull_requests.colors;
+        Self {
+            conflict: colors.conflict.map_or(palette.red, |color| color.ratatui()),
+            approved: colors
+                .approved
+                .map_or(palette.green, |color| color.ratatui()),
+            changes: colors.changes.map_or(palette.red, |color| color.ratatui()),
+            review: colors.review.map_or(palette.blue, |color| color.ratatui()),
+            human_threads: colors
+                .human_threads
+                .map_or(palette.yellow, |color| color.ratatui()),
+            bot_threads: colors
+                .bot_threads
+                .map_or(palette.yellow, |color| color.ratatui()),
+            ci_pass: colors
+                .ci_pass
+                .map_or(palette.green, |color| color.ratatui()),
+            ci_fail: colors.ci_fail.map_or(palette.red, |color| color.ratatui()),
+            ci_run: colors.ci_run.map_or(palette.peach, |color| color.ratatui()),
+            queued: colors.queued.map_or(palette.peach, |color| color.ratatui()),
+            id: colors.id.map_or(palette.overlay1, |color| color.ratatui()),
+        }
+    }
+}
+
 /// Conflict, review, human threads, bot threads, checks, space separated.
-fn status_spans(
-    pr: &ClientShellPullRequest,
-    palette: &crate::app::state::Palette,
-) -> Vec<Span<'static>> {
+fn status_spans(pr: &ClientShellPullRequest, colors: &PullRequestColors) -> Vec<Span<'static>> {
     let bold = Modifier::BOLD;
     let mut glyphs = Vec::<(String, Style)>::new();
     if pr.conflict {
         glyphs.push((
             CONFLICT.into(),
-            Style::default().fg(palette.red).add_modifier(bold),
+            Style::default().fg(colors.conflict).add_modifier(bold),
         ));
     }
     match pr.review {
         ClientShellPullRequestReview::Approved => {
-            glyphs.push((REVIEW_APPROVED.into(), Style::default().fg(palette.green)));
+            glyphs.push((REVIEW_APPROVED.into(), Style::default().fg(colors.approved)));
         }
         ClientShellPullRequestReview::ChangesRequested => glyphs.push((
             REVIEW_CHANGES.into(),
-            Style::default().fg(palette.red).add_modifier(bold),
+            Style::default().fg(colors.changes).add_modifier(bold),
         )),
         ClientShellPullRequestReview::ReviewRequired => glyphs.push((
             REVIEW_REQUIRED.into(),
-            Style::default().fg(palette.blue).add_modifier(bold),
+            Style::default().fg(colors.review).add_modifier(bold),
         )),
         ClientShellPullRequestReview::None | ClientShellPullRequestReview::Unknown => {}
     }
     if pr.human_threads > 0 {
         glyphs.push((
             format!("{THREADS}{}", pr.human_threads),
-            Style::default().fg(palette.yellow).add_modifier(bold),
+            Style::default().fg(colors.human_threads).add_modifier(bold),
         ));
     }
     if pr.bot_threads > 0 {
         glyphs.push((
             format!("{BOT_THREADS}{}", pr.bot_threads),
-            Style::default().fg(palette.yellow),
+            Style::default().fg(colors.bot_threads),
         ));
     }
     match pr.checks {
         ClientShellPullRequestChecks::Pass => {
-            glyphs.push((CI_PASS.into(), Style::default().fg(palette.green)));
+            glyphs.push((CI_PASS.into(), Style::default().fg(colors.ci_pass)));
         }
         ClientShellPullRequestChecks::Fail => glyphs.push((
             CI_FAIL.into(),
-            Style::default().fg(palette.red).add_modifier(bold),
+            Style::default().fg(colors.ci_fail).add_modifier(bold),
         )),
         ClientShellPullRequestChecks::Pending => {
-            glyphs.push((CI_PENDING.into(), Style::default().fg(palette.peach)));
+            glyphs.push((CI_PENDING.into(), Style::default().fg(colors.ci_run)));
         }
         ClientShellPullRequestChecks::None | ClientShellPullRequestChecks::Unknown => {}
     }

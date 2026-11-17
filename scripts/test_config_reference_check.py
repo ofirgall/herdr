@@ -34,6 +34,8 @@ pub struct UiConfig {
     pub host_cursor: HostCursorModeConfig,
     /// Tab bar status entries.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
+    /// A color with its own string format.
+    pub tint: Option<HexColor>,
     #[serde(rename = "accent_color")]
     pub accent: String,
     #[serde(skip)]
@@ -49,6 +51,13 @@ pub struct KeysConfig {
     /// Prefix-mode custom command bindings.
     pub command: Vec<CommandKeybindConfig>,
     pub(crate) user_fields: BTreeSet<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HexColor {
+    r: u8,
+    g: u8,
+    b: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +116,12 @@ class CollectKeysTests(unittest.TestCase):
 
         self.assertIn("ui.accent_color", keys)
         self.assertNotIn("ui.accent", keys)
+
+    def test_struct_without_public_fields_is_a_leaf_key(self) -> None:
+        keys = collect_keys(sample_model())
+
+        self.assertIn("ui.tint", keys)
+        self.assertFalse(any(key.startswith("ui.tint.") for key in keys))
 
     def test_skips_serde_skip_and_private_fields(self) -> None:
         keys = collect_keys(sample_model())
