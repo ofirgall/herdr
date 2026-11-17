@@ -234,6 +234,20 @@ fn workspace_metadata_presence_and_order_contract() {
             ],
             json!({"id":"cli:request","method":"workspace.report_metadata","params":{"workspace_id":"w:7","source":"user","tokens":{"key":""}}}),
         ),
+        (
+            vec![
+                "workspace",
+                "report-metadata",
+                "w:7",
+                "--source",
+                "user",
+                "--token",
+                "pr=#7",
+                "--link",
+                "pr=https://example.com/a=b",
+            ],
+            json!({"id":"cli:request","method":"workspace.report_metadata","params":{"workspace_id":"w:7","source":"user","tokens":{"pr":"#7"},"links":{"pr":"https://example.com/a=b"}}}),
+        ),
     ];
     for (args, expected) in cases {
         let captured = capture(&args, json!({"id":"cli:request","result":{"type":"ok"}}));
@@ -328,6 +342,20 @@ fn workspace_legacy_rejections_do_not_connect() {
                 "key",
             ],
             "token must use NAME=VALUE\n",
+        ),
+        (
+            vec![
+                "workspace",
+                "report-metadata",
+                "w1",
+                "--source",
+                "user",
+                "--token",
+                "key=value",
+                "--link",
+                "key",
+            ],
+            "link must use NAME=URL\n",
         ),
         (
             vec![

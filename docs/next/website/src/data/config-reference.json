@@ -1133,6 +1133,12 @@
           "description": "Tab color for the idle state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's green."
         },
         {
+          "key": "ui.sidebar.token_link_click",
+          "type": "string",
+          "default": "\"click\"",
+          "description": "Which click opens the web link of a sidebar token reported with --link. \"click\" opens it on a plain click, a modifier (ctrl, alt, cmd, meta, hyper, or a + combination such as ctrl+alt, never shift) requires exactly that modifier and leaves a plain click to select the row, and \"off\" removes the underline and the link click. Many terminals do not forward cmd-click on macOS and ctrl-click can become a right click. Invalid values are reported by herdr config check and keep the default."
+        },
+        {
           "key": "ui.sidebar.agents.enabled",
           "type": "boolean",
           "default": "true",

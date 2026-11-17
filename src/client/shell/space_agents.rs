@@ -108,6 +108,7 @@ impl<'a> SpaceAgentIndex<'a> {
                     vec![vec![crate::ui::ResolvedToken {
                         kind: crate::ui::ResolvedTokenKind::StateIcon,
                         style: Default::default(),
+                        link: None,
                     }]]
                 } else {
                     rows
@@ -215,7 +216,7 @@ pub(super) fn render_children(
                 continue;
             }
             let mut spans = Vec::<Span<'static>>::new();
-            spans.extend(crate::ui::resolved_token_spans(
+            spans.extend(super::agent_sidebar::token_row_spans(
                 tokens,
                 icon,
                 status_style,
@@ -224,6 +225,11 @@ pub(super) fn render_children(
                 secondary,
                 palette,
                 width as usize,
+                (!config.token_link_click.is_off()).then(|| super::agent_sidebar::LinkSink {
+                    hits: &mut hits.token_links,
+                    x: area.x + indent,
+                    y: y + index as u16,
+                }),
             ));
             Paragraph::new(Line::from(spans)).render(
                 Rect::new(area.x + indent, y + index as u16, width, 1),

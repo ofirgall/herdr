@@ -1721,11 +1721,22 @@ impl App {
         let raw_display_agent_set = params.display_agent.is_some();
         let raw_state_labels_set = !params.state_labels.is_empty();
         let tokens = if params.tokens.is_empty() {
+            if !params.links.is_empty() {
+                return encode_error(
+                    id,
+                    "invalid_metadata_link",
+                    "links require the same request to set the linked tokens",
+                );
+            }
             None
         } else {
-            match normalize_metadata_tokens(params.tokens) {
-                Ok(tokens) => Some(tokens),
+            let tokens = match normalize_metadata_tokens(params.tokens) {
+                Ok(tokens) => tokens,
                 Err(message) => return encode_error(id, "invalid_metadata_token", message),
+            };
+            match super::super::api_helpers::attach_metadata_links(tokens, params.links) {
+                Ok(tokens) => Some(tokens),
+                Err(message) => return encode_error(id, "invalid_metadata_link", message),
             }
         };
         let ttl = match normalize_metadata_ttl(params.ttl_ms) {
@@ -2413,6 +2424,7 @@ mod tests {
             display_agent: None,
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
+            links: Default::default(),
             clear_title: false,
             clear_display_agent: false,
             clear_state_labels: false,
@@ -4442,6 +4454,69 @@ mod tests {
             .attached_terminal_id
             .clone();
         assert!(app.state.terminals[&terminal_id].agent_metadata.is_empty());
+    }
+
+    fn pane_info_via_api(app: &mut App, pane_id: &str) -> crate::api::schema::PaneInfo {
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "get".into(),
+            method: crate::api::schema::Method::PaneGet(PaneTarget {
+                pane_id: pane_id.into(),
+            }),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneInfo { pane } = success.result else {
+            panic!("expected pane info");
+        };
+        pane
+    }
+
+    #[test]
+    fn pane_token_links_are_exposed_follow_the_token_and_reject_invalid_requests() {
+        let (mut app, pane_id) = app_with_test_workspace();
+        let url = "https://github.com/o/r/pull/7009";
+        let report = |app: &mut App, tokens: &[(&str, Option<&str>)], links: &[(&str, &str)]| {
+            let mut params = metadata_params(pane_id.clone());
+            params.title = None;
+            params.tokens = tokens
+                .iter()
+                .map(|(key, value)| ((*key).into(), value.map(str::to_string)))
+                .collect();
+            params.links = links
+                .iter()
+                .map(|(key, url)| ((*key).into(), (*url).into()))
+                .collect();
+            app.handle_pane_report_metadata("req".into(), params)
+        };
+
+        let response = report(&mut app, &[("pr", Some("#1"))], &[("pr", url)]);
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        let pane = pane_info_via_api(&mut app, &pane_id);
+        assert_eq!(pane.links["pr"], url);
+
+        // Invalid requests are rejected whole and leave tokens unchanged.
+        let too_long = format!("https://example.com/{}", "a".repeat(2048));
+        type LinkCase<'a> = (&'a [(&'a str, Option<&'a str>)], &'a [(&'a str, &'a str)]);
+        let cases: [LinkCase; 4] = [
+            (&[("other", Some("x"))], &[("pr", "https://example.com")]),
+            (&[], &[("pr", "https://example.com")]),
+            (&[("pr", Some("#2"))], &[("pr", "file:///etc/passwd")]),
+            (&[("pr", Some("#2"))], &[("pr", too_long.as_str())]),
+        ];
+        for (tokens, links) in cases {
+            let response = report(&mut app, tokens, links);
+            let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+            assert_eq!(error.error.code, "invalid_metadata_link");
+            let pane = pane_info_via_api(&mut app, &pane_id);
+            assert_eq!(pane.tokens["pr"], "#1");
+            assert_eq!(pane.links["pr"], url);
+        }
+
+        // Setting the value without a link clears it.
+        report(&mut app, &[("pr", Some("#3"))], &[]);
+        let pane = pane_info_via_api(&mut app, &pane_id);
+        assert_eq!(pane.tokens["pr"], "#3");
+        assert!(pane.links.is_empty());
     }
 
     #[test]

@@ -229,6 +229,9 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[schemars(schema_with = "super::common::metadata_token_values_schema")]
     pub tokens: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[schemars(schema_with = "super::common::metadata_link_values_schema")]
+    pub links: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
     pub workspace_id: String,

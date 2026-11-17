@@ -66,6 +66,15 @@ pub(crate) fn clear_token() -> Input<HashMap<String, Option<String>>> {
     })
 }
 
+pub(crate) fn link() -> Input<HashMap<String, String>> {
+    Input::<HashMap<String, String>>::value("link", "NAME=URL", |slot, value| {
+        let (key, url) = super::parse_link_assignment(value)?;
+        slot.insert(key, url);
+        Ok(())
+    })
+    .help("Attach a web URL to a token set in the same request")
+}
+
 pub(crate) fn validate_tokens(tokens: &HashMap<String, Option<String>>) -> Result<(), ParseError> {
     if tokens.is_empty() {
         return Err(ParseError::Usage("missing token to set or clear".into()));

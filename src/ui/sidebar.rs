@@ -139,10 +139,74 @@ pub(crate) fn resolved_token_spans(
     palette: &Palette,
     max_width: usize,
 ) -> Vec<Span<'static>> {
+    let layout = layout_tokens(resolved, state_icon.0, max_width);
+    emit_token_spans(
+        resolved,
+        layout,
+        state_icon,
+        state_text_style,
+        workspace_style,
+        secondary_style,
+        custom_style,
+        palette,
+        false,
+    )
+    .0
+}
+
+/// Like [`resolved_token_spans`], but underlines tokens that carry a link and
+/// reports the columns of each visible linked token. Callers use it only for
+/// rows with at least one linked token.
+pub(crate) fn resolved_token_spans_with_links(
+    resolved: &[ResolvedToken],
+    state_icon: (&str, Style),
+    state_text_style: Style,
+    workspace_style: Style,
+    secondary_style: Style,
+    custom_style: Style,
+    palette: &Palette,
+    max_width: usize,
+) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
+    let layout = layout_tokens(resolved, state_icon.0, max_width);
+    emit_token_spans(
+        resolved,
+        layout,
+        state_icon,
+        state_text_style,
+        workspace_style,
+        secondary_style,
+        custom_style,
+        palette,
+        true,
+    )
+}
+
+/// Which tokens of a row are visible after width fitting and how many columns
+/// each flexible token may use. Elided tokens are absent from `visible`.
+struct TokenLayout {
+    visible: Vec<usize>,
+    budgets: Vec<usize>,
+}
+
+/// Columns a linked token occupies in a rendered row, relative to the first
+/// column of the row's token spans. Separators are not part of any token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TokenColumns {
+    /// Index of the token in the resolved row.
+    pub index: usize,
+    pub start: usize,
+    pub width: usize,
+}
+
+fn layout_tokens(
+    resolved: &[ResolvedToken],
+    state_icon_text: &str,
+    max_width: usize,
+) -> TokenLayout {
     let fixed_widths = resolved
         .iter()
         .map(|token| match &token.kind {
-            ResolvedTokenKind::StateIcon => display_width(state_icon.0),
+            ResolvedTokenKind::StateIcon => display_width(state_icon_text),
             ResolvedTokenKind::AgentIndex(index) => display_width(&(index + 1).to_string()),
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
@@ -238,8 +302,29 @@ pub(crate) fn resolved_token_spans(
             break;
         }
     }
+    TokenLayout {
+        visible: visible_indices,
+        budgets,
+    }
+}
 
+fn emit_token_spans(
+    resolved: &[ResolvedToken],
+    layout: TokenLayout,
+    state_icon: (&str, Style),
+    state_text_style: Style,
+    workspace_style: Style,
+    secondary_style: Style,
+    custom_style: Style,
+    palette: &Palette,
+    underline_links: bool,
+) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
     let mut spans = Vec::new();
+    let mut columns = Vec::new();
+    let TokenLayout {
+        visible: visible_indices,
+        budgets,
+    } = layout;
     for (position, index) in visible_indices.iter().copied().enumerate() {
         let token = &resolved[index];
         if position > 0 {
@@ -249,6 +334,7 @@ pub(crate) fn resolved_token_spans(
                 Style::default().fg(palette.overlay0),
             ));
         }
+        let first_span = spans.len();
         match &token.kind {
             ResolvedTokenKind::StateIcon => spans.push(Span::styled(
                 state_icon.0.to_string(),
@@ -301,8 +387,24 @@ pub(crate) fn resolved_token_spans(
                 ));
             }
         }
+        if underline_links && token.link.is_some() {
+            let width_of = |spans: &[Span<'static>]| {
+                spans
+                    .iter()
+                    .map(|span| display_width(&span.content))
+                    .sum::<usize>()
+            };
+            for span in &mut spans[first_span..] {
+                span.style = span.style.add_modifier(Modifier::UNDERLINED);
+            }
+            columns.push(TokenColumns {
+                index,
+                start: width_of(&spans[..first_span]),
+                width: width_of(&spans[first_span..]),
+            });
+        }
     }
-    spans
+    (spans, columns)
 }
 
 fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) -> Style {
@@ -376,5 +478,130 @@ mod section_geometry_tests {
             expanded_sidebar_sections(Rect::default(), 0.5, true, false),
             (Rect::default(), Rect::default())
         );
+    }
+}
+
+#[cfg(test)]
+mod token_link_layout_tests {
+    use super::*;
+    use crate::config::SidebarTokenStyle;
+
+    fn token(kind: ResolvedTokenKind, link: bool) -> ResolvedToken {
+        ResolvedToken {
+            kind,
+            style: SidebarTokenStyle::default(),
+            link: link.then(|| "https://example.com".to_owned()),
+        }
+    }
+
+    fn linked(row: &[ResolvedToken], width: usize) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
+        let style = Style::default();
+        resolved_token_spans_with_links(
+            row,
+            ("*", style),
+            style,
+            style,
+            style,
+            style,
+            &Palette::catppuccin(),
+            width,
+        )
+    }
+
+    fn text(spans: &[Span<'static>]) -> String {
+        spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
+    fn underlined(spans: &[Span<'static>]) -> Vec<String> {
+        spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::UNDERLINED))
+            .map(|span| span.content.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn visible_linked_tokens_report_their_columns_without_separators() {
+        let row = vec![
+            token(ResolvedTokenKind::StateIcon, false),
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+            token(ResolvedTokenKind::Custom("ci".into()), true),
+        ];
+        let (spans, columns) = linked(&row, 40);
+        assert_eq!(text(&spans), "* repo #7009 ci");
+        assert_eq!(
+            columns,
+            vec![
+                TokenColumns {
+                    index: 2,
+                    start: 7,
+                    width: 5
+                },
+                TokenColumns {
+                    index: 3,
+                    start: 13,
+                    width: 2
+                },
+            ]
+        );
+        assert_eq!(underlined(&spans), vec!["#7009", "ci"]);
+    }
+
+    #[test]
+    fn truncated_linked_token_is_clickable_only_on_its_visible_columns() {
+        let row = vec![
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+        ];
+        let (spans, columns) = linked(&row, 8);
+        let rendered = text(&spans);
+        assert!(display_width(&rendered) <= 8);
+        assert_eq!(columns.len(), 1);
+        let column = &columns[0];
+        assert_eq!(column.index, 1);
+        let shown = underlined(&spans).concat();
+        assert!(display_width("#7009") > column.width);
+        assert_eq!(column.width, display_width(&shown));
+        assert_eq!(
+            display_width(&rendered),
+            column.start + column.width,
+            "the linked token is last, so it ends the row"
+        );
+    }
+
+    #[test]
+    fn elided_linked_token_has_no_columns_and_no_underline() {
+        let row = vec![
+            token(ResolvedTokenKind::Custom("pr".into()), true),
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+        ];
+        let (spans, columns) = linked(&row, 1);
+        assert!(columns.is_empty());
+        assert!(underlined(&spans).is_empty());
+    }
+
+    #[test]
+    fn plain_spans_match_the_linked_layout_and_never_underline_without_links() {
+        let row = vec![
+            token(ResolvedTokenKind::StateIcon, false),
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+        ];
+        let style = Style::default();
+        for width in [0, 3, 8, 40] {
+            let plain = resolved_token_spans(
+                &row,
+                ("*", style),
+                style,
+                style,
+                style,
+                style,
+                &Palette::catppuccin(),
+                width,
+            );
+            assert!(underlined(&plain).is_empty());
+            assert_eq!(text(&plain), text(&linked(&row, width).0));
+        }
     }
 }

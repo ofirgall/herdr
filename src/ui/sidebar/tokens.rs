@@ -4,6 +4,8 @@ use crate::config::{AgentSidebarToken, SidebarTokenStyle, SpaceSidebarToken, Spa
 pub(crate) struct ResolvedToken {
     pub kind: ResolvedTokenKind,
     pub style: SidebarTokenStyle,
+    /// Web URL reported with a custom API token; never set for static metadata.
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +43,16 @@ impl ResolvedTokenKind {
 
 impl ResolvedToken {
     fn new(kind: ResolvedTokenKind, style: SidebarTokenStyle) -> Self {
-        Self { kind, style }
+        Self {
+            kind,
+            style,
+            link: None,
+        }
+    }
+
+    fn with_link(mut self, link: Option<String>) -> Self {
+        self.link = link;
+        self
     }
 
     #[cfg(test)]
@@ -61,6 +72,8 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
+    /// API-reported links by token name; static tokens have none.
+    pub(crate) links: &'a [(String, String)],
 }
 
 /// Resolves one agent's token `rows`; callers choose the row set (per-agent
@@ -76,6 +89,7 @@ pub(crate) fn agent_rows(
                 .iter()
                 .filter_map(|configured| {
                     let (token, style) = configured.parts();
+                    let mut custom_link = None;
                     let kind = match token {
                         AgentSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
                         AgentSidebarToken::StateText => {
@@ -105,17 +119,20 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::TerminalTitleStripped => context
                             .terminal_title_stripped
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
-                        AgentSidebarToken::Custom(name) => context
-                            .tokens
-                            .get(name)
-                            .cloned()
-                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::Custom(name) => {
+                            custom_link = custom_link_for(context.links, name);
+                            context
+                                .tokens
+                                .get(name)
+                                .cloned()
+                                .map(ResolvedTokenKind::Custom)
+                        }
                         AgentSidebarToken::Styled { .. } => None,
                     }?;
                     let style = kind
                         .text_value()
                         .map_or(Some(style), |value| configured.style_for_value(value))?;
-                    Some(ResolvedToken::new(kind, style))
+                    Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
             (!resolved.is_empty()).then_some(resolved)
@@ -129,6 +146,8 @@ pub(crate) struct SpaceTokenContext<'a> {
     pub(crate) state_text: &'a str,
     pub(crate) ahead_behind: Option<(usize, usize)>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
+    /// API-reported links by token name; static metadata has none.
+    pub(crate) links: &'a [(String, String)],
     pub(crate) suppress_git_details: bool,
 }
 
@@ -144,6 +163,7 @@ pub(crate) fn space_rows(
                 .iter()
                 .filter_map(|configured| {
                     let (token, style) = configured.parts();
+                    let mut custom_link = None;
                     let kind = match token {
                         SpaceSidebarToken::StateIcon if config.show_status => {
                             Some(ResolvedTokenKind::StateIcon)
@@ -164,22 +184,32 @@ pub(crate) fn space_rows(
                             .filter(|(ahead, behind)| *ahead > 0 || *behind > 0)
                             .map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),
                         SpaceSidebarToken::GitStatus => None,
-                        SpaceSidebarToken::Custom(name) => context
-                            .tokens
-                            .get(name)
-                            .cloned()
-                            .map(ResolvedTokenKind::Custom),
+                        SpaceSidebarToken::Custom(name) => {
+                            custom_link = custom_link_for(context.links, name);
+                            context
+                                .tokens
+                                .get(name)
+                                .cloned()
+                                .map(ResolvedTokenKind::Custom)
+                        }
                         SpaceSidebarToken::Styled { .. } => None,
                     }?;
                     let style = kind
                         .text_value()
                         .map_or(Some(style), |value| configured.style_for_value(value))?;
-                    Some(ResolvedToken::new(kind, style))
+                    Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
             (!resolved.is_empty()).then_some(resolved)
         })
         .collect()
+}
+
+fn custom_link_for(links: &[(String, String)], name: &str) -> Option<String> {
+    links
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, url)| url.clone())
 }
 
 pub(crate) fn separator(_previous: &ResolvedToken, _current: &ResolvedToken) -> &'static str {
@@ -200,6 +230,7 @@ mod tests {
         terminal_title_stripped: Option<String>,
         canonical_agent: Option<crate::detect::Agent>,
         tokens: std::collections::HashMap<String, String>,
+        links: Vec<(String, String)>,
     }
 
     fn entry() -> Entry {
@@ -212,6 +243,7 @@ mod tests {
             terminal_title_stripped: None,
             canonical_agent: Some(crate::detect::Agent::Pi),
             tokens: std::collections::HashMap::new(),
+            links: Vec::new(),
         }
     }
 
@@ -232,6 +264,7 @@ mod tests {
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             tokens: &entry.tokens,
+            links: &entry.links,
         }
     }
 
@@ -340,6 +373,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                     ahead_behind: None,
                     suppress_git_details: false,
                     tokens: &entry.tokens,
+                    links: &entry.links,
                 },
             );
             assert_eq!(spaces[0][0].style.dim, (value == "20").then_some(true));
@@ -389,6 +423,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     ahead_behind: None,
                     suppress_git_details: false,
                     tokens: &entry.tokens,
+                    links: &entry.links,
                 },
             );
             assert_eq!(rows.len(), count);
@@ -598,6 +633,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     state_text: "idle",
                     ahead_behind: Some((2, 1)),
                     tokens: &std::collections::HashMap::new(),
+                    links: &[],
                     suppress_git_details: true,
                 },
             ),
@@ -625,6 +661,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     state_text: "idle",
                     ahead_behind: None,
                     tokens: &tokens,
+                    links: &[],
                     suppress_git_details: false,
                 },
             ),
@@ -655,6 +692,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     state_text: "working",
                     ahead_behind: None,
                     tokens: &std::collections::HashMap::new(),
+                    links: &[],
                     suppress_git_details: false,
                 },
             ),
@@ -662,5 +700,59 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 "repo".into()
             ))]]
         );
+    }
+    #[test]
+    fn links_attach_only_to_custom_tokens_with_an_api_link() {
+        let config: crate::config::SidebarConfig = toml::from_str(
+            r#"
+[agents]
+rows = [["workspace", "$pr", "$plain"]]
+[spaces]
+rows = [["workspace", "$pr", "$plain", "$env"]]
+"#,
+        )
+        .unwrap();
+        let mut entry = entry();
+        entry.tokens.insert("pr".into(), "#7".into());
+        entry.tokens.insert("plain".into(), "x".into());
+        entry.links = vec![
+            ("pr".into(), "https://example.com/7".into()),
+            // A link for a token without a value, or a built-in, is ignored.
+            ("workspace".into(), "https://example.com/w".into()),
+            ("missing".into(), "https://example.com/m".into()),
+        ];
+        let rows = agent_rows(entry.rows(&config.agents), context(&entry), "working");
+        assert_eq!(rows[0][0].link, None);
+        assert_eq!(rows[0][1].link.as_deref(), Some("https://example.com/7"));
+        assert_eq!(rows[0][2].link, None);
+
+        // Static metadata (here: "env" is only in the token map, as the
+        // client merges it) has no entry in the API links, so no link; an API
+        // token that overrides it brings its own link.
+        let mut tokens = entry.tokens.clone();
+        tokens.insert("env".into(), "staging".into());
+        let space = |tokens: &std::collections::HashMap<String, String>,
+                     links: &[(String, String)]| {
+            space_rows(
+                &config.spaces,
+                SpaceTokenContext {
+                    workspace: "repo",
+                    branch: None,
+                    state_text: "idle",
+                    ahead_behind: None,
+                    tokens,
+                    links,
+                    suppress_git_details: false,
+                },
+            )
+        };
+        let rows = space(&tokens, &entry.links);
+        assert_eq!(rows[0][3].kind, ResolvedTokenKind::Custom("staging".into()));
+        assert_eq!(rows[0][3].link, None);
+        assert_eq!(rows[0][1].link.as_deref(), Some("https://example.com/7"));
+        let overriding = [("env".to_string(), "https://example.com/env".to_string())];
+        let rows = space(&tokens, &overriding);
+        assert_eq!(rows[0][3].link.as_deref(), Some("https://example.com/env"));
+        assert_eq!(rows[0][1].link, None);
     }
 }

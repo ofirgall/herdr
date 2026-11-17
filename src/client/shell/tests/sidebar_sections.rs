@@ -23,6 +23,7 @@ fn snapshot_with_agent() -> ClientShellSnapshot {
         state_change_seq: 1,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: true,
     });
     snapshot

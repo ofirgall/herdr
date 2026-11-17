@@ -264,8 +264,13 @@ fn parse_right_click_passthrough_modifier(value: &str) -> Option<Option<KeyModif
         return Some(None);
     }
 
+    parse_modifier_combination(trimmed).map(Some)
+}
+
+/// Parses a `+`-joined, shift-free modifier combination such as `ctrl+alt`.
+pub(super) fn parse_modifier_combination(value: &str) -> Option<KeyModifiers> {
     let mut modifiers = KeyModifiers::empty();
-    for token in trimmed.split('+') {
+    for token in value.trim().split('+') {
         let token = token.trim().to_ascii_lowercase();
         let modifier = match token.as_str() {
             "ctrl" | "control" => KeyModifiers::CONTROL,
@@ -279,7 +284,7 @@ fn parse_right_click_passthrough_modifier(value: &str) -> Option<Option<KeyModif
         modifiers |= modifier;
     }
 
-    (!modifiers.is_empty()).then_some(Some(modifiers))
+    (!modifiers.is_empty()).then_some(modifiers)
 }
 
 #[derive(Debug, Clone)]

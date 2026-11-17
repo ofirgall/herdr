@@ -711,6 +711,7 @@ mod tests {
             agent_status: AgentStatus::Unknown,
             state_labels: HashMap::new(),
             tokens: HashMap::new(),
+            links: Default::default(),
             agent_session: None,
             scroll,
             revision: 0,

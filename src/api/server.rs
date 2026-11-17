@@ -1153,6 +1153,7 @@ mod tests {
             agent_status,
             state_labels: HashMap::new(),
             tokens: HashMap::new(),
+            links: Default::default(),
             agent_session: None,
             scroll: None,
             revision: 0,

@@ -4,8 +4,12 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MetadataToken {
     value: String,
+    link: Option<String>,
     expires_at: Option<Instant>,
 }
+
+/// A metadata patch: `Some((value, link))` sets a token, `None` clears it.
+pub(crate) type MetadataTokenPatch = HashMap<String, Option<(String, Option<String>)>>;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct MetadataTokens {
@@ -43,7 +47,7 @@ pub(crate) fn accept_sequence(
 impl MetadataTokens {
     pub(crate) fn patch(
         &mut self,
-        patch: HashMap<String, Option<String>>,
+        patch: MetadataTokenPatch,
         ttl: Option<Duration>,
         now: Instant,
     ) -> bool {
@@ -51,8 +55,12 @@ impl MetadataTokens {
         let mut changed = false;
         for (key, value) in patch {
             match value {
-                Some(value) => {
-                    let token = MetadataToken { value, expires_at };
+                Some((value, link)) => {
+                    let token = MetadataToken {
+                        value,
+                        link,
+                        expires_at,
+                    };
                     if self.entries.get(&key) != Some(&token) {
                         self.entries.insert(key, token);
                         changed = true;
@@ -66,7 +74,7 @@ impl MetadataTokens {
         changed
     }
 
-    pub(crate) fn key_count_after_patch(&self, patch: &HashMap<String, Option<String>>) -> usize {
+    pub(crate) fn key_count_after_patch(&self, patch: &MetadataTokenPatch) -> usize {
         let mut keys = self
             .values()
             .into_keys()
@@ -85,6 +93,14 @@ impl MetadataTokens {
         self.entries
             .iter()
             .map(|(key, token)| (key.clone(), token.value.clone()))
+            .collect()
+    }
+
+    /// Links of the tokens that have one, keyed by token name.
+    pub(crate) fn links(&self) -> HashMap<String, String> {
+        self.entries
+            .iter()
+            .filter_map(|(key, token)| Some((key.clone(), token.link.clone()?)))
             .collect()
     }
 
@@ -107,11 +123,15 @@ impl MetadataTokens {
 mod tests {
     use super::*;
 
-    fn patch(items: &[(&str, Option<&str>)]) -> HashMap<String, Option<String>> {
+    fn patch(items: &[(&str, Option<&str>)]) -> MetadataTokenPatch {
         items
             .iter()
-            .map(|(key, value)| ((*key).into(), value.map(str::to_string)))
+            .map(|(key, value)| ((*key).into(), value.map(|v| (v.to_string(), None))))
             .collect()
+    }
+
+    fn linked(key: &str, value: &str, link: &str) -> MetadataTokenPatch {
+        HashMap::from([(key.into(), Some((value.into(), Some(link.into()))))])
     }
 
     #[test]
@@ -255,5 +275,52 @@ mod tests {
             tokens.values(),
             HashMap::from([("summary".into(), "persistent".into())])
         );
+    }
+
+    #[test]
+    fn link_is_stored_with_the_token_and_replaced_by_later_values() {
+        let now = Instant::now();
+        let mut tokens = MetadataTokens::default();
+        assert!(tokens.patch(linked("pr", "#1", "https://example.com/1"), None, now));
+        assert_eq!(
+            tokens.links(),
+            HashMap::from([("pr".into(), "https://example.com/1".into())])
+        );
+
+        // Same value and link is not a change.
+        assert!(!tokens.patch(linked("pr", "#1", "https://example.com/1"), None, now));
+        // A link-only change is a change.
+        assert!(tokens.patch(linked("pr", "#1", "https://example.com/2"), None, now));
+        assert_eq!(tokens.links()["pr"], "https://example.com/2");
+
+        // Re-setting without a link clears it.
+        assert!(tokens.patch(patch(&[("pr", Some("#1"))]), None, now));
+        assert!(tokens.links().is_empty());
+        assert_eq!(tokens.values(), HashMap::from([("pr".into(), "#1".into())]));
+    }
+
+    #[test]
+    fn clearing_a_token_removes_its_link() {
+        let now = Instant::now();
+        let mut tokens = MetadataTokens::default();
+        tokens.patch(linked("pr", "#1", "https://example.com/1"), None, now);
+        assert!(tokens.patch(patch(&[("pr", None)]), None, now));
+        assert!(tokens.values().is_empty());
+        assert!(tokens.links().is_empty());
+    }
+
+    #[test]
+    fn expiry_removes_the_link_with_the_token() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(1);
+        let mut tokens = MetadataTokens::default();
+        tokens.patch(
+            linked("pr", "#1", "https://example.com/1"),
+            Some(Duration::from_secs(1)),
+            now,
+        );
+        assert!(tokens.expire_at(deadline));
+        assert!(tokens.values().is_empty());
+        assert!(tokens.links().is_empty());
     }
 }

@@ -11,6 +11,7 @@ pub use rules::SidebarTokenRule;
 
 use std::collections::BTreeMap;
 
+use crossterm::event::KeyModifiers;
 use serde::{Deserialize, Serialize};
 
 use crate::detect::Agent;
@@ -547,11 +548,107 @@ impl SpacesSidebarConfig {
     }
 }
 
+/// Which click opens the link of a sidebar token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TokenLinkClick {
+    /// A plain click (no ctrl/alt/super/meta/hyper) opens the link.
+    #[default]
+    Click,
+    /// A click holding exactly these modifiers opens the link.
+    Modifier(KeyModifiers),
+    /// Links are neither underlined nor clickable.
+    Off,
+}
+
+impl TokenLinkClick {
+    fn parse(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("click") {
+            return Some(Self::Click);
+        }
+        if trimmed.eq_ignore_ascii_case("off") {
+            return Some(Self::Off);
+        }
+        super::model::parse_modifier_combination(trimmed).map(Self::Modifier)
+    }
+
+    fn as_config_string(self) -> String {
+        match self {
+            Self::Click => "click".to_owned(),
+            Self::Off => "off".to_owned(),
+            Self::Modifier(modifiers) => [
+                (KeyModifiers::CONTROL, "ctrl"),
+                (KeyModifiers::ALT, "alt"),
+                (KeyModifiers::SUPER, "cmd"),
+                (KeyModifiers::META, "meta"),
+                (KeyModifiers::HYPER, "hyper"),
+            ]
+            .into_iter()
+            .filter(|(modifier, _)| modifiers.contains(*modifier))
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>()
+            .join("+"),
+        }
+    }
+
+    /// Whether a left click carrying `modifiers` opens a token link.
+    /// Shift is ignored: terminals commonly reserve shift-click for their own
+    /// selection, so it neither enables nor blocks the click.
+    pub fn matches(self, modifiers: KeyModifiers) -> bool {
+        let modifiers = modifiers - KeyModifiers::SHIFT;
+        match self {
+            Self::Click => modifiers.is_empty(),
+            Self::Modifier(required) => modifiers == required,
+            Self::Off => false,
+        }
+    }
+
+    pub fn is_off(self) -> bool {
+        self == Self::Off
+    }
+}
+
+/// Serde form of [`TokenLinkClick`]: a string, so the config reference lists
+/// it as a string rather than an enum.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenLinkClickConfig(TokenLinkClick);
+
+impl TokenLinkClickConfig {
+    pub fn mode(self) -> TokenLinkClick {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenLinkClickConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        TokenLinkClick::parse(&value).map(Self).ok_or_else(|| {
+            serde::de::Error::custom(
+                "token_link_click must be click, off, ctrl/control, alt/option, cmd/command/super, meta, hyper, or a + separated combination without shift",
+            )
+        })
+    }
+}
+
+impl Serialize for TokenLinkClickConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0.as_config_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// Which click opens the link of a metadata token that carries one.
+    pub token_link_click: TokenLinkClickConfig,
 }
 
 impl SidebarConfig {
@@ -588,6 +685,65 @@ tokens = { env = "dev" }
         assert_eq!(spaces.metadata[1].tokens["env"], "dev");
         assert!(spaces.metadata_diagnostics().is_empty());
         assert!(config.collect_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn token_link_click_parses_every_accepted_form() {
+        let parse = |value: &str| -> Result<TokenLinkClick, _> {
+            toml::from_str::<SidebarConfig>(&format!("token_link_click = \"{value}\""))
+                .map(|config| config.token_link_click.mode())
+        };
+        assert_eq!(
+            SidebarConfig::default().token_link_click.mode(),
+            TokenLinkClick::Click
+        );
+        assert_eq!(parse("click").unwrap(), TokenLinkClick::Click);
+        assert_eq!(parse("off").unwrap(), TokenLinkClick::Off);
+        assert_eq!(
+            parse("ctrl").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::CONTROL)
+        );
+        assert_eq!(
+            parse("Option").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::ALT)
+        );
+        assert_eq!(
+            parse("cmd+alt").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::SUPER | KeyModifiers::ALT)
+        );
+        for value in ["super", "command", "meta", "hyper", "control+alt"] {
+            assert!(
+                matches!(parse(value).unwrap(), TokenLinkClick::Modifier(_)),
+                "{value}"
+            );
+        }
+        for value in ["shift", "ctrl+shift", "banana", "", "ctrl+", "none"] {
+            assert!(parse(value).is_err(), "{value:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn token_link_click_round_trips_and_serializes() {
+        for value in ["click", "off", "ctrl", "ctrl+alt", "cmd+meta+hyper"] {
+            let config: SidebarConfig =
+                toml::from_str(&format!("token_link_click = \"{value}\"")).unwrap();
+            let round: SidebarConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(round, config, "{value}");
+        }
+    }
+
+    #[test]
+    fn token_link_click_matching_ignores_shift_and_requires_exact_modifiers() {
+        let none = KeyModifiers::empty();
+        assert!(TokenLinkClick::Click.matches(none));
+        assert!(TokenLinkClick::Click.matches(KeyModifiers::SHIFT));
+        assert!(!TokenLinkClick::Click.matches(KeyModifiers::CONTROL));
+        let ctrl = TokenLinkClick::Modifier(KeyModifiers::CONTROL);
+        assert!(!ctrl.matches(none));
+        assert!(ctrl.matches(KeyModifiers::CONTROL));
+        assert!(ctrl.matches(KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+        assert!(!ctrl.matches(KeyModifiers::CONTROL | KeyModifiers::ALT));
+        assert!(!TokenLinkClick::Off.matches(none));
     }
 
     #[test]

@@ -1369,7 +1369,25 @@ impl ClientShellState {
                 }
                 return;
             }
+            if let Some(link) = self.token_link_press.take() {
+                if super::contains(link.rect, point) {
+                    outcome
+                        .actions
+                        .push(ClientShellAction::OpenSafeWebUrl(link.url));
+                }
+                return;
+            }
             if let Some(press) = self.workspace_press.take() {
+                if let Some(link) = press
+                    .token_link
+                    .as_ref()
+                    .filter(|link| super::contains(link.rect, point))
+                {
+                    outcome
+                        .actions
+                        .push(ClientShellAction::OpenSafeWebUrl(link.url.clone()));
+                    return;
+                }
                 self.finish_endpoint_workspace_press(press, outcome);
                 return;
             }
@@ -1938,6 +1956,7 @@ impl ClientShellState {
                 self.word_selection_gesture = None;
                 let previous_pane_click = self.last_pane_click.take();
                 self.workspace_press = None;
+                self.token_link_press = None;
                 self.tab_press = None;
                 self.chrome_drag = None;
                 // The toggle is painted over the agent scrollbar's last cell.
@@ -2119,6 +2138,7 @@ impl ClientShellState {
                         workspace_id: hit.workspace_id.clone(),
                         start_column: mouse.column,
                         start_row: mouse.row,
+                        token_link: self.token_link_at(point, mouse.modifiers),
                     });
                 if let Some(workspace_press) = workspace_press {
                     self.workspace_press = Some(workspace_press);
@@ -2153,6 +2173,10 @@ impl ClientShellState {
                     return;
                 }
                 if self.handle_endpoint_agent_click(point, outcome) {
+                    return;
+                }
+                if let Some(link) = self.token_link_at(point, mouse.modifiers) {
+                    self.token_link_press = Some(link);
                     return;
                 }
                 let agent_pane_id = self

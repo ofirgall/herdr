@@ -480,6 +480,7 @@ fn render_spaces_section(
             state.selected_workspace_id.is_some(),
             dragged,
             palette,
+            (!config.token_link_click.is_off()).then_some(&mut hits.token_links),
         );
         let group_toggle = render_parent_group_toggle(
             buffer,
@@ -849,11 +850,15 @@ pub(in crate::client::shell) fn workspace_rows(
             state_text: status_text(status),
             ahead_behind: workspace.git_ahead_behind,
             tokens: &token_values,
+            links: &workspace.token_links,
             suppress_git_details: indented,
         },
     )
 }
 
+// The row state flags and the optional link sink are independent inputs shared
+// by the single- and multi-machine sidebars.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::client::shell) fn render_workspace_rows(
     buffer: &mut Buffer,
     area: Rect,
@@ -866,6 +871,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     navigating: bool,
     dragged: bool,
     palette: &Palette,
+    mut links: Option<&mut Vec<TokenLinkHit>>,
 ) {
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y + row_index as u16;
@@ -915,7 +921,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
         } else {
             palette.overlay0
         });
-        let spans = crate::ui::resolved_token_spans(
+        let spans = super::agent_sidebar::token_row_spans(
             row,
             (
                 status_icon(status, indicators),
@@ -927,6 +933,9 @@ pub(in crate::client::shell) fn render_workspace_rows(
             Style::default().fg(palette.overlay1),
             palette,
             area.right().saturating_sub(2).saturating_sub(x) as usize,
+            links
+                .as_deref_mut()
+                .map(|hits| super::agent_sidebar::LinkSink { hits, x, y }),
         );
         Paragraph::new(Line::from(spans)).render(
             Rect::new(x, y, area.right().saturating_sub(2).saturating_sub(x), 1),

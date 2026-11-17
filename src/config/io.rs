@@ -901,6 +901,29 @@ resume_agents_on_restore = true
     }
 
     #[test]
+    fn load_live_config_reports_invalid_token_link_click_and_keeps_default() {
+        let loaded =
+            load_live_config_from_str("[ui.sidebar]\ntoken_link_click = \"shift\"\n").unwrap();
+        assert!(
+            loaded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("token_link_click")),
+            "{:?}",
+            loaded.diagnostics
+        );
+        assert_eq!(loaded.invalid_sections, vec!["ui".to_string()]);
+        assert_eq!(
+            loaded.config.ui.sidebar.token_link_click.mode(),
+            crate::config::TokenLinkClick::Click
+        );
+
+        let loaded =
+            load_live_config_from_str("[ui.sidebar]\ntoken_link_click = \"alt\"\n").unwrap();
+        assert!(loaded.diagnostics.is_empty());
+    }
+
+    #[test]
     fn load_live_config_warns_about_unknown_theme_names() {
         let loaded = load_live_config_from_str(
             r#"

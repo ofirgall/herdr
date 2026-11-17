@@ -234,6 +234,7 @@ fn reply_to_probe(request: ApiRequestMessage) {
                 agent_status: AgentStatus::Working,
                 state_labels: Default::default(),
                 tokens: Default::default(),
+                links: Default::default(),
                 agent_session: None,
                 scroll: None,
                 revision: 0,

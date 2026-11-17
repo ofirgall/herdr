@@ -71,6 +71,10 @@ cli_params! {
         pub tokens: HashMap<String, Option<String>> => Field::new(HashMap::new())
             .input(bindings::token()).input(bindings::clear_token())
             .validate(bindings::validate_tokens),
+        /// Optional web URL per token name; only valid for tokens set in the same request.
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        #[schemars(schema_with = "super::common::metadata_link_values_schema")]
+        pub links: HashMap<String, String> => Field::new(HashMap::new()).input(bindings::link()),
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub seq: Option<u64> => Field::new(None).input(bindings::seq()),
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,6 +96,9 @@ pub struct WorkspaceInfo {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[schemars(schema_with = "super::common::metadata_token_values_schema")]
     pub tokens: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[schemars(schema_with = "super::common::metadata_link_values_schema")]
+    pub links: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorkspaceWorktreeInfo>,
 }

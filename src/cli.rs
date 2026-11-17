@@ -64,6 +64,16 @@ pub(crate) fn parse_token_assignment(raw: &str) -> Result<(String, Option<String
     Ok((key.to_string(), Some(value.to_string())))
 }
 
+pub(crate) fn parse_link_assignment(raw: &str) -> Result<(String, String), String> {
+    let Some((key, url)) = raw.split_once('=') else {
+        return Err("link must use NAME=URL".into());
+    };
+    if key.is_empty() {
+        return Err("link name must not be empty".into());
+    }
+    Ok((key.to_string(), url.to_string()))
+}
+
 pub(crate) fn parse_env_assignment(raw: &str) -> Result<(String, String), String> {
     let Some((key, value)) = raw.split_once('=') else {
         return Err("env must use KEY=VALUE".into());

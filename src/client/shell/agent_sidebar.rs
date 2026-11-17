@@ -85,7 +85,8 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            let links = (!config.token_link_click.is_off()).then_some(&mut hits.token_links);
+            render_agent_row(buffer, rect, row, config, links);
         },
     );
 }
@@ -309,6 +310,70 @@ pub(super) fn agent_row(
     })
 }
 
+/// Where the hits of a row's linked tokens are recorded; `x` is the screen
+/// column of the row's first token span and `y` its screen row.
+pub(super) struct LinkSink<'a> {
+    pub(super) hits: &'a mut Vec<TokenLinkHit>,
+    pub(super) x: u16,
+    pub(super) y: u16,
+}
+
+/// Token spans of one row. Rows without a linked token, and callers that pass
+/// no `links` sink (links off, or a sidebar without link support), take the
+/// plain path with no extra work; otherwise linked tokens are underlined and
+/// one hit per visible linked token is recorded.
+pub(super) fn token_row_spans(
+    tokens: &[crate::ui::ResolvedToken],
+    icon: (&str, Style),
+    state_style: Style,
+    name_style: Style,
+    secondary: Style,
+    custom: Style,
+    palette: &Palette,
+    max_width: usize,
+    links: Option<LinkSink<'_>>,
+) -> Vec<ratatui::text::Span<'static>> {
+    match links {
+        Some(sink) if tokens.iter().any(|token| token.link.is_some()) => {
+            let (spans, columns) = crate::ui::resolved_token_spans_with_links(
+                tokens,
+                icon,
+                state_style,
+                name_style,
+                secondary,
+                custom,
+                palette,
+                max_width,
+            );
+            for column in columns {
+                let Some(url) = tokens[column.index].link.clone() else {
+                    continue;
+                };
+                sink.hits.push(TokenLinkHit {
+                    rect: Rect::new(
+                        sink.x.saturating_add(column.start as u16),
+                        sink.y,
+                        column.width as u16,
+                        1,
+                    ),
+                    url,
+                });
+            }
+            spans
+        }
+        _ => crate::ui::resolved_token_spans(
+            tokens,
+            icon,
+            state_style,
+            name_style,
+            secondary,
+            custom,
+            palette,
+            max_width,
+        ),
+    }
+}
+
 /// Resolves one agent's token `rows` from its snapshot entry. `pane_label` is
 /// the fallback for the `pane` token when the agent reports no title.
 pub(super) fn resolve_agent_rows(
@@ -346,6 +411,7 @@ pub(super) fn resolve_agent_rows(
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             tokens: &tokens,
+            links: &agent.token_links,
         },
         state_text,
     )
@@ -356,6 +422,7 @@ pub(super) fn render_agent_row(
     rect: Rect,
     row: &AgentRow,
     config: &ClientShellConfig,
+    mut links: Option<&mut Vec<TokenLinkHit>>,
 ) {
     let palette = &config.palette;
     let row_style = if row.focused {
@@ -382,6 +449,7 @@ pub(super) fn render_agent_row(
         vec![vec![crate::ui::ResolvedToken {
             kind: crate::ui::ResolvedTokenKind::StateIcon,
             style: Default::default(),
+            link: None,
         }]]
     } else {
         row.rows.clone()
@@ -389,7 +457,7 @@ pub(super) fn render_agent_row(
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
-        spans.extend(crate::ui::resolved_token_spans(
+        spans.extend(token_row_spans(
             tokens,
             icon,
             status_style,
@@ -398,6 +466,11 @@ pub(super) fn render_agent_row(
             secondary,
             palette,
             rect.width.saturating_sub(indent as u16) as usize,
+            links.as_deref_mut().map(|hits| LinkSink {
+                hits,
+                x: rect.x.saturating_add(indent as u16),
+                y: rect.y + index as u16,
+            }),
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),

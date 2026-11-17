@@ -351,6 +351,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
+# Click that opens the web link of a sidebar token reported with --link: "click" (plain
+# click), "off", or a modifier such as "alt", "ctrl", "cmd", or "ctrl+alt". Many terminals
+# do not forward cmd-click and ctrl-click can become a right click.
+# [ui.sidebar]
+# token_link_click = "click"
+
 # Expanded agent rows. Built-ins are state_icon, state_text, machine, workspace, tab,
 # pane, agent, terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.

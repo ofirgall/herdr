@@ -160,7 +160,7 @@ herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [
 herdr workspace get <workspace_id>
 herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
-herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]
+herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--link NAME=URL] [--seq N] [--ttl-ms N]
 herdr workspace close <workspace_id> [--group]
 ```
 
@@ -321,6 +321,7 @@ herdr pane report-metadata <pane_id> \
   [--clear-state-labels] \
   [--token NAME=VALUE] \
   [--clear-token NAME] \
+  [--link NAME=URL] \
   [--seq N] \
   [--ttl-ms N]
 ```
@@ -330,6 +331,8 @@ herdr pane report-metadata <pane_id> \
 Metadata text is normalized before storage. Herdr trims surrounding whitespace, removes control characters, and caps `--title`, `--display-agent`, each `--state-label`, and token values at 80 characters. Empty normalized token values clear that key.
 
 `--token` patches one named display value; `--clear-token` removes one. Unmentioned tokens remain unchanged. Pane tokens are available to Agent sidebar rows as `$name`; workspace tokens are available to Space rows. TTL applies independently to the token keys updated by that call.
+
+`--link NAME=URL` (JSON field `links`, a map from token name to URL) attaches a web link to a token set in the same call, for example `--token pr=#7009 --link pr=https://github.com/o/r/pull/7009`. The link belongs to the token. Setting the token again without `--link`, clearing it, or letting it expire removes the link, so resend the link with every update. Only `http` and `https` URLs of at most 2048 bytes are accepted. A link whose token is not set in the same call, or an invalid URL, rejects the whole request with `invalid_metadata_link` and changes nothing. Workspace and pane info, metadata events, and agent info report `links` next to `tokens`, only for tokens that have a link. Servers older than this feature ignore `links` and still report success, so check `herdr --version` if you depend on it.
 
 `--source` and `--applies-to-source` must be 80 characters or fewer and may contain only ASCII letters, digits, colon, dot, underscore, and hyphen. `--ttl-ms` makes metadata expire automatically and must be between `1` and `86400000` milliseconds. Omit it for metadata that should stay until replaced, cleared, or the pane closes. `--seq` lets Herdr ignore stale reports from the same `--source`; stale reports are accepted by the API but ignored by pane state. A pane or workspace accepts sequenced token reports from at most 32 distinct sources during its lifetime; clearing or expiry does not release those source slots.
 

@@ -11,6 +11,23 @@ impl ClientShellState {
             .map(|hit| hit.workspace_id.clone())
     }
 
+    /// The linked sidebar token under `point` when `modifiers` match
+    /// `token_link_click`. Never matches with the setting off.
+    pub(super) fn token_link_at(
+        &self,
+        point: (u16, u16),
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<TokenLinkHit> {
+        if !self.config.token_link_click.matches(modifiers) {
+            return None;
+        }
+        self.hits
+            .token_links
+            .iter()
+            .find(|hit| super::contains(hit.rect, point))
+            .cloned()
+    }
+
     pub(super) fn endpoint_workspace_is_draggable(&self, press: &ClientWorkspacePress) -> bool {
         press.endpoint_id == self.active_endpoint_id
             && self

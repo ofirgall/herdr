@@ -754,6 +754,8 @@ Metadata reports are display-only. Valid metadata can override the pane title, d
 
 Token maps are per-resource patches. A string sets a key, JSON `null` clears it, and omitted keys remain unchanged. The latest accepted update wins. Optional TTL applies independently to token keys updated by that report. Pane tokens are exposed by pane and agent get/list responses and can be rendered as `$name` in Agent sidebar rows. A report may mention at most 16 token keys, and a pane or workspace may retain at most 32 keys. Token names are 1–32 ASCII letters, digits, underscores, or hyphens.
 
+An optional `links` map (token name to URL) attaches a web link to a token set in the same request. The link belongs to the token: setting the token again without a link, clearing it, or TTL expiry removes it. A link must be an `http` or `https` URL of at most 2048 bytes, and its token must be set (not cleared) in the same request; otherwise the whole request is rejected with `invalid_metadata_link` and no token changes. Pane, workspace, and agent info and metadata events expose `links` next to `tokens`, only for tokens that have a link, and omit the field when none does. Older servers ignore `links` and still report success.
+
 Workspace tokens use the same contract:
 
 ```json

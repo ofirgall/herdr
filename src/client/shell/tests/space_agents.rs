@@ -16,6 +16,7 @@ fn agent(pane: &str, workspace: &str, tab: &str, status: AgentStatus) -> ClientS
         state_change_seq: 1,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: false,
     }
 }

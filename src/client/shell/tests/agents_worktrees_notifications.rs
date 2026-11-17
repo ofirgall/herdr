@@ -109,6 +109,7 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         branch: Some("worktree/feature".into()),
         git_ahead_behind: None,
         tokens: Vec::new(),
+        token_links: Default::default(),
         worktree: Some(ClientShellWorktree {
             key: "repo".into(),
             label: "repo".into(),
@@ -581,6 +582,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             state_change_seq: 1,
             state_labels: Vec::new(),
             tokens: Vec::new(),
+            token_links: Default::default(),
             focused: true,
         },
         ClientShellAgent {
@@ -597,6 +599,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             state_change_seq: 2,
             state_labels: Vec::new(),
             tokens: Vec::new(),
+            token_links: Default::default(),
             focused: false,
         },
     ];
@@ -671,6 +674,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             state_change_seq: 10,
             state_labels: Vec::new(),
             tokens: vec![("summary".into(), "review complete".into())],
+            token_links: Default::default(),
             focused: true,
         },
         ClientShellAgent {
@@ -687,6 +691,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             state_change_seq: 20,
             state_labels: vec![("blocked".into(), "needs input".into())],
             tokens: vec![("summary".into(), "waiting for Can".into())],
+            token_links: Default::default(),
             focused: false,
         },
     ];
@@ -810,6 +815,7 @@ fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
         state_change_seq: 1,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: true,
     }];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
@@ -883,6 +889,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_change_seq: 1,
             state_labels: Vec::new(),
             tokens: Vec::new(),
+            token_links: Default::default(),
             focused: true,
         },
         ClientShellAgent {
@@ -899,6 +906,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_change_seq: 2,
             state_labels: Vec::new(),
             tokens: Vec::new(),
+            token_links: Default::default(),
             focused: false,
         },
         ClientShellAgent {
@@ -915,6 +923,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_change_seq: 3,
             state_labels: Vec::new(),
             tokens: Vec::new(),
+            token_links: Default::default(),
             focused: false,
         },
     ];
@@ -989,6 +998,7 @@ fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
         state_change_seq: 1,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: true,
     });
     let config =
@@ -1554,6 +1564,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
         state_change_seq: 1,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: false,
     });
     state.set_snapshot(Box::new(projected));

@@ -359,6 +359,7 @@ impl App {
             agent_status: pane_agent_status(terminal.state, pane.seen),
             state_labels: presentation.state_labels,
             tokens: terminal.metadata_tokens.values(),
+            links: terminal.metadata_tokens.links(),
             agent_session: terminal_agent_session_info(terminal),
             scroll: None,
             revision: terminal.revision,
@@ -400,6 +401,7 @@ impl App {
             }),
             agent_status: pane_agent_status(agg_state, seen),
             tokens: ws.metadata_tokens.values(),
+            links: ws.metadata_tokens.links(),
             worktree: ws
                 .worktree_space()
                 .map(|space| crate::api::schema::WorkspaceWorktreeInfo {

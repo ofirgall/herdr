@@ -565,6 +565,20 @@ All matching entries apply in order, and later entries override earlier ones for
 
 Metadata reporters provide values only; styling stays in the local sidebar configuration. See [CLI reference: report metadata](/docs/cli-reference/#panes) for limits, clearing, sequencing, and expiry.
 
+A reporter can attach a web link to a custom token with `--link NAME=URL`, for example `herdr workspace report-metadata --token pr='#7009' --link pr=https://github.com/acme/app/pull/7009`. In Space rows, agent rows, and agent children, a `$name` token that has a link is drawn underlined, and clicking it opens the URL in the browser on the machine running Herdr, including when the Space lives on an SSH machine. The click does not select the Space or focus the agent, and a press that turns into a drag still reorders Spaces. Only the visible columns of the token are clickable: a token cut short by a narrow sidebar is clickable on what is left of it, and an omitted token is not clickable. Static `[[ui.sidebar.spaces.metadata]]` tokens, built-in tokens, and the collapsed and multi-machine sidebars never have links. A link lives and expires with its token; see [CLI reference: report metadata](/docs/cli-reference/#panes).
+
+Choose which click opens a link with `token_link_click` under `[ui.sidebar]`:
+
+```toml
+[ui.sidebar]
+token_link_click = "click"   # default: a plain click opens the link
+# token_link_click = "alt"        # only alt-click opens it; a plain click selects the row as usual
+# token_link_click = "ctrl+alt"   # modifiers combine with +
+# token_link_click = "off"        # no underline and no link clicks
+```
+
+Accepted modifiers are `ctrl` (`control`), `alt` (`option`), `cmd` (`command`, `super`), `meta`, and `hyper`; `shift` is not accepted. With a modifier, the click must hold exactly that modifier. Any other value is reported by `herdr config check` and the default is kept. Many terminals do not forward cmd-click on macOS, and ctrl-click can be turned into a right click, so the default is a plain click and `alt` and `ctrl` are the practical modifiers; you may need to enable the modifier for mouse reporting in your terminal.
+
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 
 ## Notifications
