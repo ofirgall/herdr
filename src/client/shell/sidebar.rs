@@ -419,6 +419,7 @@ fn render_spaces_section(
     let gaps = (0..entries.len())
         .map(|index| {
             space_gap_after(
+                &entries[index],
                 child_heights[index] > 0,
                 entries.get(index + 1),
                 &config.spaces,
@@ -732,13 +733,16 @@ pub(in crate::client::shell) const SUBSPACE_INDENT: u16 = 4;
 /// Blank rows drawn after an entry, before `next`: `row_gap` before a
 /// top-level space, `subspace_row_gap` before a worktree child, none after the
 /// last entry. With `row_gap_after_agents_only`, only an entry whose agent
-/// children are shown is followed by a gap.
+/// children are shown, or the last worktree child of a group, is followed by
+/// a gap, so a group always stays apart from the next top-level space.
 fn space_gap_after(
+    entry: &WorkspaceEntry,
     shows_agents: bool,
     next: Option<&WorkspaceEntry>,
     config: &SpacesSidebarConfig,
 ) -> u16 {
-    if config.row_gap_after_agents_only && !shows_agents {
+    let closes_group = entry.indented && next.is_some_and(|next| !next.indented);
+    if config.row_gap_after_agents_only && !shows_agents && !closes_group {
         return 0;
     }
     next.map_or(0, |next| {

@@ -1267,7 +1267,7 @@
           "key": "ui.sidebar.spaces.row_gap_after_agents_only",
           "type": "boolean",
           "default": "false",
-          "description": "Apply row_gap and subspace_row_gap only after a Space whose agent children are shown, so Spaces without visible agents stay packed."
+          "description": "Apply row_gap and subspace_row_gap only after a Space whose agent children are shown, or after the last worktree child of a group, so Spaces without visible agents stay packed while each group stays apart from the next Space."
         },
         {
           "key": "ui.sidebar.spaces.rows",

@@ -740,6 +740,7 @@ fn row_gap_after_agents_only_spaces_only_entries_with_shown_agents() {
         });
     }
     snapshot.workspaces.push(workspace("ws_4", 4, "other"));
+    snapshot.workspaces.push(workspace("ws_5", 5, "quiet"));
     let mut config = Config::default();
     config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
     config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
@@ -756,8 +757,17 @@ fn row_gap_after_agents_only_spaces_only_entries_with_shown_agents() {
     // docs shows an agent, so a gap (continuing the rail) follows it.
     assert_eq!(empty, notes + 2, "{rows:#?}");
     assert_eq!(rows[notes + 1].chars().nth(1), Some('│'), "{rows:#?}");
-    // empty shows no agents, so "other" follows it directly.
-    assert_eq!(other, empty + 1, "{rows:#?}");
+    // empty shows no agents but closes the worktree group, so a plain gap
+    // (no rail) separates it from "other".
+    assert_eq!(other, empty + 2, "{rows:#?}");
+    assert_eq!(
+        rows[empty + 1].trim_matches(['│', '▕', ' ']),
+        "",
+        "{rows:#?}"
+    );
+    assert_ne!(rows[empty + 1].chars().nth(1), Some('│'), "{rows:#?}");
+    // Top-level spaces without agents stay packed.
+    assert_eq!(row_index(&rows, "quiet"), other + 1, "{rows:#?}");
     // The parent shows agents, so a gap precedes docs.
     assert_eq!(rows[docs - 1].chars().nth(1), Some('│'), "{rows:#?}");
     assert!(!rows[docs - 1].contains("api"), "{rows:#?}");

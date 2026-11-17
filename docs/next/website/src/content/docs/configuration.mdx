@@ -532,7 +532,7 @@ rows = [
 
 Unspecified fields keep the token's style. Agent rows reject `focused`.
 
-`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group; set `subspace_row_gap` under `[ui.sidebar.spaces]` to add blank rows before each worktree child as well, with the tree connector continuing through them. Set `row_gap_after_agents_only = true` to add these gaps only after a Space whose agent children are shown.
+`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group; set `subspace_row_gap` under `[ui.sidebar.spaces]` to add blank rows before each worktree child as well, with the tree connector continuing through them. Set `row_gap_after_agents_only = true` to add these gaps only after a Space whose agent children are shown, or after the last worktree child of a group.
 
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 

@@ -382,7 +382,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # row_gap = 0
 # Blank rows before each indented worktree child; the tree connector continues through them.
 # subspace_row_gap = 0
-# Only add those gaps after a space whose agent children are shown.
+# Only add those gaps after a space whose agent children are shown, or after
+# the last worktree child of a group.
 # row_gap_after_agents_only = false
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
