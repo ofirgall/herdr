@@ -18,8 +18,12 @@ pub(crate) enum ResolvedTokenKind {
     Pane(String),
     Agent(String),
     AgentIndex(usize),
-    /// Jump-number key character of a space.
-    Index(char),
+    /// Jump-number key character of a space and the text drawn for it
+    /// (the digit with its configured format applied).
+    Index {
+        digit: char,
+        text: String,
+    },
     TerminalTitle(String),
     Branch(String),
     GitStatus {
@@ -41,7 +45,9 @@ impl ResolvedTokenKind {
             | Self::TerminalTitle(value)
             | Self::Branch(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::AgentIndex(_) | Self::Index(_) | Self::GitStatus { .. } => None,
+            Self::StateIcon | Self::AgentIndex(_) | Self::Index { .. } | Self::GitStatus { .. } => {
+                None
+            }
         }
     }
 }
@@ -173,7 +179,15 @@ pub(crate) fn space_rows(
                     let mut custom_link = None;
                     let kind = match token {
                         SpaceSidebarToken::Index => {
-                            context.jump_number.map(ResolvedTokenKind::Index)
+                            context.jump_number.map(|digit| ResolvedTokenKind::Index {
+                                digit,
+                                text: match configured.index_format() {
+                                    Some(format) => {
+                                        format!("{}{digit}{}", format.before, format.after)
+                                    }
+                                    None => digit.to_string(),
+                                },
+                            })
                         }
                         SpaceSidebarToken::StateIcon if config.show_status => {
                             Some(ResolvedTokenKind::StateIcon)
@@ -205,7 +219,7 @@ pub(crate) fn space_rows(
                         SpaceSidebarToken::Styled { .. } => None,
                     }?;
                     let style = match &kind {
-                        ResolvedTokenKind::Index(digit) => {
+                        ResolvedTokenKind::Index { digit, .. } => {
                             configured.style_for_value(digit.encode_utf8(&mut [0; 4]))?
                         }
                         _ => kind
@@ -687,7 +701,10 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         assert_eq!(
             resolve(Some('0')),
             vec![vec![
-                ResolvedToken::unstyled(ResolvedTokenKind::Index('0')),
+                ResolvedToken::unstyled(ResolvedTokenKind::Index {
+                    digit: '0',
+                    text: "0".into()
+                }),
                 ResolvedToken::unstyled(ResolvedTokenKind::Workspace("repo".into())),
             ]]
         );
@@ -811,5 +828,48 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
         let rows = space(&tokens, &overriding);
         assert_eq!(rows[0][3].link.as_deref(), Some("https://example.com/env"));
         assert_eq!(rows[0][1].link, None);
+    }
+
+    #[test]
+    fn formatted_index_token_wraps_the_digit_and_is_elided_without_a_number() {
+        let config: SpacesSidebarConfig = toml::from_str(
+            r##"rows = [[{token = "index", format = "[{}]", rules = [{equals = "0", fg = "#ff0000"}]}, "workspace"]]"##,
+        )
+        .unwrap();
+        let tokens = std::collections::HashMap::new();
+        let resolve = |jump_number| {
+            space_rows(
+                &config,
+                SpaceTokenContext {
+                    workspace: "repo",
+                    jump_number,
+                    branch: None,
+                    state_text: "idle",
+                    ahead_behind: None,
+                    tokens: &tokens,
+                    links: &[],
+                    suppress_git_details: false,
+                },
+            )
+        };
+        let first_token = |jump_number| resolve(jump_number).remove(0).remove(0);
+        for (digit, text) in [('1', "[1]"), ('2', "[2]"), ('0', "[0]")] {
+            let token = first_token(Some(digit));
+            assert_eq!(
+                token.kind,
+                ResolvedTokenKind::Index {
+                    digit,
+                    text: text.into()
+                }
+            );
+            // The rule matches the bare digit and styles the whole text.
+            assert_eq!(token.style.fg.is_some(), digit == '0', "{digit}");
+        }
+        assert_eq!(
+            resolve(None),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                "repo".into()
+            ))]]
+        );
     }
 }

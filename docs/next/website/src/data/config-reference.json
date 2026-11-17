@@ -179,6 +179,12 @@
           "description": "Override the peach color token on top of the base theme. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for space jump numbers (the index sidebar token and the collapsed sidebar). Unset keeps the focused-space highlight and muted secondary colors; when set, it applies to every row. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -291,6 +297,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the peach color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -417,6 +429,12 @@
           "type": "string",
           "default": "\"\"",
           "description": "Executable used for new interactive panes. Empty means SHELL, then /bin/sh; on Windows, pwsh.exe when present on PATH, otherwise powershell.exe."
+        },
+        {
+          "key": "theme.custom.dark.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",
@@ -1201,7 +1219,7 @@
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one. At most 16 rows and 16 tokens per row."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. At most 16 rows and 16 tokens per row."
         },
         {
           "key": "ui.sidebar.spaces.show_status",

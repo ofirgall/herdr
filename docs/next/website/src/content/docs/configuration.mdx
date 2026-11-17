@@ -302,7 +302,7 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
+`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. A token's own `fg`, including one from a rule, still wins. It is accepted in `[theme.custom]` and in the light and dark subtables.
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
@@ -477,7 +477,7 @@ Agent rows accept these built-in tokens:
 
 Space rows accept these built-in tokens:
 
-- `index` — the space's jump number: `1` to `9`, then `0` for the tenth. It is hidden for spaces without a number (skipped spaces and the eleventh and later spaces). It is not in the default rows.
+- `index` — the space's jump number: `1` to `9`, then `0` for the tenth. It is hidden for spaces without a number (skipped spaces and the eleventh and later spaces). It is not in the default rows. A styled `index` token accepts `format`, a template where `{}` stands for the number, for example `{ token = "index", format = "[{}]" }` renders `[1]`. The format must contain exactly one `{}`, no other braces and no control characters, and be at most 16 characters; a space without a number hides the whole token, including the text around `{}`. Rules match the bare number, and `fg`, `bold` and `dim` apply to the whole formatted text. `format` is rejected on other tokens.
 - `state_icon` — colored icon for the space's rolled-up agent state.
 - `state_text` — text for the rolled-up agent state.
 - `workspace` — workspace name.

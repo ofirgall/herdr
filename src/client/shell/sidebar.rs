@@ -115,6 +115,9 @@ pub(crate) fn render_collapsed_sidebar(
         } else {
             Style::default().fg(palette.overlay0)
         };
+        let number_style = palette
+            .index
+            .map_or(number_style, |color| number_style.fg(color));
         put_text(
             buffer,
             rect.x,

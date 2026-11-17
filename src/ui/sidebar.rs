@@ -208,7 +208,7 @@ fn layout_tokens(
         .map(|token| match &token.kind {
             ResolvedTokenKind::StateIcon => display_width(state_icon_text),
             ResolvedTokenKind::AgentIndex(index) => display_width(&(index + 1).to_string()),
-            ResolvedTokenKind::Index(_) => 1,
+            ResolvedTokenKind::Index { text, .. } => display_width(text),
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
@@ -361,9 +361,14 @@ fn emit_token_spans(
                 (index + 1).to_string(),
                 apply_token_style(secondary_style, token.style),
             )),
-            ResolvedTokenKind::Index(digit) => spans.push(Span::styled(
-                digit.to_string(),
-                apply_token_style(secondary_style, token.style),
+            ResolvedTokenKind::Index { text, .. } => spans.push(Span::styled(
+                text.clone(),
+                apply_token_style(
+                    palette
+                        .index
+                        .map_or(secondary_style, |color| Style::default().fg(color)),
+                    token.style,
+                ),
             )),
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 if *ahead > 0 {

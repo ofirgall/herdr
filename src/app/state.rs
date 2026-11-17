@@ -71,6 +71,9 @@ pub struct Palette {
     pub teal: Color,
     /// Interrupted / warning states.
     pub peach: Color,
+    /// Optional color for space jump numbers. When unset, numbers use the row's
+    /// secondary color (highlight on the focused space, muted elsewhere).
+    pub index: Option<Color>,
 }
 
 impl Palette {
@@ -96,6 +99,7 @@ impl Palette {
             blue: Color::Rgb(137, 180, 250),
             teal: Color::Rgb(148, 226, 213),
             peach: Color::Rgb(250, 179, 135),
+            index: None,
         }
     }
 
@@ -121,6 +125,7 @@ impl Palette {
             blue: Color::Rgb(30, 102, 245),
             teal: Color::Rgb(23, 146, 153),
             peach: Color::Rgb(254, 100, 11),
+            index: None,
         }
     }
 
@@ -146,6 +151,7 @@ impl Palette {
             blue: Color::Blue,
             teal: Color::Cyan,
             peach: Color::Yellow,
+            index: None,
         }
     }
 
@@ -171,6 +177,7 @@ impl Palette {
             blue: Color::Rgb(122, 162, 247),
             teal: Color::Rgb(125, 207, 255),
             peach: Color::Rgb(255, 158, 100),
+            index: None,
         }
     }
 
@@ -196,6 +203,7 @@ impl Palette {
             blue: Color::Rgb(46, 125, 233),
             teal: Color::Rgb(17, 140, 116),
             peach: Color::Rgb(177, 92, 0),
+            index: None,
         }
     }
 
@@ -221,6 +229,7 @@ impl Palette {
             blue: Color::Rgb(139, 233, 253), // cyan-ish
             teal: Color::Rgb(139, 233, 253),
             peach: Color::Rgb(255, 184, 108),
+            index: None,
         }
     }
 
@@ -246,6 +255,7 @@ impl Palette {
             blue: Color::Rgb(129, 161, 193),
             teal: Color::Rgb(143, 188, 187),
             peach: Color::Rgb(208, 135, 112),
+            index: None,
         }
     }
 
@@ -271,6 +281,7 @@ impl Palette {
             blue: Color::Rgb(131, 165, 152),
             teal: Color::Rgb(142, 192, 124),
             peach: Color::Rgb(254, 128, 25),
+            index: None,
         }
     }
 
@@ -296,6 +307,7 @@ impl Palette {
             blue: Color::Rgb(7, 102, 120),
             teal: Color::Rgb(66, 123, 88),
             peach: Color::Rgb(175, 58, 3),
+            index: None,
         }
     }
 
@@ -321,6 +333,7 @@ impl Palette {
             blue: Color::Rgb(97, 175, 239),
             teal: Color::Rgb(86, 182, 194),
             peach: Color::Rgb(209, 154, 102),
+            index: None,
         }
     }
 
@@ -346,6 +359,7 @@ impl Palette {
             blue: Color::Rgb(64, 120, 242),
             teal: Color::Rgb(1, 132, 188),
             peach: Color::Rgb(152, 104, 1),
+            index: None,
         }
     }
 
@@ -371,6 +385,7 @@ impl Palette {
             blue: Color::Rgb(38, 139, 210),
             teal: Color::Rgb(42, 161, 152),
             peach: Color::Rgb(203, 75, 22),
+            index: None,
         }
     }
 
@@ -396,6 +411,7 @@ impl Palette {
             blue: Color::Rgb(38, 139, 210),
             teal: Color::Rgb(42, 161, 152),
             peach: Color::Rgb(203, 75, 22),
+            index: None,
         }
     }
 
@@ -421,6 +437,7 @@ impl Palette {
             blue: Color::Rgb(126, 156, 216),
             teal: Color::Rgb(127, 180, 202),
             peach: Color::Rgb(255, 160, 102),
+            index: None,
         }
     }
 
@@ -446,6 +463,7 @@ impl Palette {
             blue: Color::Rgb(77, 105, 155),
             teal: Color::Rgb(78, 140, 162),
             peach: Color::Rgb(204, 109, 0),
+            index: None,
         }
     }
 
@@ -471,6 +489,7 @@ impl Palette {
             blue: Color::Rgb(49, 116, 143),    // pine
             teal: Color::Rgb(156, 207, 216),   // foam
             peach: Color::Rgb(234, 154, 151),  // rose
+            index: None,
         }
     }
 
@@ -496,6 +515,7 @@ impl Palette {
             blue: Color::Rgb(40, 105, 131),
             teal: Color::Rgb(86, 148, 159),
             peach: Color::Rgb(215, 130, 126),
+            index: None,
         }
     }
 
@@ -521,6 +541,7 @@ impl Palette {
             blue: Color::Rgb(176, 176, 176),
             teal: Color::Rgb(102, 221, 204),
             peach: Color::Rgb(255, 199, 153),
+            index: None,
         }
     }
 
@@ -609,6 +630,9 @@ impl Palette {
         if let Some(c) = &custom.peach {
             self.peach = parse_color(c);
         }
+        if let Some(c) = &custom.index {
+            self.index = Some(parse_color(c));
+        }
         self
     }
 
@@ -670,6 +694,9 @@ impl Palette {
         }
         if let Some(c) = &custom.peach {
             self.peach = parse_color(c);
+        }
+        if let Some(c) = &custom.index {
+            self.index = Some(parse_color(c));
         }
         self
     }

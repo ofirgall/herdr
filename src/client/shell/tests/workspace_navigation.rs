@@ -1340,3 +1340,87 @@ fn space_context_menu_labels_and_pushes_the_skip_toggle() {
     state.activate_context_menu_item(index, &mut input);
     assert_eq!(skip_index_request(&input), Some(("ws_2".into(), false)));
 }
+
+fn index_rows_state_with(
+    projected: ClientShellSnapshot,
+    rows: Vec<Vec<crate::config::SpaceSidebarToken>>,
+) -> ClientShellState {
+    let mut state = index_rows_state(projected);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.rows = rows;
+    config.ui.sidebar.spaces.agents = crate::config::SpaceAgentsMode::Off;
+    let palette = state.config.palette.clone();
+    state.config = ClientShellConfig::from_config(&config);
+    state.config.palette = palette;
+    state
+}
+
+fn space_rows_config(rows: &str) -> Vec<Vec<crate::config::SpaceSidebarToken>> {
+    toml::from_str::<crate::config::SpacesSidebarConfig>(&format!("rows = {rows}"))
+        .expect("rows parse")
+        .rows
+}
+
+/// Foreground of the first cell drawing `symbol` in the sidebar column.
+fn sidebar_symbol_fg(
+    state: &mut ClientShellState,
+    symbol: &str,
+    row: usize,
+) -> ratatui::style::Color {
+    let frame = state.compose(106, 30).expect("composed frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let width = frame.width;
+    (0..12u16)
+        .map(|x| &buffer[(x, row as u16)])
+        .find(|cell| cell.symbol() == symbol)
+        .unwrap_or_else(|| panic!("no {symbol:?} in row {row} of {width} columns"))
+        .fg
+}
+
+#[test]
+fn formatted_index_token_wraps_numbers_and_elides_skipped_spaces() {
+    let mut projected = labeled_workspaces(&["A", "B", "C"]);
+    projected.workspaces[1].skip_index = true;
+    let rows = space_rows_config(r#"[[{token = "index", format = "[{}]"}, "workspace"]]"#);
+    let mut state = index_rows_state_with(projected, rows);
+    let lines = sidebar_lines(&mut state, 2, 14, 3);
+    let trimmed = lines.iter().map(|line| line.trim()).collect::<Vec<_>>();
+    assert_eq!(trimmed, ["[1] A", "B", "[2] C"], "{lines:#?}");
+}
+
+#[test]
+fn index_number_keeps_mauve_focused_and_overlay0_unfocused_without_a_theme_color() {
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    assert_eq!(state.config.palette.index, None);
+    let palette = state.config.palette.clone();
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), palette.mauve);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), palette.overlay0);
+}
+
+#[test]
+fn index_theme_color_applies_to_every_row_and_token_fg_wins() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), theme);
+
+    let rows = space_rows_config(r##"[[{token = "index", fg = "#0000ff"}, "workspace"]]"##);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    state.config.palette.index = Some(theme);
+    let blue = ratatui::style::Color::Rgb(0, 0, 0xff);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), blue);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), blue);
+}
+
+#[test]
+fn collapsed_sidebar_numbers_use_the_theme_index_color_when_set() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    let palette = state.config.palette.clone();
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), palette.overlay0);
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 0), theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), theme);
+}

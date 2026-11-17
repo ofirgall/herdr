@@ -3458,4 +3458,33 @@ mod tests {
             "Working→Idle should still apply after temporary queue pressure"
         );
     }
+
+    #[test]
+    fn index_theme_color_is_unset_by_default_and_follows_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        assert_eq!(state::Palette::catppuccin().index, None);
+        assert_eq!(
+            palette("[theme]\nname = \"vesper\"\n", HostAppearance::Dark).index,
+            None
+        );
+        let custom = "[theme]\nauto_switch = true\n[theme.custom]\nindex = \"#f8921a\"\n";
+        assert_eq!(
+            palette(custom, HostAppearance::Dark).index,
+            Some(ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a))
+        );
+        let with_light = format!("{custom}[theme.custom.light]\nindex = \"#444444\"\n");
+        assert_eq!(
+            palette(&with_light, HostAppearance::Light).index,
+            Some(ratatui::style::Color::Rgb(0x44, 0x44, 0x44))
+        );
+        assert_eq!(
+            palette(&with_light, HostAppearance::Dark).index,
+            Some(ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a))
+        );
+    }
 }

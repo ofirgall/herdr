@@ -105,6 +105,43 @@ pub struct SidebarTokenStyle {
     pub dim: Option<bool>,
 }
 
+/// A validated `format` template for the `index` token, split around `{}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexFormat {
+    pub before: String,
+    pub after: String,
+}
+
+const MAX_INDEX_FORMAT_CHARS: usize = 16;
+
+impl IndexFormat {
+    fn parse(value: &str) -> Result<Self, String> {
+        if value.chars().count() > MAX_INDEX_FORMAT_CHARS {
+            return Err(format!(
+                "the `index` format may contain at most {MAX_INDEX_FORMAT_CHARS} characters"
+            ));
+        }
+        if value.chars().any(char::is_control) {
+            return Err("the `index` format must not contain control characters".into());
+        }
+        let placeholder_error = || "the `index` format must contain exactly one `{}`".to_string();
+        let Some((before, after)) = value.split_once("{}") else {
+            return Err(placeholder_error());
+        };
+        if before.contains(['{', '}']) || after.contains(['{', '}']) {
+            return Err(placeholder_error());
+        }
+        Ok(Self {
+            before: before.to_string(),
+            after: after.to_string(),
+        })
+    }
+
+    fn template(&self) -> String {
+        format!("{}{{}}{}", self.before, self.after)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSidebarToken {
     StateIcon,
@@ -138,6 +175,7 @@ pub enum SpaceSidebarToken {
         token: Box<SpaceSidebarToken>,
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
+        format: Option<IndexFormat>,
     },
 }
 
@@ -158,6 +196,13 @@ impl AgentSidebarToken {
 }
 
 impl SpaceSidebarToken {
+    pub(crate) fn index_format(&self) -> Option<&IndexFormat> {
+        match self {
+            Self::Styled { format, .. } => format.as_ref(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn style_for_value(&self, value: &str) -> Option<SidebarTokenStyle> {
         match self {
             Self::Styled { style, rules, .. } => rules::matching_style(rules, *style, value),
@@ -185,7 +230,16 @@ struct RawStyledSidebarToken {
     dim: Option<bool>,
     #[serde(default)]
     rules: Vec<SidebarTokenRule>,
+    #[serde(default)]
+    format: Option<String>,
 }
+
+type ParsedSidebarToken = (
+    String,
+    Option<SidebarTokenStyle>,
+    Vec<SidebarTokenRule>,
+    Option<IndexFormat>,
+);
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -195,9 +249,9 @@ enum RawSidebarToken {
 }
 
 impl RawSidebarToken {
-    fn parts(self) -> Result<(String, Option<SidebarTokenStyle>, Vec<SidebarTokenRule>), String> {
+    fn parts(self) -> Result<ParsedSidebarToken, String> {
         match self {
-            Self::Plain(token) => Ok((token, None, Vec::new())),
+            Self::Plain(token) => Ok((token, None, Vec::new(), None)),
             Self::Styled(token) => {
                 if token.rules.len() > 16 {
                     return Err("sidebar tokens may contain at most 16 rules".into());
@@ -207,6 +261,13 @@ impl RawSidebarToken {
                 {
                     return Err("sidebar rules require a text-valued token".into());
                 }
+                let format = match token.format.as_deref() {
+                    None => None,
+                    Some(_) if token.token != "index" => {
+                        return Err("`format` is only supported on the `index` token".into());
+                    }
+                    Some(value) => Some(IndexFormat::parse(value)?),
+                };
                 Ok((
                     token.token,
                     Some(SidebarTokenStyle {
@@ -215,6 +276,7 @@ impl RawSidebarToken {
                         dim: token.dim,
                     }),
                     token.rules,
+                    format,
                 ))
             }
         }
@@ -248,6 +310,7 @@ fn serialize_styled_token<S>(
     name: String,
     style: SidebarTokenStyle,
     rules: &[SidebarTokenRule],
+    format: Option<&IndexFormat>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -267,6 +330,9 @@ where
     }
     if !rules.is_empty() {
         map.serialize_entry("rules", rules)?;
+    }
+    if let Some(format) = format {
+        map.serialize_entry("format", &format.template())?;
     }
     map.end()
 }
@@ -311,7 +377,7 @@ impl Serialize for AgentSidebarToken {
                 token,
                 style,
                 rules,
-            } => serialize_styled_token(agent_token_name(token), *style, rules, serializer),
+            } => serialize_styled_token(agent_token_name(token), *style, rules, None, serializer),
             token => serializer.serialize_str(&agent_token_name(token)),
         }
     }
@@ -328,7 +394,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, _) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
@@ -365,7 +431,14 @@ impl Serialize for SpaceSidebarToken {
                 token,
                 style,
                 rules,
-            } => serialize_styled_token(space_token_name(token), *style, rules, serializer),
+                format,
+            } => serialize_styled_token(
+                space_token_name(token),
+                *style,
+                rules,
+                format.as_ref(),
+                serializer,
+            ),
             token => serializer.serialize_str(&space_token_name(token)),
         }
     }
@@ -382,7 +455,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, format) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
@@ -401,6 +474,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
             token: Box::new(token),
             style,
             rules,
+            format,
         }))
     }
 }
@@ -1060,5 +1134,87 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                 "accepted key {key:?}"
             );
         }
+    }
+
+    fn parse_space_row_token(token: &str) -> Result<SpaceSidebarToken, String> {
+        toml::from_str::<SpacesSidebarConfig>(&format!("rows = [[{token}]]"))
+            .map(|config| config.rows[0][0].clone())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn index_format_parses_around_the_placeholder() {
+        for (format, before, after) in [("[{}]", "[", "]"), ("{}.", "", "."), ("{}", "", "")] {
+            let token =
+                parse_space_row_token(&format!("{{token = \"index\", format = \"{format}\"}}"))
+                    .unwrap();
+            assert_eq!(
+                token.index_format(),
+                Some(&IndexFormat {
+                    before: before.into(),
+                    after: after.into()
+                }),
+                "{format}"
+            );
+            let round: SpacesSidebarConfig = toml::from_str(
+                &toml::to_string(&SpacesSidebarConfig {
+                    rows: vec![vec![token.clone()]],
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(round.rows[0][0], token, "{format}");
+        }
+    }
+
+    #[test]
+    fn plain_index_token_has_no_format() {
+        let token = parse_space_row_token("\"index\"").unwrap();
+        assert_eq!(token, SpaceSidebarToken::Index);
+        assert_eq!(token.index_format(), None);
+        let styled = parse_space_row_token("{token = \"index\", bold = true}").unwrap();
+        assert_eq!(styled.index_format(), None);
+    }
+
+    #[test]
+    fn invalid_index_formats_are_rejected_with_their_messages() {
+        let placeholder = "exactly one `{}`";
+        for (format, message) in [
+            ("#", placeholder),
+            ("{}{}", placeholder),
+            ("{x}", placeholder),
+            ("{}}", placeholder),
+            ("{ {}", placeholder),
+            ("{}0123456789abcde", "at most 16 characters"),
+            ("{}\\n", "control characters"),
+        ] {
+            let error =
+                parse_space_row_token(&format!("{{token = \"index\", format = \"{format}\"}}"))
+                    .unwrap_err();
+            assert!(error.contains(message), "{format:?}: {error}");
+        }
+        // Exactly 16 characters is fine.
+        assert!(
+            parse_space_row_token("{token = \"index\", format = \"{}0123456789abcd\"}").is_ok()
+        );
+    }
+
+    #[test]
+    fn format_is_rejected_on_other_tokens() {
+        let error = parse_space_row_token("{token = \"workspace\", format = \"{}:\"}").unwrap_err();
+        assert!(
+            error.contains("only supported on the `index` token"),
+            "{error}"
+        );
+        let agent = toml::from_str::<AgentsSidebarConfig>(
+            "rows = [[{token = \"workspace\", format = \"{}:\"}]]",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            agent.contains("only supported on the `index` token"),
+            "{agent}"
+        );
     }
 }
