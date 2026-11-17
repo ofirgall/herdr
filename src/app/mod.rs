@@ -3492,6 +3492,27 @@ mod tests {
     }
 
     #[test]
+    fn tab_theme_color_is_unset_by_default_and_follows_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        assert_eq!(state::Palette::catppuccin().tab, None);
+        let custom = "[theme]\nauto_switch = true\n[theme.custom]\ntab = \"#58a8e1\"\n";
+        assert_eq!(
+            palette(custom, HostAppearance::Dark).tab,
+            Some(ratatui::style::Color::Rgb(0x58, 0xa8, 0xe1))
+        );
+        let with_light = format!("{custom}[theme.custom.light]\ntab = \"#444444\"\n");
+        assert_eq!(
+            palette(&with_light, HostAppearance::Light).tab,
+            Some(ratatui::style::Color::Rgb(0x44, 0x44, 0x44))
+        );
+    }
+
+    #[test]
     fn index_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
         use crate::terminal_theme::HostAppearance;
         let palette = |toml: &str, appearance| {

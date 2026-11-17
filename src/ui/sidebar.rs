@@ -354,8 +354,16 @@ fn emit_token_spans(
                 truncate_end(text, budgets[index]),
                 apply_token_style(workspace_style, token.style),
             )),
+            ResolvedTokenKind::Tab(text) => spans.push(Span::styled(
+                truncate_end(text, budgets[index]),
+                apply_token_style(
+                    palette
+                        .tab
+                        .map_or(secondary_style, |color| secondary_style.fg(color)),
+                    token.style,
+                ),
+            )),
             ResolvedTokenKind::Machine(text)
-            | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
             | ResolvedTokenKind::Branch(text) => spans.push(Span::styled(
@@ -567,6 +575,45 @@ mod token_link_layout_tests {
             ]
         );
         assert_eq!(underlined(&spans), vec!["#7009", "ci"]);
+    }
+
+    #[test]
+    fn tab_tokens_use_the_theme_tab_color_and_a_token_fg_still_wins() {
+        use ratatui::style::Color;
+        let style = Style::default();
+        let mut palette = Palette::catppuccin();
+        let render = |row: &[ResolvedToken], palette: &Palette| {
+            resolved_token_spans(
+                row,
+                ("*", style),
+                style,
+                style,
+                style.fg(Color::Gray),
+                style,
+                palette,
+                40,
+            )
+        };
+        let row = vec![
+            token(ResolvedTokenKind::Tab("web".into()), false),
+            token(ResolvedTokenKind::Agent("claude".into()), false),
+        ];
+        let spans = render(&row, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Gray));
+
+        palette.tab = Some(Color::Rgb(1, 2, 3));
+        let spans = render(&row, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Rgb(1, 2, 3)));
+        assert_eq!(
+            spans[2].style.fg,
+            Some(Color::Gray),
+            "other secondary tokens keep theirs"
+        );
+
+        let mut styled = row.clone();
+        styled[0].style.fg = Some(serde_json::from_str("\"#0a0b0c\"").unwrap());
+        let spans = render(&styled, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Rgb(10, 11, 12)));
     }
 
     #[test]
