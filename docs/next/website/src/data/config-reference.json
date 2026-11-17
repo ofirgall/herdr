@@ -1274,7 +1274,13 @@
           "key": "ui.sidebar.pull_requests.colors.queued",
           "type": "string",
           "default": "unset",
-          "description": "Merge queue mark. A #rrggbb or #rgb color; unset uses the theme's peach. Named after the herdr-pr-tracker token $pr_queued."
+          "description": "Merge queue glyph. A #rrggbb or #rgb color; unset uses the theme's peach. Named after the herdr-pr-tracker token $pr_queued."
+        },
+        {
+          "key": "ui.sidebar.pull_requests.colors.merged",
+          "type": "string",
+          "default": "unset",
+          "description": "Merged glyph. A #rrggbb or #rgb color; unset uses the theme's mauve. Named after the herdr-pr-tracker token $pr_merged."
         },
         {
           "key": "ui.sidebar.pull_requests.colors.id",
@@ -1740,6 +1746,12 @@
           "type": "string",
           "default": "\"gh\"",
           "description": "GitHub CLI executable used for `gh api graphql`. It must be logged in."
+        },
+        {
+          "key": "pull_requests.merged_hours",
+          "type": "integer",
+          "default": "5",
+          "description": "Hours a merged pull request stays listed, dimmed and marked merged, after the open ones. 0 lists only open pull requests. At most 720."
         }
       ]
     },

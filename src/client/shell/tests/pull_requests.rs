@@ -12,6 +12,7 @@ fn pull_request(number: u64, branch: &str) -> ClientShellPullRequest {
         url: format!("https://github.com/octo/web/pull/{number}"),
         branch: branch.into(),
         draft: false,
+        merged: false,
         conflict: false,
         queued: false,
         review: ClientShellPullRequestReview::None,
@@ -338,4 +339,31 @@ fn configured_colors_override_the_palette() {
 
 fn snapshot_copy(state: &ClientShellState) -> ClientShellSnapshot {
     state.snapshot.as_deref().expect("snapshot").clone()
+}
+
+#[test]
+fn merge_status_sits_with_the_status_glyphs() {
+    let mut queued = pull_request(31, "queued");
+    queued.queued = true;
+    queued.checks = ClientShellPullRequestChecks::Pass;
+    let mut merged = pull_request(30, "landed");
+    merged.merged = true;
+    let repos = vec![ClientShellPullRequestRepo {
+        label: "web".into(),
+        url: None,
+        loading: false,
+        error: None,
+        pull_requests: vec![queued, merged],
+    }];
+    let (_, rows) = composed(false, true, repos);
+    let queued = row_with(&rows, "#31").1;
+    assert!(queued.starts_with("  #31 queued"), "{queued}");
+    assert!(queued.ends_with("\u{F4DB} \u{F058}│"), "{queued}");
+    let merged = row_with(&rows, "#30").1;
+    assert!(merged.ends_with("\u{EBAB}│"), "{merged}");
+    // The heading counts open pull requests only.
+    assert!(row_with(&rows, " web ")
+        .1
+        .trim_end_matches(['│', ' '])
+        .ends_with('1'));
 }

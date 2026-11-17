@@ -240,6 +240,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [pull_requests]
 # poll_seconds = 60
 # gh_command = "gh"
+# merged_hours = 5
 # [[pull_requests.repos]]
 # path = "~/src/web"
 # user = "@me"

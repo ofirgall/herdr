@@ -1009,6 +1009,9 @@ pub struct ClientShellPullRequest {
     pub branch: String,
     #[serde(default)]
     pub draft: bool,
+    /// Merged recently; listed after the open ones.
+    #[serde(default)]
+    pub merged: bool,
     #[serde(default)]
     pub conflict: bool,
     #[serde(default)]
@@ -3036,6 +3039,7 @@ mod tests {
                     url: "https://github.com/octo/web/pull/7".into(),
                     branch: "fix".into(),
                     draft: true,
+                    merged: false,
                     conflict: true,
                     queued: true,
                     review: ClientShellPullRequestReview::ChangesRequested,

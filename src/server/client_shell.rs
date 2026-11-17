@@ -668,6 +668,7 @@ fn client_shell_pull_request_repo(
                 url: pr.url.clone(),
                 branch: pr.branch.clone(),
                 draft: pr.draft,
+                merged: pr.merged,
                 conflict: pr.conflict,
                 queued: pr.queued,
                 review: match pr.review {
