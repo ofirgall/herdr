@@ -676,6 +676,9 @@ pub struct SpacesSidebarConfig {
     /// Blank rows before each indented worktree child, so a group's spaces are
     /// spaced too. The tree connector continues through these rows.
     pub subspace_row_gap: u16,
+    /// Apply `row_gap` and `subspace_row_gap` only after a space whose agent
+    /// children are shown, so spaces without visible agents stay packed.
+    pub row_gap_after_agents_only: bool,
     /// Whether space rows render their aggregate agent status (`state_icon`
     /// and `state_text`). Agent children keep their own status either way.
     pub show_status: bool,
@@ -720,6 +723,7 @@ impl Default for SpacesSidebarConfig {
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             subspace_row_gap: 0,
+            row_gap_after_agents_only: false,
             show_status: true,
             agents: SpaceAgentsMode::Off,
             agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],

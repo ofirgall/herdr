@@ -539,9 +539,9 @@ fn children_of_a_non_last_linked_worktree_keep_the_tree_rail() {
     let child = &rows[row_index(&rows, "notes")];
     assert!(child.starts_with(" │"), "{rows:#?}");
     let docs = &rows[row_index(&rows, "docs")];
-    assert!(docs.starts_with(" ├ "), "{rows:#?}");
+    assert!(docs.starts_with(" ├─ "), "{rows:#?}");
     let empty = &rows[row_index(&rows, "empty")];
-    assert!(empty.starts_with(" └ "), "{rows:#?}");
+    assert!(empty.starts_with(" └─ "), "{rows:#?}");
     // The parent's own children carry the rail down to its first worktree.
     let parent_child = &rows[row_index(&rows, "api")];
     assert!(parent_child.starts_with(" │"), "{rows:#?}");
@@ -586,12 +586,12 @@ fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Tree rail at column 1, status icon at column 5: the highlight starts at 4.
+    // Tree rail at column 1, status icon at column 6: the highlight starts at 5.
     assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "│");
-    for x in child.x..child.x + 4 {
+    for x in child.x..child.x + 5 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 4..child.right() {
+    for x in child.x + 5..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
@@ -726,4 +726,39 @@ fn subspace_row_gap_defaults_to_packed_worktree_children() {
         row_index(&rows, "client-shell") + 1,
         "{rows:#?}"
     );
+}
+
+#[test]
+fn row_gap_after_agents_only_spaces_only_entries_with_shown_agents() {
+    // ws_1 (parent) and ws_2 ("docs") have agents; ws_3 ("empty") has none.
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true), (2, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    snapshot.workspaces.push(workspace("ws_4", 4, "other"));
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+    config.ui.sidebar.spaces.row_gap = 1;
+    config.ui.sidebar.spaces.subspace_row_gap = 1;
+    config.ui.sidebar.spaces.row_gap_after_agents_only = true;
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let rows = compose_rows(&mut state);
+
+    let docs = row_index(&rows, "docs");
+    let notes = row_index(&rows, "notes");
+    let empty = row_index(&rows, "empty");
+    let other = row_index(&rows, "other");
+    // docs shows an agent, so a gap (continuing the rail) follows it.
+    assert_eq!(empty, notes + 2, "{rows:#?}");
+    assert_eq!(rows[notes + 1].chars().nth(1), Some('│'), "{rows:#?}");
+    // empty shows no agents, so "other" follows it directly.
+    assert_eq!(other, empty + 1, "{rows:#?}");
+    // The parent shows agents, so a gap precedes docs.
+    assert_eq!(rows[docs - 1].chars().nth(1), Some('│'), "{rows:#?}");
+    assert!(!rows[docs - 1].contains("api"), "{rows:#?}");
 }

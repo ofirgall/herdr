@@ -417,7 +417,13 @@ fn render_spaces_section(
         })
         .collect::<Vec<_>>();
     let gaps = (0..entries.len())
-        .map(|index| space_gap_before(entries.get(index + 1), &config.spaces))
+        .map(|index| {
+            space_gap_after(
+                child_heights[index] > 0,
+                entries.get(index + 1),
+                &config.spaces,
+            )
+        })
         .collect::<Vec<_>>();
     let mut metrics = super::scroll::list_scroll_metrics(
         &row_heights,
@@ -720,12 +726,21 @@ pub(crate) fn entry_for_jump_number(
 }
 
 /// Column where an indented worktree child's content starts: one column of
-/// margin, the `├`/`└` connector, and a space.
-pub(in crate::client::shell) const SUBSPACE_INDENT: u16 = 3;
+/// margin, the `├─`/`└─` connector, and a space.
+pub(in crate::client::shell) const SUBSPACE_INDENT: u16 = 4;
 
-/// Blank rows drawn before `next`: `row_gap` before a top-level space,
-/// `subspace_row_gap` before a worktree child, none after the last entry.
-fn space_gap_before(next: Option<&WorkspaceEntry>, config: &SpacesSidebarConfig) -> u16 {
+/// Blank rows drawn after an entry, before `next`: `row_gap` before a
+/// top-level space, `subspace_row_gap` before a worktree child, none after the
+/// last entry. With `row_gap_after_agents_only`, only an entry whose agent
+/// children are shown is followed by a gap.
+fn space_gap_after(
+    shows_agents: bool,
+    next: Option<&WorkspaceEntry>,
+    config: &SpacesSidebarConfig,
+) -> u16 {
+    if config.row_gap_after_agents_only && !shows_agents {
+        return 0;
+    }
     next.map_or(0, |next| {
         if next.indented {
             config.subspace_row_gap
@@ -1002,14 +1017,14 @@ pub(in crate::client::shell) fn render_workspace_rows(
             // stays close to the left edge; continuation rows indent 2 more.
             let prefix = if row_index == 0 {
                 if entry.last_child {
-                    " └ "
+                    " └─ "
                 } else {
-                    " ├ "
+                    " ├─ "
                 }
             } else if entry.last_child {
-                "     "
+                "      "
             } else {
-                " │   "
+                " │    "
             };
             x = put_segment(
                 buffer,

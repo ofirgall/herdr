@@ -381,6 +381,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # row_gap = 0
 # Blank rows before each indented worktree child; the tree connector continues through them.
 # subspace_row_gap = 0
+# Only add those gaps after a space whose agent children are shown.
+# row_gap_after_agents_only = false
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
 # Background notification popup delivery
