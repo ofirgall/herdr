@@ -151,13 +151,14 @@ pub(crate) fn resolved_token_spans(
         custom_style,
         palette,
         false,
+        false,
     )
     .0
 }
 
-/// Like [`resolved_token_spans`], but underlines tokens that carry a link and
-/// reports the columns of each visible linked token. Callers use it only for
-/// rows with at least one linked token.
+/// Like [`resolved_token_spans`], but reports the columns of each visible
+/// linked token and, when `underline_links` is set, underlines those tokens.
+/// Callers use it only for rows with at least one linked token.
 pub(crate) fn resolved_token_spans_with_links(
     resolved: &[ResolvedToken],
     state_icon: (&str, Style),
@@ -167,6 +168,7 @@ pub(crate) fn resolved_token_spans_with_links(
     custom_style: Style,
     palette: &Palette,
     max_width: usize,
+    underline_links: bool,
 ) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
     let layout = layout_tokens(resolved, state_icon.0, max_width);
     emit_token_spans(
@@ -179,6 +181,7 @@ pub(crate) fn resolved_token_spans_with_links(
         custom_style,
         palette,
         true,
+        underline_links,
     )
 }
 
@@ -187,6 +190,8 @@ pub(crate) fn resolved_token_spans_with_links(
 struct TokenLayout {
     visible: Vec<usize>,
     budgets: Vec<usize>,
+    /// Columns available to the row; a spacer fills what the tokens leave.
+    max_width: usize,
 }
 
 /// Columns a linked token occupies in a rendered row, relative to the first
@@ -210,6 +215,8 @@ fn layout_tokens(
             ResolvedTokenKind::StateIcon => display_width(state_icon_text),
             ResolvedTokenKind::AgentIndex(index) => display_width(&(index + 1).to_string()),
             ResolvedTokenKind::Index { text, .. } => display_width(text),
+            // At least one column between the left and right-aligned tokens.
+            ResolvedTokenKind::Spacer => 1,
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
@@ -307,6 +314,7 @@ fn layout_tokens(
     TokenLayout {
         visible: visible_indices,
         budgets,
+        max_width,
     }
 }
 
@@ -319,6 +327,7 @@ fn emit_token_spans(
     secondary_style: Style,
     custom_style: Style,
     palette: &Palette,
+    record_links: bool,
     underline_links: bool,
 ) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
     let mut spans = Vec::new();
@@ -326,7 +335,11 @@ fn emit_token_spans(
     let TokenLayout {
         visible: visible_indices,
         budgets,
+        max_width,
     } = layout;
+    // Span and token index of the row's spacer, widened once every token's
+    // width is known.
+    let mut spacer = None;
     for (position, index) in visible_indices.iter().copied().enumerate() {
         let token = &resolved[index];
         if position > 0 {
@@ -350,8 +363,16 @@ fn emit_token_spans(
                 truncate_end(text, budgets[index]),
                 apply_token_style(workspace_style, token.style),
             )),
+            ResolvedTokenKind::Tab(text) => spans.push(Span::styled(
+                truncate_end(text, budgets[index]),
+                apply_token_style(
+                    palette
+                        .tab
+                        .map_or(secondary_style, |color| secondary_style.fg(color)),
+                    token.style,
+                ),
+            )),
             ResolvedTokenKind::Machine(text)
-            | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
             | ResolvedTokenKind::Branch(text) => spans.push(Span::styled(
@@ -394,6 +415,10 @@ fn emit_token_spans(
                     ));
                 }
             }
+            ResolvedTokenKind::Spacer => {
+                spacer = Some((spans.len(), index));
+                spans.push(Span::raw(" "));
+            }
             ResolvedTokenKind::TerminalTitle(text) | ResolvedTokenKind::Custom(text) => {
                 spans.push(Span::styled(
                     truncate_end(text, budgets[index]),
@@ -401,21 +426,38 @@ fn emit_token_spans(
                 ));
             }
         }
-        if underline_links && token.link.is_some() {
+        if record_links && token.link.is_some() {
             let width_of = |spans: &[Span<'static>]| {
                 spans
                     .iter()
                     .map(|span| display_width(&span.content))
                     .sum::<usize>()
             };
-            for span in &mut spans[first_span..] {
-                span.style = span.style.add_modifier(Modifier::UNDERLINED);
+            if underline_links {
+                for span in &mut spans[first_span..] {
+                    span.style = span.style.add_modifier(Modifier::UNDERLINED);
+                }
             }
             columns.push(TokenColumns {
                 index,
                 start: width_of(&spans[..first_span]),
                 width: width_of(&spans[first_span..]),
             });
+        }
+    }
+    if let Some((span, spacer_index)) = spacer {
+        let used = spans
+            .iter()
+            .map(|span| display_width(&span.content))
+            .sum::<usize>();
+        let extra = max_width.saturating_sub(used);
+        if extra > 0 {
+            spans[span] = Span::raw(" ".repeat(1 + extra));
+            for column in &mut columns {
+                if column.index > spacer_index {
+                    column.start += extra;
+                }
+            }
         }
     }
     (spans, columns)
@@ -519,6 +561,7 @@ mod token_link_layout_tests {
             style,
             &Palette::catppuccin(),
             width,
+            true,
         )
     }
 
@@ -560,6 +603,109 @@ mod token_link_layout_tests {
             ]
         );
         assert_eq!(underlined(&spans), vec!["#7009", "ci"]);
+    }
+
+    #[test]
+    fn tab_tokens_use_the_theme_tab_color_and_a_token_fg_still_wins() {
+        use ratatui::style::Color;
+        let style = Style::default();
+        let mut palette = Palette::catppuccin();
+        let render = |row: &[ResolvedToken], palette: &Palette| {
+            resolved_token_spans(
+                row,
+                ("*", style),
+                style,
+                style,
+                style.fg(Color::Gray),
+                style,
+                palette,
+                40,
+            )
+        };
+        let row = vec![
+            token(ResolvedTokenKind::Tab("web".into()), false),
+            token(ResolvedTokenKind::Agent("claude".into()), false),
+        ];
+        let spans = render(&row, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Gray));
+
+        palette.tab = Some(Color::Rgb(1, 2, 3));
+        let spans = render(&row, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Rgb(1, 2, 3)));
+        assert_eq!(
+            spans[2].style.fg,
+            Some(Color::Gray),
+            "other secondary tokens keep theirs"
+        );
+
+        let mut styled = row.clone();
+        styled[0].style.fg = Some(serde_json::from_str("\"#0a0b0c\"").unwrap());
+        let spans = render(&styled, &palette);
+        assert_eq!(spans[0].style.fg, Some(Color::Rgb(10, 11, 12)));
+    }
+
+    #[test]
+    fn linked_tokens_keep_their_columns_without_underline_when_disabled() {
+        let row = vec![
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+        ];
+        let style = Style::default();
+        let (spans, columns) = resolved_token_spans_with_links(
+            &row,
+            ("*", style),
+            style,
+            style,
+            style,
+            style,
+            &Palette::catppuccin(),
+            40,
+            false,
+        );
+        assert_eq!(text(&spans), "repo #7009");
+        assert_eq!(
+            columns,
+            vec![TokenColumns {
+                index: 1,
+                start: 5,
+                width: 5
+            }]
+        );
+        assert!(underlined(&spans).is_empty());
+    }
+
+    #[test]
+    fn spacer_pushes_the_following_tokens_to_the_right_edge() {
+        let row = vec![
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Spacer, false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+            token(ResolvedTokenKind::Custom("ci".into()), true),
+        ];
+        let (spans, columns) = linked(&row, 20);
+        assert_eq!(text(&spans), "repo        #7009 ci");
+        assert_eq!(
+            columns,
+            vec![
+                TokenColumns {
+                    index: 2,
+                    start: 12,
+                    width: 5
+                },
+                TokenColumns {
+                    index: 3,
+                    start: 18,
+                    width: 2
+                },
+            ]
+        );
+        // Too narrow: the spacer keeps one column and text tokens shrink as
+        // they do in any row.
+        let (spans, _) = linked(&row, 12);
+        assert_eq!(text(&spans), "repo #70… ci");
+        // Without room to spare the spacer is a single column.
+        let (spans, _) = linked(&row, 13);
+        assert_eq!(text(&spans), "repo #7009 ci");
     }
 
     #[test]

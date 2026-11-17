@@ -14,9 +14,9 @@ use crate::protocol::{ClientShellAgent, ClientShellPane, ClientShellTab};
 /// Columns a child is indented relative to its space's first row.
 const CHILD_INDENT: u16 = 2;
 /// Worktree connector drawn on child rows; matches the space rows' `│` column.
-const TREE_RAIL: &str = "   │";
+pub(super) const TREE_RAIL: &str = " │";
 /// Columns occupied by the worktree tree marker on child rows.
-const TREE_MARKER_WIDTH: u16 = 4;
+pub(super) const TREE_MARKER_WIDTH: u16 = 2;
 
 /// One agent drawn as a child entry of its space.
 pub(super) struct SpaceAgentChild {
@@ -162,7 +162,7 @@ pub(super) fn render_agent_toggle(
 /// space's first-row content starts. A focused child's highlight starts one
 /// column before its status, leaving the tree connectors on the plain sidebar.
 /// `tree_rail` continues the group's `│` connector through the children of a
-/// linked worktree that has siblings below it, so the tree stays unbroken.
+/// space that has worktree children below it, so the tree stays unbroken.
 pub(super) fn render_children(
     buffer: &mut Buffer,
     area: Rect,
@@ -235,6 +235,7 @@ pub(super) fn render_children(
                     hits: &mut hits.token_links,
                     x: area.x + indent,
                     y: y + index as u16,
+                    underline: config.token_link_underline,
                 }),
             ));
             Paragraph::new(Line::from(spans)).render(

@@ -302,7 +302,7 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. `index_focused` colors only the focused space's number, falling back to `index` and then to the highlight color, so you can give the focused number its own color with or without `index`. A token's own `fg`, including one from a rule, still wins. Both are accepted in `[theme.custom]` and in the light and dark subtables.
+`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. `index_focused` colors only the focused space's number, falling back to `index` and then to the highlight color, so you can give the focused number its own color with or without `index`. `tab` colors tab names in the sidebar, drawn by the `tab` and `tab_stripped` tokens in agent rows and Space agent children; unset, they keep the muted secondary color. A token's own `fg`, including one from a rule, still wins. All three are accepted in `[theme.custom]` and in the light and dark subtables.
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
@@ -486,6 +486,8 @@ Space rows accept these built-in tokens:
 - `git_status` — Git ahead and behind counts when nonzero.
 - `$name` — custom workspace metadata named `name`.
 
+Agent and Space rows also accept `spacer`, which pushes the tokens after it to the right edge of the row, for example `["workspace", "spacer", "$pr_status"]` keeps a status at the right. Only the first `spacer` in a row is used, a row with nothing but spacers disappears, and when the row is too narrow it shrinks to one column. `spacer` does not count toward the 16-token limit and accepts no rules.
+
 Tokens render in their configured order. Herdr separates adjacent values with a single space. Missing values and their separators disappear; a row disappears when none of its tokens have a value. Existing custom rows remain unchanged, so add `machine` explicitly if you want machine identity in a custom multi-machine layout. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
 
 A token entry can also be an inline style table:
@@ -530,7 +532,7 @@ rows = [
 
 Unspecified fields keep the token's style. Agent rows reject `focused`.
 
-`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
+`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group; set `subspace_row_gap` under `[ui.sidebar.spaces]` to add blank rows before each worktree child as well, with the tree connector continuing through them. Set `row_gap_after_agents_only = true` to add these gaps only after a Space whose agent children are shown, or after the last worktree child of a group.
 
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 
@@ -586,6 +588,8 @@ token_link_click = "click"   # default: a plain click opens the link
 ```
 
 Accepted modifiers are `ctrl` (`control`), `alt` (`option`), `cmd` (`command`, `super`), `meta`, and `hyper`; `shift` is not accepted. With a modifier, the click must hold exactly that modifier. Any other value is reported by `herdr config check` and the default is kept. Many terminals do not forward cmd-click on macOS, and ctrl-click can be turned into a right click, so the default is a plain click and `alt` and `ctrl` are the practical modifiers; you may need to enable the modifier for mouse reporting in your terminal.
+
+Linked tokens are underlined by default. Set `token_link_underline = false` under `[ui.sidebar]` to draw them in their configured style only; the link still opens on the click `token_link_click` selects.
 
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 

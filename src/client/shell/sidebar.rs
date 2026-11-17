@@ -416,13 +416,14 @@ fn render_spaces_section(
                 .unwrap_or(1)
         })
         .collect::<Vec<_>>();
-    let gaps = entries
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            entries
-                .get(index + 1)
-                .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap)
+    let gaps = (0..entries.len())
+        .map(|index| {
+            space_gap_after(
+                &entries[index],
+                child_heights[index] > 0,
+                entries.get(index + 1),
+                &config.spaces,
+            )
         })
         .collect::<Vec<_>>();
     let mut metrics = super::scroll::list_scroll_metrics(
@@ -508,6 +509,7 @@ fn render_spaces_section(
             dragged,
             palette,
             (!config.token_link_click.is_off()).then_some(&mut hits.token_links),
+            config.token_link_underline,
         );
         let group_toggle = render_parent_group_toggle(
             buffer,
@@ -527,12 +529,16 @@ fn render_spaces_section(
             )
         });
         let child_rows = row_height - space_height;
+        // The group's `│` runs on while a worktree child follows this space.
+        let tree_continues = entries
+            .get(entry_position + 1)
+            .is_some_and(|next| next.indented);
         if let Some(children) = children[entry_position].as_deref() {
             super::space_agents::render_children(
                 buffer,
                 Rect::new(body.x, y + space_height, content_width, child_rows),
-                if entry.indented { 6 } else { 1 },
-                entry.indented && !entry.last_child,
+                if entry.indented { SUBSPACE_INDENT } else { 1 },
+                tree_continues,
                 children,
                 config,
                 hits,
@@ -547,9 +553,23 @@ fn render_spaces_section(
             agent_toggle,
             child_rows,
         });
-        let gap = entries
-            .get(entry_position + 1)
-            .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap);
+        let gap = gaps[entry_position];
+        if tree_continues {
+            for row in 0..gap {
+                let gap_y = y.saturating_add(row_height + row);
+                if gap_y >= body.bottom() {
+                    break;
+                }
+                put_text(
+                    buffer,
+                    body.x,
+                    gap_y,
+                    content_width.min(super::space_agents::TREE_MARKER_WIDTH),
+                    super::space_agents::TREE_RAIL,
+                    Style::default().fg(palette.overlay0),
+                );
+            }
+        }
         y = y.saturating_add(row_height + gap);
     }
 
@@ -704,6 +724,34 @@ pub(crate) fn entry_for_jump_number(
         })
         .nth(number - 1)
         .copied()
+}
+
+/// Column where an indented worktree child's content starts: one column of
+/// margin, the `├─`/`└─` connector, and a space.
+pub(in crate::client::shell) const SUBSPACE_INDENT: u16 = 4;
+
+/// Blank rows drawn after an entry, before `next`: `row_gap` before a
+/// top-level space, `subspace_row_gap` before a worktree child, none after the
+/// last entry. With `row_gap_after_agents_only`, only an entry whose agent
+/// children are shown, or the last worktree child of a group, is followed by
+/// a gap, so a group always stays apart from the next top-level space.
+fn space_gap_after(
+    entry: &WorkspaceEntry,
+    shows_agents: bool,
+    next: Option<&WorkspaceEntry>,
+    config: &SpacesSidebarConfig,
+) -> u16 {
+    let closes_group = entry.indented && next.is_some_and(|next| !next.indented);
+    if config.row_gap_after_agents_only && !shows_agents && !closes_group {
+        return 0;
+    }
+    next.map_or(0, |next| {
+        if next.indented {
+            config.subspace_row_gap
+        } else {
+            config.row_gap
+        }
+    })
 }
 
 pub(crate) fn workspace_entries(
@@ -960,6 +1008,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     dragged: bool,
     palette: &Palette,
     mut links: Option<&mut Vec<TokenLinkHit>>,
+    underline_links: bool,
 ) {
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y + row_index as u16;
@@ -968,16 +1017,18 @@ pub(in crate::client::shell) fn render_workspace_rows(
         }
         let mut x = area.x;
         if entry.indented {
+            // The connector sits under the parent's first column so the tree
+            // stays close to the left edge; continuation rows indent 2 more.
             let prefix = if row_index == 0 {
                 if entry.last_child {
-                    "   └─ "
+                    " └─ "
                 } else {
-                    "   ├─ "
+                    " ├─ "
                 }
             } else if entry.last_child {
-                "        "
+                "      "
             } else {
-                "   │    "
+                " │    "
             };
             x = put_segment(
                 buffer,
@@ -1035,7 +1086,12 @@ pub(in crate::client::shell) fn render_workspace_rows(
             area.right().saturating_sub(2).saturating_sub(x) as usize,
             links
                 .as_deref_mut()
-                .map(|hits| super::agent_sidebar::LinkSink { hits, x, y }),
+                .map(|hits| super::agent_sidebar::LinkSink {
+                    hits,
+                    x,
+                    y,
+                    underline: underline_links,
+                }),
         );
         Paragraph::new(Line::from(spans)).render(
             Rect::new(x, y, area.right().saturating_sub(2).saturating_sub(x), 1),

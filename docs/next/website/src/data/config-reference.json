@@ -191,6 +191,12 @@
           "description": "Color for the focused space's jump number. Falls back to theme.custom.index, then to the focused-space highlight color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.tab",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for tab names in the sidebar (the tab and tab_stripped tokens of agent rows and Space agent children). Unset keeps the row's muted secondary color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -315,6 +321,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the index_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.tab",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -453,6 +465,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the index_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.tab",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",
@@ -1181,6 +1199,12 @@
           "description": "Which click opens the web link of a sidebar token reported with --link. \"click\" opens it on a plain click, a modifier (ctrl, alt, cmd, meta, hyper, or a + combination such as ctrl+alt, never shift) requires exactly that modifier and leaves a plain click to select the row, and \"off\" removes the underline and the link click. Many terminals do not forward cmd-click on macOS and ctrl-click can become a right click. Invalid values are reported by herdr config check and keep the default."
         },
         {
+          "key": "ui.sidebar.token_link_underline",
+          "type": "boolean",
+          "default": "true",
+          "description": "Draw a sidebar token reported with --link underlined. Set false to keep linked tokens in their configured style; the link still opens on the click token_link_click selects."
+        },
+        {
           "key": "ui.sidebar.agents.enabled",
           "type": "boolean",
           "default": "true",
@@ -1196,7 +1220,7 @@
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
-          "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. Agent rows also accept a tab_stripped token showing the tab name without its jump-number prefix (the tab's own position, optionally in [] or (), at most one symbol, then whitespace); a styled tab_stripped token accepts prefix, a template with exactly one {} for the position (at most 32 characters), such as \"{}| \", which replaces the built-in rule. At most 16 rows and 16 tokens per row."
+          "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. Agent rows also accept a tab_stripped token showing the tab name without its jump-number prefix (the tab's own position, optionally in [] or (), at most one symbol, then whitespace); a styled tab_stripped token accepts prefix, a template with exactly one {} for the position (at most 32 characters), such as \"{}| \", which replaces the built-in rule. A spacer token pushes the tokens after it to the right edge of the row. At most 16 rows and 16 tokens per row; spacer does not count."
         },
         {
           "key": "ui.sidebar.agents.rows_by_agent",
@@ -1234,10 +1258,22 @@
           "description": "Blank terminal rows between worktree groups and unrelated top-level Spaces. Worktree parents and their indented children remain packed."
         },
         {
+          "key": "ui.sidebar.spaces.subspace_row_gap",
+          "type": "integer",
+          "default": "0",
+          "description": "Blank terminal rows before each indented worktree child, between a worktree parent and its first child and between sibling children. The tree connector continues through these rows. Combine with row_gap = 1 for a blank row after every Space."
+        },
+        {
+          "key": "ui.sidebar.spaces.row_gap_after_agents_only",
+          "type": "boolean",
+          "default": "false",
+          "description": "Apply row_gap and subspace_row_gap only after a Space whose agent children are shown, or after the last worktree child of a group, so Spaces without visible agents stay packed while each group stays apart from the next Space."
+        },
+        {
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. Any space-row token accepts focused, a { fg, bold, dim } table applied only on the focused space over the token's style and rules. At most 16 rows and 16 tokens per row."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. Any space-row token accepts focused, a { fg, bold, dim } table applied only on the focused space over the token's style and rules. A spacer token pushes the tokens after it to the right edge of the row. At most 16 rows and 16 tokens per row; spacer does not count."
         },
         {
           "key": "ui.sidebar.spaces.show_status",

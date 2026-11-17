@@ -486,6 +486,7 @@ pub(super) fn render_expanded(
                     false,
                     palette,
                     None,
+                    config.token_link_underline,
                 );
                 if endpoint.status != ClientEndpointStatus::Online {
                     buffer.set_style(

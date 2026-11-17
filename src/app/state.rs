@@ -77,6 +77,9 @@ pub struct Palette {
     /// Optional color for the focused space's jump number. Falls back to
     /// `index`, then to the focused row's highlight color.
     pub index_focused: Option<Color>,
+    /// Optional color for tab names in the sidebar (`tab` and `tab_stripped`
+    /// tokens). When unset, tab names use the row's secondary color.
+    pub tab: Option<Color>,
 }
 
 impl Palette {
@@ -113,6 +116,7 @@ impl Palette {
             peach: Color::Rgb(250, 179, 135),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -140,6 +144,7 @@ impl Palette {
             peach: Color::Rgb(254, 100, 11),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -167,6 +172,7 @@ impl Palette {
             peach: Color::Yellow,
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -194,6 +200,7 @@ impl Palette {
             peach: Color::Rgb(255, 158, 100),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -221,6 +228,7 @@ impl Palette {
             peach: Color::Rgb(177, 92, 0),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -248,6 +256,7 @@ impl Palette {
             peach: Color::Rgb(255, 184, 108),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -275,6 +284,7 @@ impl Palette {
             peach: Color::Rgb(208, 135, 112),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -302,6 +312,7 @@ impl Palette {
             peach: Color::Rgb(254, 128, 25),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -329,6 +340,7 @@ impl Palette {
             peach: Color::Rgb(175, 58, 3),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -356,6 +368,7 @@ impl Palette {
             peach: Color::Rgb(209, 154, 102),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -383,6 +396,7 @@ impl Palette {
             peach: Color::Rgb(152, 104, 1),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -410,6 +424,7 @@ impl Palette {
             peach: Color::Rgb(203, 75, 22),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -437,6 +452,7 @@ impl Palette {
             peach: Color::Rgb(203, 75, 22),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -464,6 +480,7 @@ impl Palette {
             peach: Color::Rgb(255, 160, 102),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -491,6 +508,7 @@ impl Palette {
             peach: Color::Rgb(204, 109, 0),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -518,6 +536,7 @@ impl Palette {
             peach: Color::Rgb(234, 154, 151),  // rose
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -545,6 +564,7 @@ impl Palette {
             peach: Color::Rgb(215, 130, 126),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -572,6 +592,7 @@ impl Palette {
             peach: Color::Rgb(255, 199, 153),
             index: None,
             index_focused: None,
+            tab: None,
         }
     }
 
@@ -666,6 +687,9 @@ impl Palette {
         if let Some(c) = &custom.index_focused {
             self.index_focused = Some(parse_color(c));
         }
+        if let Some(c) = &custom.tab {
+            self.tab = Some(parse_color(c));
+        }
         self
     }
 
@@ -733,6 +757,9 @@ impl Palette {
         }
         if let Some(c) = &custom.index_focused {
             self.index_focused = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.tab {
+            self.tab = Some(parse_color(c));
         }
         self
     }

@@ -16,23 +16,41 @@ const DEFAULT_SIDEBAR_ROW_GAP: u16 = 0;
 fn deserialize_sidebar_rows<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
+    T: Deserialize<'de> + SidebarRowToken,
 {
     let rows = Vec::<Vec<T>>::deserialize(deserializer)?;
     validate_sidebar_rows(&rows).map_err(serde::de::Error::custom)?;
     Ok(rows)
 }
 
-fn validate_sidebar_rows<T>(rows: &[Vec<T>]) -> Result<(), String> {
+/// A token that may appear in a sidebar row.
+trait SidebarRowToken {
+    /// Whether this is the `spacer` alignment marker, which does not count
+    /// toward the per-row token limit.
+    fn is_spacer(&self) -> bool;
+}
+
+impl SidebarRowToken for AgentSidebarToken {
+    fn is_spacer(&self) -> bool {
+        matches!(self.parts().0, Self::Spacer)
+    }
+}
+
+impl SidebarRowToken for SpaceSidebarToken {
+    fn is_spacer(&self) -> bool {
+        matches!(self.parts().0, Self::Spacer)
+    }
+}
+
+fn validate_sidebar_rows<T: SidebarRowToken>(rows: &[Vec<T>]) -> Result<(), String> {
     if rows.len() > MAX_SIDEBAR_ROWS {
         return Err(format!(
             "sidebar layouts may contain at most {MAX_SIDEBAR_ROWS} rows"
         ));
     }
-    if rows
-        .iter()
-        .any(|row| row.len() > MAX_SIDEBAR_TOKENS_PER_ROW)
-    {
+    if rows.iter().any(|row| {
+        row.iter().filter(|token| !token.is_spacer()).count() > MAX_SIDEBAR_TOKENS_PER_ROW
+    }) {
         return Err(format!(
             "sidebar rows may contain at most {MAX_SIDEBAR_TOKENS_PER_ROW} tokens"
         ));
@@ -193,6 +211,8 @@ pub enum AgentSidebarToken {
     TerminalTitleStripped,
     /// The tab name without its leading jump-number prefix.
     TabStripped,
+    /// Pushes the tokens after it to the right edge of the row.
+    Spacer,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -211,6 +231,8 @@ pub enum SpaceSidebarToken {
     Workspace,
     Branch,
     GitStatus,
+    /// Pushes the tokens after it to the right edge of the row.
+    Spacer,
     Custom(String),
     Styled {
         token: Box<SpaceSidebarToken>,
@@ -331,7 +353,7 @@ impl RawSidebarToken {
                     return Err("sidebar tokens may contain at most 16 rules".into());
                 }
                 if !token.rules.is_empty()
-                    && matches!(token.token.as_str(), "state_icon" | "git_status")
+                    && matches!(token.token.as_str(), "state_icon" | "git_status" | "spacer")
                 {
                     return Err("sidebar rules require a text-valued token".into());
                 }
@@ -453,6 +475,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
         AgentSidebarToken::TabStripped => "tab_stripped".into(),
+        AgentSidebarToken::Spacer => "spacer".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -466,6 +489,7 @@ fn space_token_name(token: &SpaceSidebarToken) -> String {
         SpaceSidebarToken::Workspace => "workspace".into(),
         SpaceSidebarToken::Branch => "branch".into(),
         SpaceSidebarToken::GitStatus => "git_status".into(),
+        SpaceSidebarToken::Spacer => "spacer".into(),
         SpaceSidebarToken::Custom(name) => format!("${name}"),
         SpaceSidebarToken::Styled { token, .. } => space_token_name(token),
     }
@@ -529,6 +553,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
                 ("tab_stripped", Self::TabStripped),
+                ("spacer", Self::Spacer),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -590,6 +615,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
                 ("workspace", Self::Workspace),
                 ("branch", Self::Branch),
                 ("git_status", Self::GitStatus),
+                ("spacer", Self::Spacer),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -670,7 +696,15 @@ pub struct SpacesSidebarConfig {
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
+    /// Blank rows before a top-level space (between worktree groups and
+    /// unrelated spaces).
     pub row_gap: u16,
+    /// Blank rows before each indented worktree child, so a group's spaces are
+    /// spaced too. The tree connector continues through these rows.
+    pub subspace_row_gap: u16,
+    /// Apply `row_gap` and `subspace_row_gap` only after a space whose agent
+    /// children are shown, so spaces without visible agents stay packed.
+    pub row_gap_after_agents_only: bool,
     /// Whether space rows render their aggregate agent status (`state_icon`
     /// and `state_text`). Agent children keep their own status either way.
     pub show_status: bool,
@@ -714,6 +748,8 @@ impl Default for SpacesSidebarConfig {
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            subspace_row_gap: 0,
+            row_gap_after_agents_only: false,
             show_status: true,
             agents: SpaceAgentsMode::Off,
             agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],
@@ -815,13 +851,26 @@ impl Serialize for TokenLinkClickConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
     /// Which click opens the link of a metadata token that carries one.
     pub token_link_click: TokenLinkClickConfig,
+    /// Whether a metadata token that carries a link is drawn underlined.
+    pub token_link_underline: bool,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            agents: AgentsSidebarConfig::default(),
+            spaces: SpacesSidebarConfig::default(),
+            token_link_click: TokenLinkClickConfig::default(),
+            token_link_underline: true,
+        }
+    }
 }
 
 impl SidebarConfig {
@@ -868,6 +917,21 @@ mod tests {
         for value in ["shift", "ctrl+shift", "banana", "", "ctrl+", "none"] {
             assert!(parse(value).is_err(), "{value:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn token_link_underline_defaults_on_and_can_be_disabled() {
+        assert!(SidebarConfig::default().token_link_underline);
+        assert!(
+            toml::from_str::<SidebarConfig>("")
+                .unwrap()
+                .token_link_underline
+        );
+        assert!(
+            !toml::from_str::<SidebarConfig>("token_link_underline = false")
+                .unwrap()
+                .token_link_underline
+        );
     }
 
     #[test]
@@ -1481,5 +1545,33 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
             "{error}"
         );
         assert!(parse_space_row_token("{token = \"index\", focused = {italic = true}}").is_err());
+    }
+
+    #[test]
+    fn spacer_parses_round_trips_and_does_not_count_toward_the_token_limit() {
+        let config: SidebarConfig = toml::from_str(
+            "[agents]\nrows = [[\"agent\", \"spacer\", \"$pr\"]]\n\
+             [spaces]\nrows = [[\"workspace\", { token = \"spacer\" }, \"$pr\"]]\n",
+        )
+        .unwrap();
+        assert_eq!(config.agents.rows[0][1], AgentSidebarToken::Spacer);
+        assert_eq!(
+            config.spaces.rows[0][1].parts().0,
+            &SpaceSidebarToken::Spacer
+        );
+        let round: SidebarConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(round.agents.rows, config.agents.rows);
+        assert_eq!(round.spaces.rows, config.spaces.rows);
+
+        let full = std::iter::repeat_n("\"workspace\"", MAX_SIDEBAR_TOKENS_PER_ROW)
+            .collect::<Vec<_>>()
+            .join(",");
+        let input = format!("[spaces]\nrows = [[{full}, \"spacer\"]]");
+        assert!(toml::from_str::<SidebarConfig>(&input).is_ok());
+        let input = format!("[spaces]\nrows = [[{full}, \"branch\"]]");
+        assert!(toml::from_str::<SidebarConfig>(&input).is_err());
+
+        let input = "[spaces]\nrows = [[{ token = 'spacer', rules = [{ equals = 'x' }] }]]";
+        assert!(toml::from_str::<SidebarConfig>(input).is_err());
     }
 }
