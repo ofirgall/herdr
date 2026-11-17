@@ -255,17 +255,20 @@ pub(crate) fn render_sidebar(
     };
     let spaces_enabled = config.spaces.enabled;
     let agents_enabled = config.agents.enabled;
+    let pull_requests_enabled = config.pull_requests.enabled;
+    // Agents and pull requests share the lower section.
+    let lower_enabled = agents_enabled || pull_requests_enabled;
     let (workspace_area, detail_area) = crate::ui::expanded_sidebar_sections(
         area,
         state.sidebar_section_split,
         spaces_enabled,
-        agents_enabled,
+        lower_enabled,
     );
     hits.sidebar_section_divider = crate::ui::sidebar_section_divider_rect(
         area,
         state.sidebar_section_split,
         spaces_enabled,
-        agents_enabled,
+        lower_enabled,
     );
     if spaces_enabled {
         render_spaces_section(buffer, workspace_area, snapshot, config, state, hits);
@@ -274,10 +277,10 @@ pub(crate) fn render_sidebar(
     // sidebar content when only one section is shown. In the latter case that
     // row is shared with the `«` toggle, so the footer leaves two columns free.
     let content = crate::ui::sidebar_content_rect(area);
-    let (footer_area, agents_area) = if spaces_enabled && agents_enabled {
+    let (footer_area, lower_area) = if spaces_enabled && lower_enabled {
         (workspace_area, detail_area)
     } else {
-        let agents_area = Rect::new(
+        let lower_area = Rect::new(
             detail_area.x,
             detail_area.y,
             detail_area.width,
@@ -290,10 +293,12 @@ pub(crate) fn render_sidebar(
                 content.width.saturating_sub(2),
                 content.height,
             ),
-            agents_area,
+            lower_area,
         )
     };
     render_sidebar_footer(buffer, footer_area, snapshot, config, hits);
+    let (agents_area, pull_requests_area) =
+        split_lower_section(lower_area, agents_enabled, pull_requests_enabled);
     if agents_enabled {
         super::render_agent_panel(
             buffer,
@@ -302,6 +307,17 @@ pub(crate) fn render_sidebar(
             config,
             state.agent_scroll,
             spaces_enabled,
+            hits,
+        );
+    }
+    if pull_requests_enabled {
+        super::pull_request_sidebar::render_pull_request_panel(
+            buffer,
+            pull_requests_area,
+            snapshot,
+            config,
+            state.expanded_pull_requests,
+            spaces_enabled || agents_enabled,
             hits,
         );
     }
@@ -724,6 +740,32 @@ pub(crate) fn entry_for_jump_number(
         })
         .nth(number - 1)
         .copied()
+}
+
+/// Splits the lower sidebar section into `(agents, pull_requests)`: the whole
+/// area for the one enabled, the top and bottom halves when both are.
+pub(in crate::client::shell) fn split_lower_section(
+    area: Rect,
+    agents_enabled: bool,
+    pull_requests_enabled: bool,
+) -> (Rect, Rect) {
+    match (agents_enabled, pull_requests_enabled) {
+        (true, true) => {
+            let agents_height = area.height.div_ceil(2);
+            (
+                Rect::new(area.x, area.y, area.width, agents_height),
+                Rect::new(
+                    area.x,
+                    area.y + agents_height,
+                    area.width,
+                    area.height - agents_height,
+                ),
+            )
+        }
+        (true, false) => (area, Rect::default()),
+        (false, true) => (Rect::default(), area),
+        (false, false) => (Rect::default(), Rect::default()),
+    }
 }
 
 /// Column where an indented worktree child's content starts: one column of

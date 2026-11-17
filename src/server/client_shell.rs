@@ -270,6 +270,12 @@ pub(super) fn snapshot_with_completions(
         panes,
         agents,
         commands: app.client_shell_command_manifest(),
+        pull_requests: app
+            .state
+            .pull_requests
+            .iter()
+            .map(client_shell_pull_request_repo)
+            .collect(),
     };
     (shell, completions)
 }
@@ -630,6 +636,71 @@ fn split_hit_rect(
         return None;
     }
     Some(hit)
+}
+
+fn client_shell_checks(
+    checks: crate::app::pull_requests::PullRequestChecks,
+) -> protocol::ClientShellPullRequestChecks {
+    use crate::app::pull_requests::PullRequestChecks;
+    match checks {
+        PullRequestChecks::None => protocol::ClientShellPullRequestChecks::None,
+        PullRequestChecks::Pass => protocol::ClientShellPullRequestChecks::Pass,
+        PullRequestChecks::Fail => protocol::ClientShellPullRequestChecks::Fail,
+        PullRequestChecks::Pending => protocol::ClientShellPullRequestChecks::Pending,
+    }
+}
+
+fn client_shell_pull_request_repo(
+    repo: &crate::app::pull_requests::PullRequestRepoState,
+) -> protocol::ClientShellPullRequestRepo {
+    use crate::app::pull_requests::PullRequestReview;
+    protocol::ClientShellPullRequestRepo {
+        label: repo.label.clone(),
+        url: repo.url.clone(),
+        loading: repo.loading,
+        error: repo.error.clone(),
+        pull_requests: repo
+            .pull_requests
+            .iter()
+            .map(|pr| protocol::ClientShellPullRequest {
+                number: pr.number,
+                title: pr.title.clone(),
+                url: pr.url.clone(),
+                branch: pr.branch.clone(),
+                draft: pr.draft,
+                conflict: pr.conflict,
+                queued: pr.queued,
+                review: match pr.review {
+                    PullRequestReview::None => protocol::ClientShellPullRequestReview::None,
+                    PullRequestReview::Approved => protocol::ClientShellPullRequestReview::Approved,
+                    PullRequestReview::ChangesRequested => {
+                        protocol::ClientShellPullRequestReview::ChangesRequested
+                    }
+                    PullRequestReview::ReviewRequired => {
+                        protocol::ClientShellPullRequestReview::ReviewRequired
+                    }
+                },
+                checks: client_shell_checks(pr.checks),
+                human_threads: pr.human_threads,
+                bot_threads: pr.bot_threads,
+                check_runs: pr
+                    .check_runs
+                    .iter()
+                    .map(|run| protocol::ClientShellPullRequestCheck {
+                        name: run.name.clone(),
+                        outcome: client_shell_checks(run.outcome),
+                        url: run.url.clone(),
+                    })
+                    .collect(),
+                check_counts: protocol::ClientShellPullRequestCheckCounts {
+                    passed: pr.check_counts.passed,
+                    failed: pr.check_counts.failed,
+                    pending: pr.check_counts.pending,
+                    skipped: pr.check_counts.skipped,
+                },
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ ROOT_STRUCT = "Config"
 
 # Dotted key prefixes that are open-ended (user-defined tables/arrays) and
 # therefore not enumerable in a flat reference table.
-SKIPPED_SUBTREES = ("keys.command",)
+SKIPPED_SUBTREES = ("keys.command", "pull_requests.repos")
 
 FIELD_RE = re.compile(r"^\s*pub ([a-z_][a-z0-9_]*):\s*(.+?),?\s*$")
 STRUCT_RE = re.compile(r"^\s*pub(?:\(crate\))? struct ([A-Za-z0-9_]+)\s*\{\s*$")
@@ -231,7 +231,9 @@ def collect_entries(model: Model, struct_name: str = ROOT_STRUCT, prefix: str = 
     for struct_field in model.structs[struct_name]:
         dotted = f"{prefix}{struct_field.name}"
         inner, is_vec = strip_wrappers(struct_field.rust_type)
-        if inner in model.structs:
+        # A struct without public fields (a color, say) has its own serde
+        # format and is a single value.
+        if model.structs.get(inner):
             if dotted in SKIPPED_SUBTREES:
                 continue
             if is_vec:

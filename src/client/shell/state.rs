@@ -23,6 +23,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) hide_tab_bar_when_single_tab: bool,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
+    pub(super) pull_requests: crate::config::PullRequestsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) status_indicators: super::StatusIndicators,
     pub(super) tab_status: super::TabStatus,
@@ -101,6 +102,8 @@ pub(super) struct ShellHitMap {
     pub(super) space_agents: Vec<(Rect, String)>,
     /// Visible linked sidebar tokens; empty in the collapsed and multi-machine sidebars.
     pub(super) token_links: Vec<TokenLinkHit>,
+    /// Pull request check list toggles: `(rect, pull request URL)`.
+    pub(super) pull_request_toggles: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
@@ -912,6 +915,8 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
     pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
+    /// Pull requests whose checks are listed in the sidebar, by URL.
+    pub(super) expanded_pull_requests: HashSet<String>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
@@ -1107,6 +1112,7 @@ impl ClientShellState {
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             space_agent_overrides,
+            expanded_pull_requests: HashSet::new(),
             workspace_scroll: 0,
             agent_scroll: 0,
             pending_agent_reveal: None,
@@ -1220,6 +1226,12 @@ impl ClientShellState {
     pub(super) fn group_is_collapsed(&self, endpoint_id: &ClientEndpointId, key: &str) -> bool {
         self.collapsed_groups_for_endpoint(endpoint_id)
             .is_some_and(|groups| groups.contains(key))
+    }
+
+    pub(super) fn toggle_pull_request_checks(&mut self, url: String) {
+        if !self.expanded_pull_requests.remove(&url) {
+            self.expanded_pull_requests.insert(url);
+        }
     }
 
     pub(super) fn toggle_collapsed_group(&mut self, endpoint_id: &ClientEndpointId, key: String) {

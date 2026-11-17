@@ -242,6 +242,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) remote_collapsed_groups: &'a HashMap<ClientEndpointId, HashSet<String>>,
     /// Agent-children overrides of the active endpoint: workspace id -> expanded.
     pub(super) space_agent_overrides: Option<&'a HashMap<String, bool>>,
+    /// Pull requests whose checks are listed, by URL.
+    pub(super) expanded_pull_requests: &'a HashSet<String>,
     pub(super) workspace_scroll: &'a mut usize,
     pub(super) agent_scroll: &'a mut usize,
     pub(super) tab_scroll: &'a mut usize,

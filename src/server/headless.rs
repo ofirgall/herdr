@@ -3449,6 +3449,7 @@ impl HeadlessServer {
         }
 
         changed |= self.app.handle_tab_bar_status_tasks(now);
+        changed |= self.app.handle_pull_request_tasks(now);
 
         if geometry_dirty {
             self.app.pending_agent_resume_deadline = None;

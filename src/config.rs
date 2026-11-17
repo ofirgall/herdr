@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 mod io;
 mod keybinds;
 mod model;
+mod pull_requests;
 mod sidebar;
 mod sound;
 mod tab_bar;
@@ -28,9 +29,11 @@ pub use self::{
         TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
         ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
+    pull_requests::{PullRequestsConfig, WatchedRepoConfig},
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, PlaceholderTemplate, SidebarConfig,
-        SidebarTokenStyle, SpaceAgentsMode, SpaceSidebarToken, SpacesSidebarConfig, TokenLinkClick,
+        AgentSidebarToken, AgentsSidebarConfig, PlaceholderTemplate, PullRequestsSidebarConfig,
+        SidebarConfig, SidebarTokenStyle, SpaceAgentsMode, SpaceSidebarToken, SpacesSidebarConfig,
+        TokenLinkClick,
     },
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,
@@ -146,7 +149,7 @@ impl Config {
 
     pub(crate) fn all_sidebar_sections_disabled_diagnostic(&self) -> Option<String> {
         self.ui.sidebar.all_sections_disabled().then(|| {
-            "ui.sidebar.spaces.enabled and ui.sidebar.agents.enabled are both false; showing both sections".to_owned()
+            "ui.sidebar.spaces.enabled, ui.sidebar.agents.enabled and ui.sidebar.pull_requests.enabled are all false; showing spaces and agents".to_owned()
         })
     }
 

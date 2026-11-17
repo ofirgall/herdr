@@ -67,6 +67,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         }],
         agents: Vec::new(),
         commands: Vec::new(),
+        pull_requests: Vec::new(),
     }
 }
 
@@ -266,6 +267,7 @@ mod link_hover;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod pull_requests;
 mod sidebar_sections;
 mod startup_overlays;
 
