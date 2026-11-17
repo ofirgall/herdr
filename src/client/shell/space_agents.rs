@@ -35,7 +35,8 @@ impl SpaceAgentChild {
 /// Per-frame lookup tables, built once so each space does not rescan the snapshot.
 pub(super) struct SpaceAgentIndex<'a> {
     by_workspace: HashMap<&'a str, Vec<&'a ClientShellAgent>>,
-    tabs: HashMap<&'a str, &'a ClientShellTab>,
+    /// Tabs by id with their one-based position among their space's tabs.
+    tabs: HashMap<&'a str, (&'a ClientShellTab, usize)>,
     panes: HashMap<&'a str, &'a ClientShellPane>,
 }
 
@@ -43,10 +44,15 @@ impl<'a> SpaceAgentIndex<'a> {
     /// Groups agents by workspace, ordered by tab number and then by snapshot
     /// order. The agent-view order is deliberately ignored.
     pub(super) fn new(snapshot: &'a ClientShellSnapshot) -> Self {
+        let mut positions = HashMap::<&str, usize>::new();
         let tabs = snapshot
             .tabs
             .iter()
-            .map(|tab| (tab.tab_id.as_str(), tab))
+            .map(|tab| {
+                let position = positions.entry(tab.workspace_id.as_str()).or_insert(0);
+                *position += 1;
+                (tab.tab_id.as_str(), (tab, *position))
+            })
             .collect::<HashMap<_, _>>();
         let panes = snapshot
             .panes
@@ -64,7 +70,7 @@ impl<'a> SpaceAgentIndex<'a> {
             // Stable sort keeps snapshot order within a tab.
             agents.sort_by_key(|agent| {
                 tabs.get(agent.tab_id.as_str())
-                    .map_or(usize::MAX, |tab| tab.number)
+                    .map_or(usize::MAX, |(tab, _)| tab.number)
             });
         }
         Self {
@@ -91,13 +97,13 @@ impl<'a> SpaceAgentIndex<'a> {
             .iter()
             .enumerate()
             .map(|(index, agent)| {
+                let tab = self.tabs.get(agent.tab_id.as_str());
                 let rows = super::agent_sidebar::resolve_agent_rows(
                     &config.spaces.agent_rows,
                     agent,
                     &workspace.label,
-                    self.tabs
-                        .get(agent.tab_id.as_str())
-                        .map(|tab| tab.label.as_str()),
+                    tab.map(|(tab, _)| tab.label.as_str()),
+                    tab.map(|(_, position)| *position),
                     self.panes
                         .get(agent.pane_id.as_str())
                         .and_then(|pane| pane.label.as_deref()),

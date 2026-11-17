@@ -468,6 +468,7 @@ Agent rows accept these built-in tokens:
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.
+- `tab_stripped` — the tab name without the jump number a rename plugin wrote into it, for example `1| zsh` becomes `zsh` and `[2] build` becomes `build`. It is hidden whenever `tab` is, and the tab bar, the API and `tab` keep the full name. Only the tab's own number is removed: its position among its space's tabs, the number `switch_tab` uses. The number may be wrapped in `[]` or `()`, may be followed by at most one punctuation or symbol character, and must be followed by whitespace, so `2024 report`, `3d model` and another tab's number are shown unchanged. A styled token accepts `prefix`, the exact text your plugin writes with `{}` for the tab's position, for example `{ token = "tab_stripped", prefix = "{}| " }` removes `2| ` from the second tab. With `prefix`, only that exact text is removed and the built-in rule is not used, so plugin formats with several symbols or spaces work. The prefix must contain exactly one `{}`, no other braces and no control characters, and be at most 32 characters. Rules match the stripped name. `prefix` is rejected on other tokens. It is not in the default rows.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `agent_index` — the agent's 1-based position in the agents panel list.

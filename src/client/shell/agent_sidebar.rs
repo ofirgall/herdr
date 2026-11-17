@@ -280,11 +280,18 @@ pub(super) fn agent_row(
         .panes
         .iter()
         .find(|pane| pane.pane_id == agent.pane_id);
-    let tab_count = snapshot
+    let mut tab_count = 0;
+    let mut tab_position = None;
+    for candidate in snapshot
         .tabs
         .iter()
         .filter(|candidate| candidate.workspace_id == agent.workspace_id)
-        .count();
+    {
+        tab_count += 1;
+        if candidate.tab_id == agent.tab_id {
+            tab_position = Some(tab_count);
+        }
+    }
     let tab_label = tab
         .filter(|tab| tab_count > 1 || tab.custom_label)
         .map(|tab| tab.label.as_str());
@@ -298,6 +305,7 @@ pub(super) fn agent_row(
         agent,
         &workspace.label,
         tab_label,
+        tab_position,
         pane.and_then(|pane| pane.label.as_deref()),
         machine,
         agent_index,
@@ -381,6 +389,7 @@ pub(super) fn resolve_agent_rows(
     agent: &crate::protocol::ClientShellAgent,
     workspace_label: &str,
     tab_label: Option<&str>,
+    tab_position: Option<usize>,
     pane_label: Option<&str>,
     machine: Option<&str>,
     agent_index: usize,
@@ -405,6 +414,10 @@ pub(super) fn resolve_agent_rows(
             machine,
             workspace: workspace_label,
             tab: tab_label,
+            tab_stripped: tab_label
+                .zip(tab_position)
+                .map(|(label, position)| crate::ui::strip_tab_number(label, position)),
+            tab_position,
             pane: agent.title.as_deref().or(pane_label),
             agent_label,
             agent_index,

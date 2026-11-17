@@ -76,6 +76,10 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    /// `tab` without its built-in jump-number prefix; `None` whenever `tab` is.
+    pub(crate) tab_stripped: Option<&'a str>,
+    /// One-based position of the tab among its space's tabs.
+    pub(crate) tab_position: Option<usize>,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
     /// Zero-based position of the agent in the agents panel list.
@@ -115,6 +119,16 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Tab => context
                             .tab
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                        AgentSidebarToken::TabStripped => context.tab.map(|label| {
+                            let stripped = match (configured.tab_prefix(), context.tab_position) {
+                                (Some(prefix), Some(position)) => {
+                                    strip_tab_prefix(label, position, prefix)
+                                }
+                                (Some(_), None) => label,
+                                (None, _) => context.tab_stripped.unwrap_or(label),
+                            };
+                            ResolvedTokenKind::Tab(stripped.to_string())
+                        }),
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
@@ -149,6 +163,76 @@ pub(crate) fn agent_rows(
             (!resolved.is_empty()).then_some(resolved)
         })
         .collect()
+}
+
+/// Removes the tab's own jump number, as written by a rename plugin, from the
+/// start of `label`: an optional `[` or `(`, exactly the digits of `position`,
+/// the matching close bracket, at most one symbol, then whitespace. Returns
+/// `label` unchanged unless the prefix matches and text remains after it.
+pub(crate) fn strip_tab_number(label: &str, position: usize) -> &str {
+    let mut digits = [0u8; 20];
+    let digits = format_digits(position, &mut digits);
+    let mut rest = label;
+    let close = match rest.chars().next() {
+        Some('[') => Some(']'),
+        Some('(') => Some(')'),
+        _ => None,
+    };
+    if close.is_some() {
+        rest = &rest[1..];
+    }
+    let Some(after) = rest.strip_prefix(digits) else {
+        return label;
+    };
+    rest = after;
+    if let Some(close) = close {
+        let Some(after) = rest.strip_prefix(close) else {
+            return label;
+        };
+        rest = after;
+    }
+    if let Some(first) = rest.chars().next() {
+        if !first.is_alphanumeric() && !first.is_whitespace() {
+            rest = &rest[first.len_utf8()..];
+        }
+    }
+    let trimmed = rest.trim_start();
+    if trimmed.len() == rest.len() || trimmed.is_empty() {
+        return label;
+    }
+    trimmed
+}
+
+/// Removes exactly `before + position + after` from the start of `label`,
+/// leaving `label` unchanged unless text remains after it.
+fn strip_tab_prefix<'a>(
+    label: &'a str,
+    position: usize,
+    prefix: &crate::config::PlaceholderTemplate,
+) -> &'a str {
+    let mut digits = [0u8; 20];
+    let digits = format_digits(position, &mut digits);
+    label
+        .strip_prefix(prefix.before.as_str())
+        .and_then(|rest| rest.strip_prefix(digits))
+        .and_then(|rest| rest.strip_prefix(prefix.after.as_str()))
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(label)
+}
+
+/// Writes the decimal digits of `value` into `buffer` without allocating.
+fn format_digits(mut value: usize, buffer: &mut [u8; 20]) -> &str {
+    let mut start = buffer.len();
+    loop {
+        start -= 1;
+        buffer[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    // The slice holds only ASCII digits, so this cannot fail.
+    std::str::from_utf8(&buffer[start..]).unwrap_or_default()
 }
 
 pub(crate) struct SpaceTokenContext<'a> {
@@ -253,6 +337,8 @@ mod tests {
     struct Entry {
         workspace: String,
         tab: Option<String>,
+        tab_stripped: Option<String>,
+        tab_position: Option<usize>,
         pane: Option<String>,
         agent_label: Option<String>,
         terminal_title: Option<String>,
@@ -266,6 +352,8 @@ mod tests {
         Entry {
             workspace: "repo".into(),
             tab: None,
+            tab_stripped: None,
+            tab_position: None,
             pane: None,
             agent_label: Some("pi".into()),
             terminal_title: None,
@@ -287,6 +375,8 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            tab_stripped: entry.tab_stripped.as_deref(),
+            tab_position: entry.tab_position,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             agent_index: 0,
@@ -871,5 +961,107 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
                 "repo".into()
             ))]]
         );
+    }
+
+    #[test]
+    fn strip_tab_number_removes_only_the_tabs_own_prefix() {
+        for (label, position, expected) in [
+            ("1| zsh", 1, "zsh"),
+            ("[1] build", 1, "build"),
+            ("(1) x", 1, "x"),
+            ("1. x", 1, "x"),
+            ("1 \u{258f} x", 1, "\u{258f} x"),
+            ("12| x", 12, "x"),
+            ("2024 report", 1, "2024 report"),
+            ("2d plan", 2, "2d plan"),
+            ("3| zsh", 1, "3| zsh"),
+            ("1|| x", 1, "1|| x"),
+            ("1| ", 1, "1| "),
+            (
+                "1| \u{4fee}\u{590d}\u{1f642} title",
+                1,
+                "\u{4fee}\u{590d}\u{1f642} title",
+            ),
+        ] {
+            assert_eq!(strip_tab_number(label, position), expected, "{label:?}");
+        }
+        // The stripped text is a subslice of the label.
+        let label = "2| zsh";
+        let stripped = strip_tab_number(label, 2);
+        assert!(std::ptr::eq(stripped.as_ptr(), label[3..].as_ptr()));
+    }
+
+    fn tab_stripped_text(
+        config: &str,
+        tab: &str,
+        position: usize,
+    ) -> Option<(ResolvedTokenKind, SidebarTokenStyle)> {
+        let config: AgentsSidebarConfig = toml::from_str(config).unwrap();
+        let mut entry = entry();
+        entry.tab = Some(tab.into());
+        entry.tab_stripped = Some(strip_tab_number(tab, position).to_string());
+        entry.tab_position = Some(position);
+        let rows = agent_rows(entry.rows(&config), context(&entry), "idle");
+        rows.into_iter()
+            .next()
+            .and_then(|row| row.into_iter().next())
+            .map(|token| (token.kind, token.style))
+    }
+
+    #[test]
+    fn tab_stripped_resolves_the_stripped_name_and_matches_rules_against_it() {
+        let plain = tab_stripped_text(r#"rows = [["tab_stripped"]]"#, "1| zsh", 1);
+        assert_eq!(plain.unwrap().0, ResolvedTokenKind::Tab("zsh".into()));
+        let tab = tab_stripped_text(r#"rows = [["tab"]]"#, "1| zsh", 1);
+        assert_eq!(tab.unwrap().0, ResolvedTokenKind::Tab("1| zsh".into()));
+        let ruled = tab_stripped_text(
+            r##"rows = [[{ token = "tab_stripped", rules = [{ equals = "zsh", fg = "#ff0000" }] }]]"##,
+            "1| zsh",
+            1,
+        )
+        .unwrap();
+        assert!(ruled.1.fg.is_some());
+        let unmatched = tab_stripped_text(
+            r##"rows = [[{ token = "tab_stripped", rules = [{ equals = "zsh", fg = "#ff0000" }] }]]"##,
+            "1| fish",
+            1,
+        )
+        .unwrap();
+        assert!(unmatched.1.fg.is_none());
+    }
+
+    #[test]
+    fn tab_stripped_is_elided_when_tab_is() {
+        let config: AgentsSidebarConfig =
+            toml::from_str(r#"rows = [["tab", "tab_stripped"], ["workspace"]]"#).unwrap();
+        let entry = entry();
+        let rows = agent_rows(entry.rows(&config), context(&entry), "idle");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1);
+    }
+
+    #[test]
+    fn tab_stripped_prefix_replaces_the_built_in_rule() {
+        let resolve = |prefix: &str, tab: &str, position| {
+            let config =
+                format!("rows = [[{{ token = \"tab_stripped\", prefix = \"{prefix}\" }}]]");
+            match tab_stripped_text(&config, tab, position).unwrap().0 {
+                ResolvedTokenKind::Tab(text) => text,
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        assert_eq!(resolve("{}| ", "2| zsh", 2), "zsh");
+        assert_eq!(
+            resolve(
+                "{}    \u{f0142} \u{2502} ",
+                "2    \u{f0142} \u{2502} zsh",
+                2
+            ),
+            "zsh"
+        );
+        // The built-in rule would strip this; an explicit prefix disables it.
+        assert_eq!(resolve("[{}] ", "1| zsh", 1), "1| zsh");
+        assert_eq!(resolve("{}| ", "2| zsh", 1), "2| zsh");
+        assert_eq!(resolve("{}| ", "2| ", 2), "2| ");
     }
 }

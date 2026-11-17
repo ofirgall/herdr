@@ -616,3 +616,56 @@ fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
+
+/// Sidebar text (first 30 columns) of a frame with agent rows configured for
+/// the agents panel and for agents nested under spaces.
+fn sidebar_text_with_tab_tokens(token: &str, tabs: [&str; 2]) -> (String, String) {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.rows =
+        toml::from_str::<crate::config::AgentsSidebarConfig>(&format!("rows = [[\"{token}\"]]"))
+            .unwrap()
+            .rows;
+    config.ui.sidebar.spaces.agent_rows = toml::from_str::<crate::config::SpacesSidebarConfig>(
+        &format!("agent_rows = [[\"{token}\"]]"),
+    )
+    .unwrap()
+    .agent_rows;
+    let mut snapshot = snapshot();
+    snapshot.agents = vec![agent("pane_1", "ws_1", "tab_2", AgentStatus::Idle)];
+    // Creation numbers differ from positions: the second tab is number 5.
+    snapshot.tabs = vec![
+        tab("tab_1", "ws_1", 1, tabs[0]),
+        tab("tab_2", "ws_1", 5, tabs[1]),
+    ];
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let frame = state.compose(106, 30).expect("composed frame");
+    let rows = frame_rows(&frame)
+        .into_iter()
+        .map(|row| row.chars().take(30).collect::<String>())
+        .collect::<Vec<_>>();
+    // The spaces section ends at the first rule; the agents panel is below.
+    let split = rows
+        .iter()
+        .position(|row| row.starts_with('─'))
+        .unwrap_or(rows.len());
+    (rows[..split].join("\n"), rows[split..].join("\n"))
+}
+
+#[test]
+fn tab_stripped_hides_the_tab_position_in_panel_and_space_children() {
+    let tabs = ["1| web", "2| zsh"];
+    let (spaces, panel) = sidebar_text_with_tab_tokens("tab_stripped", tabs);
+    for text in [&spaces, &panel] {
+        assert!(text.contains("zsh") && !text.contains("2| zsh"), "{text}");
+    }
+    let (spaces, panel) = sidebar_text_with_tab_tokens("tab", tabs);
+    for text in [&spaces, &panel] {
+        assert!(text.contains("2| zsh"), "{text}");
+    }
+    // The creation number (5) is not the position, so it is not stripped.
+    let (spaces, panel) = sidebar_text_with_tab_tokens("tab_stripped", ["1| web", "5| zsh"]);
+    for text in [&spaces, &panel] {
+        assert!(text.contains("5| zsh"), "{text}");
+    }
+}

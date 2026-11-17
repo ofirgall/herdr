@@ -105,26 +105,30 @@ pub struct SidebarTokenStyle {
     pub dim: Option<bool>,
 }
 
-/// A validated `format` template for the `index` token, split around `{}`.
+/// A validated `{}` template (the `index` token's `format`, the
+/// `tab_stripped` token's `prefix`), split around the placeholder.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IndexFormat {
+pub struct PlaceholderTemplate {
     pub before: String,
     pub after: String,
 }
 
 const MAX_INDEX_FORMAT_CHARS: usize = 16;
+const MAX_TAB_PREFIX_CHARS: usize = 32;
 
-impl IndexFormat {
-    fn parse(value: &str) -> Result<Self, String> {
-        if value.chars().count() > MAX_INDEX_FORMAT_CHARS {
+impl PlaceholderTemplate {
+    /// `subject` names the option in error messages, for example
+    /// "the `index` format".
+    fn parse(value: &str, subject: &str, max_chars: usize) -> Result<Self, String> {
+        if value.chars().count() > max_chars {
             return Err(format!(
-                "the `index` format may contain at most {MAX_INDEX_FORMAT_CHARS} characters"
+                "{subject} may contain at most {max_chars} characters"
             ));
         }
         if value.chars().any(char::is_control) {
-            return Err("the `index` format must not contain control characters".into());
+            return Err(format!("{subject} must not contain control characters"));
         }
-        let placeholder_error = || "the `index` format must contain exactly one `{}`".to_string();
+        let placeholder_error = || format!("{subject} must contain exactly one `{{}}`");
         let Some((before, after)) = value.split_once("{}") else {
             return Err(placeholder_error());
         };
@@ -154,11 +158,15 @@ pub enum AgentSidebarToken {
     AgentIndex,
     TerminalTitle,
     TerminalTitleStripped,
+    /// The tab name without its leading jump-number prefix.
+    TabStripped,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
+        /// Exact prefix template for `tab_stripped`.
+        prefix: Option<PlaceholderTemplate>,
     },
 }
 
@@ -175,11 +183,18 @@ pub enum SpaceSidebarToken {
         token: Box<SpaceSidebarToken>,
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
-        format: Option<IndexFormat>,
+        format: Option<PlaceholderTemplate>,
     },
 }
 
 impl AgentSidebarToken {
+    pub(crate) fn tab_prefix(&self) -> Option<&PlaceholderTemplate> {
+        match self {
+            Self::Styled { prefix, .. } => prefix.as_ref(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn style_for_value(&self, value: &str) -> Option<SidebarTokenStyle> {
         match self {
             Self::Styled { style, rules, .. } => rules::matching_style(rules, *style, value),
@@ -196,7 +211,7 @@ impl AgentSidebarToken {
 }
 
 impl SpaceSidebarToken {
-    pub(crate) fn index_format(&self) -> Option<&IndexFormat> {
+    pub(crate) fn index_format(&self) -> Option<&PlaceholderTemplate> {
         match self {
             Self::Styled { format, .. } => format.as_ref(),
             _ => None,
@@ -232,13 +247,16 @@ struct RawStyledSidebarToken {
     rules: Vec<SidebarTokenRule>,
     #[serde(default)]
     format: Option<String>,
+    #[serde(default)]
+    prefix: Option<String>,
 }
 
 type ParsedSidebarToken = (
     String,
     Option<SidebarTokenStyle>,
     Vec<SidebarTokenRule>,
-    Option<IndexFormat>,
+    Option<PlaceholderTemplate>,
+    Option<PlaceholderTemplate>,
 );
 
 #[derive(Deserialize)]
@@ -251,7 +269,7 @@ enum RawSidebarToken {
 impl RawSidebarToken {
     fn parts(self) -> Result<ParsedSidebarToken, String> {
         match self {
-            Self::Plain(token) => Ok((token, None, Vec::new(), None)),
+            Self::Plain(token) => Ok((token, None, Vec::new(), None, None)),
             Self::Styled(token) => {
                 if token.rules.len() > 16 {
                     return Err("sidebar tokens may contain at most 16 rules".into());
@@ -266,7 +284,22 @@ impl RawSidebarToken {
                     Some(_) if token.token != "index" => {
                         return Err("`format` is only supported on the `index` token".into());
                     }
-                    Some(value) => Some(IndexFormat::parse(value)?),
+                    Some(value) => Some(PlaceholderTemplate::parse(
+                        value,
+                        "the `index` format",
+                        MAX_INDEX_FORMAT_CHARS,
+                    )?),
+                };
+                let prefix = match token.prefix.as_deref() {
+                    None => None,
+                    Some(_) if token.token != "tab_stripped" => {
+                        return Err("`prefix` is only supported on the `tab_stripped` token".into());
+                    }
+                    Some(value) => Some(PlaceholderTemplate::parse(
+                        value,
+                        "the `tab_stripped` prefix",
+                        MAX_TAB_PREFIX_CHARS,
+                    )?),
                 };
                 Ok((
                     token.token,
@@ -277,6 +310,7 @@ impl RawSidebarToken {
                     }),
                     token.rules,
                     format,
+                    prefix,
                 ))
             }
         }
@@ -310,7 +344,8 @@ fn serialize_styled_token<S>(
     name: String,
     style: SidebarTokenStyle,
     rules: &[SidebarTokenRule],
-    format: Option<&IndexFormat>,
+    format: Option<&PlaceholderTemplate>,
+    prefix: Option<&PlaceholderTemplate>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -334,6 +369,9 @@ where
     if let Some(format) = format {
         map.serialize_entry("format", &format.template())?;
     }
+    if let Some(prefix) = prefix {
+        map.serialize_entry("prefix", &prefix.template())?;
+    }
     map.end()
 }
 
@@ -349,6 +387,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::AgentIndex => "agent_index".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
+        AgentSidebarToken::TabStripped => "tab_stripped".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -377,7 +416,15 @@ impl Serialize for AgentSidebarToken {
                 token,
                 style,
                 rules,
-            } => serialize_styled_token(agent_token_name(token), *style, rules, None, serializer),
+                prefix,
+            } => serialize_styled_token(
+                agent_token_name(token),
+                *style,
+                rules,
+                None,
+                prefix.as_ref(),
+                serializer,
+            ),
             token => serializer.serialize_str(&agent_token_name(token)),
         }
     }
@@ -394,7 +441,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules, _) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, _, prefix) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
@@ -410,6 +457,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("agent_index", Self::AgentIndex),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
+                ("tab_stripped", Self::TabStripped),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -417,6 +465,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
             token: Box::new(token),
             style,
             rules,
+            prefix,
         }))
     }
 }
@@ -437,6 +486,7 @@ impl Serialize for SpaceSidebarToken {
                 *style,
                 rules,
                 format.as_ref(),
+                None,
                 serializer,
             ),
             token => serializer.serialize_str(&space_token_name(token)),
@@ -455,7 +505,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules, format) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, format, _) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
@@ -1150,7 +1200,7 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                     .unwrap();
             assert_eq!(
                 token.index_format(),
-                Some(&IndexFormat {
+                Some(&PlaceholderTemplate {
                     before: before.into(),
                     after: after.into()
                 }),
@@ -1215,6 +1265,103 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
         assert!(
             agent.contains("only supported on the `index` token"),
             "{agent}"
+        );
+    }
+
+    fn parse_agent_row_token(token: &str) -> Result<AgentSidebarToken, String> {
+        toml::from_str::<AgentsSidebarConfig>(&format!("rows = [[{token}]]"))
+            .map(|config| config.rows[0][0].clone())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn tab_stripped_name_round_trips() {
+        let token = parse_agent_row_token("\"tab_stripped\"").unwrap();
+        assert_eq!(token, AgentSidebarToken::TabStripped);
+        assert_eq!(token.tab_prefix(), None);
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![token.clone()]],
+            ..Default::default()
+        };
+        assert!(toml::to_string(&config)
+            .unwrap()
+            .contains("\"tab_stripped\""));
+        let round: AgentsSidebarConfig =
+            toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(round.rows[0][0], token);
+    }
+
+    #[test]
+    fn tab_stripped_prefix_parses_and_round_trips() {
+        for (prefix, before, after) in [
+            ("{}| ", "", "| "),
+            ("[{}] ", "[", "] "),
+            ("{}    \u{f0142} \u{2502} ", "", "    \u{f0142} \u{2502} "),
+        ] {
+            let token = parse_agent_row_token(&format!(
+                "{{token = \"tab_stripped\", prefix = \"{prefix}\"}}"
+            ))
+            .unwrap();
+            assert_eq!(
+                token.tab_prefix(),
+                Some(&PlaceholderTemplate {
+                    before: before.into(),
+                    after: after.into()
+                })
+            );
+            let round: AgentsSidebarConfig = toml::from_str(
+                &toml::to_string(&AgentsSidebarConfig {
+                    rows: vec![vec![token.clone()]],
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(round.rows[0][0], token, "{prefix}");
+        }
+    }
+
+    #[test]
+    fn invalid_tab_prefixes_are_rejected_with_their_messages() {
+        let placeholder = "`tab_stripped` prefix must contain exactly one `{}`";
+        for (prefix, message) in [
+            ("| ", placeholder),
+            ("{}{}", placeholder),
+            ("{x}", placeholder),
+            (
+                "{}0123456789abcdef0123456789abcdef",
+                "at most 32 characters",
+            ),
+            ("{}\\n", "control characters"),
+        ] {
+            let error = parse_agent_row_token(&format!(
+                "{{token = \"tab_stripped\", prefix = \"{prefix}\"}}"
+            ))
+            .unwrap_err();
+            assert!(error.contains(message), "{prefix:?}: {error}");
+        }
+        // Exactly 32 characters is fine.
+        assert!(parse_agent_row_token(
+            "{token = \"tab_stripped\", prefix = \"{}0123456789abcdef0123456789abcd\"}"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn prefix_is_rejected_on_other_tokens() {
+        for token in ["tab", "workspace"] {
+            let error =
+                parse_agent_row_token(&format!("{{token = \"{token}\", prefix = \"{{}}| \"}}"))
+                    .unwrap_err();
+            assert!(
+                error.contains("only supported on the `tab_stripped` token"),
+                "{error}"
+            );
+        }
+        let space = parse_space_row_token("{token = \"index\", prefix = \"{}| \"}").unwrap_err();
+        assert!(
+            space.contains("only supported on the `tab_stripped` token"),
+            "{space}"
         );
     }
 }

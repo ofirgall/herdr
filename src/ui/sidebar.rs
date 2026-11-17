@@ -6,6 +6,7 @@ use ratatui::{
     text::Span,
 };
 
+pub(crate) use self::tokens::strip_tab_number;
 pub(crate) use self::tokens::{
     agent_rows as sidebar_agent_rows, space_rows as sidebar_space_rows, AgentTokenContext,
     ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
