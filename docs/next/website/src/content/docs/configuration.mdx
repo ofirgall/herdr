@@ -130,7 +130,7 @@ enabled = true
 
 The server polls every watched repository in one `gh api graphql` request, so the [GitHub CLI](https://cli.github.com/) must be installed and logged in. Each repository is a heading with its open pull request count, followed by one line per pull request: its number, branch, and status glyphs at the right edge for a merge conflict, the review decision, unresolved human and bot review threads, and checks. Drafts are dimmed and marked `◌`; queued pull requests carry a merge queue mark. The glyphs need a Nerd Font.
 
-Clicking a heading opens the repository's pull requests on GitHub, and clicking a line opens that pull request, using the `ui.sidebar.token_link_click` mode. When a poll fails, the heading shows `⚠` with the error below it, and the last listed pull requests stay until a poll succeeds. Up to 32 repositories can be watched.
+Clicking a heading opens the repository's pull requests on GitHub, and clicking a line opens that pull request, using the `ui.sidebar.token_link_click` mode. A pull request with checks has a `▸` before it: clicking it, or the checks glyph, lists the failing and running checks (GitHub Actions jobs and commit statuses) under the pull request, each opening its run, followed by a line counting the passed and skipped ones that opens the pull request's checks page. Click again to fold the list. Counts cover every check, while the failing and running checks listed come from the first 100 the head commit reports. When a poll fails, the heading shows `⚠` with the error below it, and the last listed pull requests stay until a poll succeeds. Up to 32 repositories can be watched.
 
 ## Remote attach
 

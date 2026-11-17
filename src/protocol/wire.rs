@@ -1021,6 +1021,36 @@ pub struct ClientShellPullRequest {
     pub human_threads: u32,
     #[serde(default)]
     pub bot_threads: u32,
+    /// The head commit's failing and running checks, failing first.
+    #[serde(default)]
+    pub check_runs: Vec<ClientShellPullRequestCheck>,
+    /// All of the head commit's checks by outcome.
+    #[serde(default)]
+    pub check_counts: ClientShellPullRequestCheckCounts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ClientShellPullRequestCheckCounts {
+    #[serde(default)]
+    pub passed: u32,
+    #[serde(default)]
+    pub failed: u32,
+    #[serde(default)]
+    pub pending: u32,
+    /// Skipped, neutral, cancelled and stale.
+    #[serde(default)]
+    pub skipped: u32,
+}
+
+/// One check run (a GitHub Actions job, say) or commit status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellPullRequestCheck {
+    pub name: String,
+    /// `none` for a skipped, neutral, cancelled or stale result.
+    #[serde(default)]
+    pub outcome: ClientShellPullRequestChecks,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -3012,6 +3042,17 @@ mod tests {
                     checks: ClientShellPullRequestChecks::Pending,
                     human_threads: 2,
                     bot_threads: 1,
+                    check_runs: vec![ClientShellPullRequestCheck {
+                        name: "lint".into(),
+                        outcome: ClientShellPullRequestChecks::Fail,
+                        url: Some("https://github.com/octo/web/actions/runs/1/job/2".into()),
+                    }],
+                    check_counts: ClientShellPullRequestCheckCounts {
+                        passed: 3,
+                        failed: 1,
+                        pending: 0,
+                        skipped: 2,
+                    },
                 }],
             }],
         }));

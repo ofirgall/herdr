@@ -316,6 +316,7 @@ pub(crate) fn render_sidebar(
             pull_requests_area,
             snapshot,
             config,
+            state.expanded_pull_requests,
             spaces_enabled || agents_enabled,
             hits,
         );

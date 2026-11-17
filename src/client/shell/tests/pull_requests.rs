@@ -1,8 +1,9 @@
 use super::*;
 use crate::protocol::{
-    ClientShellPullRequest, ClientShellPullRequestChecks, ClientShellPullRequestRepo,
-    ClientShellPullRequestReview,
+    ClientShellPullRequest, ClientShellPullRequestCheck, ClientShellPullRequestCheckCounts,
+    ClientShellPullRequestChecks, ClientShellPullRequestRepo, ClientShellPullRequestReview,
 };
+use crossterm::event::{MouseButton, MouseEventKind};
 
 fn pull_request(number: u64, branch: &str) -> ClientShellPullRequest {
     ClientShellPullRequest {
@@ -17,6 +18,22 @@ fn pull_request(number: u64, branch: &str) -> ClientShellPullRequest {
         checks: ClientShellPullRequestChecks::None,
         human_threads: 0,
         bot_threads: 0,
+        check_runs: Vec::new(),
+        check_counts: Default::default(),
+    }
+}
+
+const LINT_URL: &str = "https://github.com/octo/web/actions/runs/1/job/2";
+
+fn check(
+    name: &str,
+    outcome: ClientShellPullRequestChecks,
+    url: Option<&str>,
+) -> ClientShellPullRequestCheck {
+    ClientShellPullRequestCheck {
+        name: name.into(),
+        outcome,
+        url: url.map(str::to_owned),
     }
 }
 
@@ -25,6 +42,20 @@ fn repos() -> Vec<ClientShellPullRequestRepo> {
     busy.human_threads = 2;
     busy.review = ClientShellPullRequestReview::Approved;
     busy.checks = ClientShellPullRequestChecks::Fail;
+    busy.check_runs = vec![
+        check("lint", ClientShellPullRequestChecks::Fail, Some(LINT_URL)),
+        check(
+            "a-very-long-job-name-that-overflows",
+            ClientShellPullRequestChecks::Pending,
+            None,
+        ),
+    ];
+    busy.check_counts = ClientShellPullRequestCheckCounts {
+        passed: 96,
+        failed: 2,
+        pending: 1,
+        skipped: 40,
+    };
     let mut draft = pull_request(7221, "chore-voice");
     draft.draft = true;
     vec![
@@ -95,7 +126,8 @@ fn pull_requests_replace_the_agents_section() {
     );
     let (busy, row) = row_with(&rows, "#7214");
     assert_eq!(busy, heading + 1);
-    assert!(row.starts_with("  #7214 fix-"), "{row}");
+    // `▸`: its checks can be listed.
+    assert!(row.starts_with("▸ #7214 fix-"), "{row}");
     // Approved, two human threads and failing checks, right-aligned.
     assert!(row.contains("\u{F0008} \u{F017A}2 \u{F530}"), "{row}");
     let (draft, row) = row_with(&rows, "#7221");
@@ -174,4 +206,84 @@ fn the_lower_section_splits_between_agents_and_pull_requests() {
         split_lower_section(area, false, true),
         (Rect::default(), area)
     );
+}
+
+fn sidebar_rows(state: &mut ClientShellState) -> Vec<String> {
+    let frame = state.compose(106, 30).expect("composed frame");
+    frame_rows(&frame)
+        .into_iter()
+        .map(|row| row.chars().take(26).collect::<String>())
+        .collect()
+}
+
+fn press(state: &mut ClientShellState, x: u16, y: u16) -> Vec<ClientShellAction> {
+    let mut actions = Vec::new();
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        actions.extend(
+            state
+                .handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+                    kind,
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                })])
+                .actions,
+        );
+    }
+    actions
+}
+
+#[test]
+fn the_toggle_lists_a_pull_requests_checks_failing_first() {
+    let (mut state, rows) = composed(false, true, repos());
+    let (busy, _) = row_with(&rows, "#7214");
+    // Collapsed by default; a pull request without checks has no toggle.
+    assert!(!rows.join("\n").contains("lint"));
+    assert!(row_with(&rows, "#7221").1.starts_with("  "));
+
+    assert!(press(&mut state, 0, busy as u16).is_empty());
+    let rows = sidebar_rows(&mut state);
+    assert!(rows[busy].starts_with("▾ #7214"), "{}", rows[busy]);
+    // Failing and running checks, then the rest counted: 2 failing + 1
+    // running counted, 2 listed.
+    let checks = &rows[busy + 1..busy + 4];
+    assert!(checks[0].starts_with("    \u{F530} lint"), "{checks:#?}");
+    assert!(
+        checks[1].starts_with("    \u{EAD2} a-very-long-job-na…│"),
+        "{checks:#?}"
+    );
+    assert!(
+        checks[2].starts_with("    \u{F058} 96  – 40  +1 more"),
+        "{checks:#?}"
+    );
+    assert!(rows[busy + 4].contains("#7221"), "{rows:#?}");
+    assert!(state
+        .hits
+        .token_links
+        .iter()
+        .any(|hit| hit.rect.y as usize == busy + 3
+            && hit.url == "https://github.com/octo/web/pull/7214/checks"));
+
+    // A check with a run page links to it.
+    assert!(state
+        .hits
+        .token_links
+        .iter()
+        .any(|hit| hit.rect.y as usize == busy + 1 && hit.url == LINT_URL));
+
+    // The checks glyph at the right edge toggles too.
+    let (glyph, _) = state
+        .hits
+        .pull_request_toggles
+        .iter()
+        .find(|(rect, _)| rect.y as usize == busy && rect.x > 1)
+        .expect("checks glyph toggle")
+        .clone();
+    press(&mut state, glyph.x, glyph.y);
+    let rows = sidebar_rows(&mut state);
+    assert!(rows[busy].starts_with("▸ #7214"), "{}", rows[busy]);
+    assert!(!rows.join("\n").contains("lint"));
 }

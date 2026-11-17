@@ -55,6 +55,54 @@ pub(crate) struct PullRequestState {
     pub(crate) human_threads: u32,
     /// Unresolved review threads whose last comment is a bot's.
     pub(crate) bot_threads: u32,
+    /// The head commit's failing and running checks, failing first.
+    pub(crate) check_runs: Vec<PullRequestCheckState>,
+    /// All of the head commit's checks by outcome, beyond those fetched.
+    pub(crate) check_counts: PullRequestCheckCounts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct PullRequestCheckCounts {
+    pub(crate) passed: u32,
+    pub(crate) failed: u32,
+    pub(crate) pending: u32,
+    /// Skipped, neutral, cancelled and stale.
+    pub(crate) skipped: u32,
+}
+
+impl PullRequestCheckCounts {
+    pub(crate) fn add(&mut self, outcome: PullRequestChecks, count: u32) {
+        let slot = match outcome {
+            PullRequestChecks::Pass => &mut self.passed,
+            PullRequestChecks::Fail => &mut self.failed,
+            PullRequestChecks::Pending => &mut self.pending,
+            PullRequestChecks::None => &mut self.skipped,
+        };
+        *slot = slot.saturating_add(count);
+    }
+
+    /// The worst news: a failure, else a running check, else a pass.
+    pub(crate) fn rollup(&self) -> PullRequestChecks {
+        if self.failed > 0 {
+            PullRequestChecks::Fail
+        } else if self.pending > 0 {
+            PullRequestChecks::Pending
+        } else if self.passed > 0 {
+            PullRequestChecks::Pass
+        } else {
+            PullRequestChecks::None
+        }
+    }
+}
+
+/// One check run (a GitHub Actions job, say) or commit status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestCheckState {
+    pub(crate) name: String,
+    /// `None` for a skipped, neutral, cancelled or stale result.
+    pub(crate) outcome: PullRequestChecks,
+    /// The run's page: the job log for an Actions job.
+    pub(crate) url: Option<String>,
 }
 
 /// One watched repository's latest poll.
@@ -238,6 +286,8 @@ mod tests {
             checks: PullRequestChecks::None,
             human_threads: 0,
             bot_threads: 0,
+            check_runs: Vec::new(),
+            check_counts: PullRequestCheckCounts::default(),
         }
     }
 

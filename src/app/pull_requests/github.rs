@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::{PullRequestChecks, PullRequestRepoState, PullRequestReview, PullRequestState};
+use super::{
+    PullRequestCheckCounts, PullRequestCheckState, PullRequestChecks, PullRequestRepoState,
+    PullRequestReview, PullRequestState,
+};
 use crate::config::WatchedRepoConfig;
 
 /// Open pull requests fetched per repository.
@@ -192,10 +195,13 @@ pub(super) fn graphql_document(queries: &[String]) -> String {
   reviewThreads(first: {MAX_REVIEW_THREADS}) {{
     nodes {{ isResolved comments(last: 1) {{ nodes {{ author {{ __typename login }} }} }} }}
   }}
-  commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{ nodes {{
+  commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{
+    checkRunCountsByState {{ state count }}
+    statusContextCountsByState {{ state count }}
+    nodes {{
     __typename
-    ... on CheckRun {{ conclusion status }}
-    ... on StatusContext {{ state }}
+    ... on CheckRun {{ name conclusion status detailsUrl }}
+    ... on StatusContext {{ context state targetUrl }}
   }} }} }} }} }} }}
 }}
 "
@@ -279,11 +285,13 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
             human_threads += 1;
         }
     }
-    let contexts = node
-        .pointer("/commits/nodes/0/commit/statusCheckRollup/contexts/nodes")
+    let connection = node.pointer("/commits/nodes/0/commit/statusCheckRollup/contexts");
+    let contexts = connection
+        .and_then(|connection| connection.get("nodes"))
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
+    let check_counts = check_counts(connection, contexts);
     Some((
         text("createdAt"),
         PullRequestState {
@@ -298,9 +306,11 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
                 .get("mergeQueueEntry")
                 .is_some_and(|entry| !entry.is_null()),
             review: review_of(node),
-            checks: rollup_checks(contexts),
+            checks: check_counts.rollup(),
             human_threads,
             bot_threads,
+            check_runs: check_runs_of(contexts),
+            check_counts,
         },
     ))
 }
@@ -337,40 +347,110 @@ fn review_of(node: &Value) -> PullRequestReview {
     }
 }
 
-/// Collapses check runs and status contexts, worst news first. Cancelled,
-/// skipped, neutral and stale results carry no signal.
-pub(super) fn rollup_checks(contexts: &[Value]) -> PullRequestChecks {
-    let mut failed = false;
-    let mut pending = false;
-    let mut signal = false;
-    for context in contexts {
-        let text = |key: &str| context.get(key).and_then(Value::as_str);
-        let outcome = text("conclusion").or_else(|| text("state"));
-        let running = text("status").is_some_and(|status| status != "COMPLETED")
-            || matches!(outcome, None | Some("PENDING" | "EXPECTED"));
-        if running {
-            pending = true;
-            signal = true;
-            continue;
+/// A check run conclusion or status, or a commit status state: `None` for a
+/// cancelled, skipped, neutral or stale one, which carries no signal.
+fn state_outcome(state: &str) -> PullRequestChecks {
+    match state {
+        "SKIPPED" | "NEUTRAL" | "CANCELLED" | "STALE" => PullRequestChecks::None,
+        "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "ERROR" => {
+            PullRequestChecks::Fail
         }
-        match outcome {
-            Some("SKIPPED" | "NEUTRAL" | "CANCELLED" | "STALE") => {}
-            Some("FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" | "ERROR") => {
-                failed = true;
-                signal = true;
+        "IN_PROGRESS" | "QUEUED" | "PENDING" | "WAITING" | "REQUESTED" | "EXPECTED" => {
+            PullRequestChecks::Pending
+        }
+        _ => PullRequestChecks::Pass,
+    }
+}
+
+/// One check run's or status context's outcome.
+fn check_outcome(context: &Value) -> PullRequestChecks {
+    let text = |key: &str| context.get(key).and_then(Value::as_str);
+    let running = text("status").is_some_and(|status| status != "COMPLETED");
+    match text("conclusion").or_else(|| text("state")) {
+        _ if running => PullRequestChecks::Pending,
+        None => PullRequestChecks::Pending,
+        Some(outcome) => state_outcome(outcome),
+    }
+}
+
+/// Every check by outcome: GitHub's per-state totals, which count past the
+/// fetched page, else the fetched contexts.
+fn check_counts(connection: Option<&Value>, contexts: &[Value]) -> PullRequestCheckCounts {
+    let mut counts = PullRequestCheckCounts::default();
+    let by_state = ["checkRunCountsByState", "statusContextCountsByState"]
+        .into_iter()
+        .filter_map(|key| connection?.get(key)?.as_array())
+        .flatten()
+        .collect::<Vec<_>>();
+    if by_state.is_empty() {
+        for context in contexts {
+            counts.add(check_outcome(context), 1);
+        }
+        return counts;
+    }
+    for entry in by_state {
+        let state = entry
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let count = entry
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        counts.add(
+            state_outcome(state),
+            u32::try_from(count).unwrap_or(u32::MAX),
+        );
+    }
+    counts
+}
+
+/// Collapses check runs and status contexts, worst news first.
+#[cfg(test)]
+fn rollup_checks(contexts: &[Value]) -> PullRequestChecks {
+    check_counts(None, contexts).rollup()
+}
+
+/// The failing check runs and status contexts, then the running ones, by
+/// name within each.
+pub(super) fn check_runs_of(contexts: &[Value]) -> Vec<PullRequestCheckState> {
+    let rank = |outcome: PullRequestChecks| match outcome {
+        PullRequestChecks::Fail => 0,
+        PullRequestChecks::Pending => 1,
+        PullRequestChecks::Pass | PullRequestChecks::None => 2,
+    };
+    let mut runs = contexts
+        .iter()
+        .filter_map(|context| {
+            let text = |key: &str| {
+                context
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+            };
+            let outcome = check_outcome(context);
+            if !matches!(
+                outcome,
+                PullRequestChecks::Fail | PullRequestChecks::Pending
+            ) {
+                return None;
             }
-            _ => signal = true,
-        }
-    }
-    if failed {
-        PullRequestChecks::Fail
-    } else if pending {
-        PullRequestChecks::Pending
-    } else if signal {
-        PullRequestChecks::Pass
-    } else {
-        PullRequestChecks::None
-    }
+            let name = text("name").or_else(|| text("context"))?;
+            Some(PullRequestCheckState {
+                name: name.to_owned(),
+                outcome,
+                url: text("detailsUrl")
+                    .or_else(|| text("targetUrl"))
+                    .map(str::to_owned),
+            })
+        })
+        .collect::<Vec<_>>();
+    runs.sort_by(|left, right| {
+        rank(left.outcome)
+            .cmp(&rank(right.outcome))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    runs
 }
 
 fn clean_error(text: &str) -> String {
@@ -521,6 +601,69 @@ mod tests {
                 run(Some("SKIPPED"), "COMPLETED")
             ]),
             PullRequestChecks::None
+        );
+    }
+
+    #[test]
+    fn check_runs_list_failing_then_running_checks() {
+        let runs = check_runs_of(&[
+            json!({ "__typename": "CheckRun", "name": "test", "conclusion": "SUCCESS", "status": "COMPLETED", "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2" }),
+            json!({ "__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE", "status": "COMPLETED", "detailsUrl": "" }),
+            json!({ "__typename": "CheckRun", "name": "deploy", "conclusion": "SKIPPED", "status": "COMPLETED" }),
+            json!({ "__typename": "StatusContext", "context": "ci/build", "state": "PENDING", "targetUrl": "https://ci.example/1" }),
+            json!({ "__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS", "status": "COMPLETED" }),
+            json!({ "__typename": "CheckRun" }),
+        ]);
+        assert_eq!(
+            runs.iter()
+                .map(|run| (run.name.as_str(), run.outcome, run.url.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("lint", PullRequestChecks::Fail, None),
+                (
+                    "ci/build",
+                    PullRequestChecks::Pending,
+                    Some("https://ci.example/1")
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn check_counts_prefer_githubs_totals() {
+        let connection = json!({
+            "checkRunCountsByState": [
+                { "state": "SUCCESS", "count": 67 },
+                { "state": "SKIPPED", "count": 40 },
+                { "state": "CANCELLED", "count": 1 },
+                { "state": "IN_PROGRESS", "count": 2 },
+                { "state": "STARTUP_FAILURE", "count": 1 }
+            ],
+            "statusContextCountsByState": [
+                { "state": "SUCCESS", "count": 1 },
+                { "state": "EXPECTED", "count": 1 }
+            ]
+        });
+        let fetched =
+            [json!({ "__typename": "CheckRun", "conclusion": "SUCCESS", "status": "COMPLETED" })];
+        let counts = check_counts(Some(&connection), &fetched);
+        assert_eq!(
+            counts,
+            PullRequestCheckCounts {
+                passed: 68,
+                failed: 1,
+                pending: 3,
+                skipped: 41
+            }
+        );
+        assert_eq!(counts.rollup(), PullRequestChecks::Fail);
+        // Without totals the fetched contexts are counted.
+        assert_eq!(
+            check_counts(Some(&json!({})), &fetched),
+            PullRequestCheckCounts {
+                passed: 1,
+                ..Default::default()
+            }
         );
     }
 

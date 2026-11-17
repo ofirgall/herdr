@@ -2107,6 +2107,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                let pull_request_toggle = self
+                    .hits
+                    .pull_request_toggles
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, url)| url.clone());
+                if let Some(url) = pull_request_toggle {
+                    self.toggle_pull_request_checks(url);
+                    outcome.repaint = true;
+                    return;
+                }
                 let agent_toggle = self.hits.workspaces.iter().find_map(|hit| {
                     let rect = hit.agent_toggle?;
                     super::contains(rect, point).then(|| hit.workspace_id.clone())
