@@ -1240,6 +1240,12 @@
           "description": "Blank terminal rows between worktree groups and unrelated top-level Spaces. Worktree parents and their indented children remain packed."
         },
         {
+          "key": "ui.sidebar.spaces.subspace_row_gap",
+          "type": "integer",
+          "default": "0",
+          "description": "Blank terminal rows before each indented worktree child, between a worktree parent and its first child and between sibling children. The tree connector continues through these rows. Combine with row_gap = 1 for a blank row after every Space."
+        },
+        {
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",

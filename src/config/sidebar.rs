@@ -670,7 +670,12 @@ pub struct SpacesSidebarConfig {
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
+    /// Blank rows before a top-level space (between worktree groups and
+    /// unrelated spaces).
     pub row_gap: u16,
+    /// Blank rows before each indented worktree child, so a group's spaces are
+    /// spaced too. The tree connector continues through these rows.
+    pub subspace_row_gap: u16,
     /// Whether space rows render their aggregate agent status (`state_icon`
     /// and `state_text`). Agent children keep their own status either way.
     pub show_status: bool,
@@ -714,6 +719,7 @@ impl Default for SpacesSidebarConfig {
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            subspace_row_gap: 0,
             show_status: true,
             agents: SpaceAgentsMode::Off,
             agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],

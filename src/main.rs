@@ -379,6 +379,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [ui.sidebar.spaces]
 # Blank rows between space entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
+# Blank rows before each indented worktree child; the tree connector continues through them.
+# subspace_row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
 # Background notification popup delivery

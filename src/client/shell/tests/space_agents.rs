@@ -535,13 +535,16 @@ fn children_of_a_non_last_linked_worktree_keep_the_tree_rail() {
     let rows = compose_rows(&mut state);
 
     // ws_2 ("docs") has a sibling below it, so its child row continues the rail
-    // in the same column as the `├─` connectors.
+    // in the same column as the `├` connectors.
     let child = &rows[row_index(&rows, "notes")];
-    assert!(child.starts_with("   │"), "{rows:#?}");
+    assert!(child.starts_with(" │"), "{rows:#?}");
     let docs = &rows[row_index(&rows, "docs")];
-    assert!(docs.starts_with("   ├─"), "{rows:#?}");
+    assert!(docs.starts_with(" ├ "), "{rows:#?}");
     let empty = &rows[row_index(&rows, "empty")];
-    assert!(empty.starts_with("   └─"), "{rows:#?}");
+    assert!(empty.starts_with(" └ "), "{rows:#?}");
+    // The parent's own children carry the rail down to its first worktree.
+    let parent_child = &rows[row_index(&rows, "api")];
+    assert!(parent_child.starts_with(" │"), "{rows:#?}");
 }
 
 #[test]
@@ -583,12 +586,12 @@ fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Tree rail at column 3, status icon at column 8: the highlight starts at 7.
-    assert_eq!(buffer[(child.x + 3, child.y)].symbol(), "│");
-    for x in child.x..child.x + 7 {
+    // Tree rail at column 1, status icon at column 5: the highlight starts at 4.
+    assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "│");
+    for x in child.x..child.x + 4 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 7..child.right() {
+    for x in child.x + 4..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
@@ -668,4 +671,59 @@ fn tab_stripped_hides_the_tab_position_in_panel_and_space_children() {
     for text in [&spaces, &panel] {
         assert!(text.contains("5| zsh"), "{text}");
     }
+}
+
+#[test]
+fn subspace_row_gap_spaces_worktree_children_and_keeps_the_tree_rail() {
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true), (2, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    snapshot.workspaces.push(workspace("ws_4", 4, "other"));
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Off;
+    config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+    config.ui.sidebar.spaces.row_gap = 1;
+    config.ui.sidebar.spaces.subspace_row_gap = 1;
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let rows = compose_rows(&mut state);
+
+    let parent = row_index(&rows, "client-shell");
+    let docs = row_index(&rows, "docs");
+    let empty = row_index(&rows, "empty");
+    let other = row_index(&rows, "other");
+    assert_eq!(docs, parent + 2, "{rows:#?}");
+    assert_eq!(empty, docs + 2, "{rows:#?}");
+    assert_eq!(other, empty + 2, "{rows:#?}");
+    // Gaps inside the group continue the tree; the gap after the group does not.
+    let rail = |row: &str| row.chars().nth(1) == Some('│');
+    assert!(rail(&rows[parent + 1]), "{rows:#?}");
+    assert!(rail(&rows[docs + 1]), "{rows:#?}");
+    assert!(!rail(&rows[empty + 1]), "{rows:#?}");
+}
+
+#[test]
+fn subspace_row_gap_defaults_to_packed_worktree_children() {
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+    config.ui.sidebar.spaces.row_gap = 1;
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let rows = compose_rows(&mut state);
+    assert_eq!(
+        row_index(&rows, "docs"),
+        row_index(&rows, "client-shell") + 1,
+        "{rows:#?}"
+    );
 }
