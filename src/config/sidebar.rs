@@ -916,8 +916,10 @@ pub struct PullRequestColorsConfig {
     pub ci_fail: Option<SidebarTokenColor>,
     /// Running checks glyph. Default: theme `peach`.
     pub ci_run: Option<SidebarTokenColor>,
-    /// Merge queue mark. Default: theme `peach`.
+    /// Merge queue glyph. Default: theme `peach`.
     pub queued: Option<SidebarTokenColor>,
+    /// Merged glyph. Default: theme `mauve`.
+    pub merged: Option<SidebarTokenColor>,
     /// Pull request number. Default: theme `overlay1`.
     pub id: Option<SidebarTokenColor>,
 }

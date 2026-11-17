@@ -118,6 +118,7 @@ Herdr can list the open pull requests of repositories you watch in a sidebar sec
 [pull_requests]
 poll_seconds = 60  # 15 to 3600
 gh_command = "gh"
+merged_hours = 5  # keep merged pull requests listed this long; 0 = open only
 
 [[pull_requests.repos]]
 path = "~/src/web"   # a local clone; its `origin` remote names the GitHub repository
@@ -128,7 +129,7 @@ label = "web"        # optional heading; defaults to the folder name
 enabled = true
 ```
 
-The server polls every watched repository in one `gh api graphql` request, so the [GitHub CLI](https://cli.github.com/) must be installed and logged in. Each repository is a heading with its open pull request count, followed by one line per pull request: its number, branch, and status glyphs at the right edge for a merge conflict, the review decision, unresolved human and bot review threads, and checks. Drafts are dimmed and marked `◌`; queued pull requests carry a merge queue mark. The glyphs need a Nerd Font.
+The server polls every watched repository in one `gh api graphql` request, so the [GitHub CLI](https://cli.github.com/) must be installed and logged in. Each repository is a heading with its open pull request count, followed by one line per pull request: its number, branch, and status glyphs at the right edge for a merge conflict, the review decision, unresolved human and bot review threads, the merge queue, and checks. Drafts are dimmed and marked `◌`. Pull requests merged within `merged_hours` follow the open ones, dimmed, with a merged glyph; the heading counts open pull requests only. The glyphs need a Nerd Font.
 
 Clicking a heading opens the repository's pull requests on GitHub, and clicking a line opens that pull request, using the `ui.sidebar.token_link_click` mode. A pull request with checks ends with a `▸` at the right edge: clicking it, or the checks glyph beside it, lists the failing and running checks (GitHub Actions jobs and commit statuses) under the pull request, each opening its run, followed by a line counting the passed and skipped ones that opens the pull request's checks page. Click again to fold the list. Counts cover every check, while the failing and running checks listed come from the first 100 the head commit reports. When a poll fails, the heading shows `⚠` with the error below it, and the last listed pull requests stay until a poll succeeds. Up to 32 repositories can be watched.
 
@@ -146,6 +147,7 @@ ci_pass = "#a6e3a1"        # green; also the passed checks count
 ci_fail = "#f38ba8"        # red
 ci_run = "#f8921a"         # peach
 queued = "#f8921a"         # peach
+merged = "#cba6f7"         # mauve
 id = "#5c6fae"             # overlay1; the pull request number
 ```
 

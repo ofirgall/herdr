@@ -45,6 +45,8 @@ pub(crate) struct PullRequestState {
     pub(crate) url: String,
     pub(crate) branch: String,
     pub(crate) draft: bool,
+    /// Merged within `merged_hours`; listed after the open ones.
+    pub(crate) merged: bool,
     /// Cannot merge without resolving a conflict.
     pub(crate) conflict: bool,
     /// In the merge queue.
@@ -178,9 +180,11 @@ impl App {
         let generation = poller.generation;
         let repos = poller.config.repos.clone();
         let gh_command = poller.config.gh_command.clone();
+        let merged_hours = poller.config.merged_hours;
         let event_tx = self.event_tx.clone();
         let spawned = crate::thread_spawn::spawn_named("herdr-pr-poll", move || {
-            let repos = github::fetch_pull_requests(&repos, &gh_command);
+            let merged_since = github::merged_since(merged_hours, time::OffsetDateTime::now_utc());
+            let repos = github::fetch_pull_requests(&repos, &gh_command, merged_since.as_deref());
             let _ = event_tx.blocking_send(AppEvent::PullRequestsRefreshed { generation, repos });
         });
         match spawned {
@@ -280,6 +284,7 @@ mod tests {
             url: format!("https://github.com/o/r/pull/{number}"),
             branch: format!("b{number}"),
             draft: false,
+            merged: false,
             conflict: false,
             queued: false,
             review: PullRequestReview::None,

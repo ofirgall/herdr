@@ -1,5 +1,6 @@
 //! The pull requests sidebar section: the endpoint's watched repositories,
-//! each a heading with its open pull requests one per line below it.
+//! each a heading with its open pull requests one per line below it, then
+//! those merged within `pull_requests.merged_hours`, dimmed.
 //!
 //! A pull request line is its number and branch, with its status glyphs
 //! (glyphs and colors of the herdr-pr-tracker plugin) at the right edge. A
@@ -7,10 +8,10 @@
 //! request, through the sidebar link click (`token_link_click`).
 //!
 //! A pull request with checks ends with a `▸` at the right edge; clicking it,
-//! or the checks glyph beside it, lists its failing and running checks (GitHub Actions jobs and commit
-//! statuses) below the line, each linking to its run, then a line counting the
-//! passed and skipped ones, linking to the pull request's checks page. Which
-//! lists are open is client state.
+//! or the checks glyph beside it, lists its failing and running checks
+//! (GitHub Actions jobs and commit statuses) below the line, each linking to
+//! its run, then a line counting the passed and skipped ones, linking to the
+//! pull request's checks page. Which lists are open is client state.
 
 use std::collections::HashSet;
 
@@ -41,6 +42,7 @@ const CI_FAIL: &str = "\u{F530}";
 const CI_PENDING: &str = "\u{EAD2}";
 const DRAFT: &str = "\u{25CC}";
 const QUEUED: &str = "\u{F4DB}";
+const MERGED: &str = "\u{EBAB}";
 const WARNING: &str = "\u{26A0}";
 const CHECK_SKIPPED: &str = "\u{2013}";
 const EXPAND: &str = "\u{25B8}";
@@ -206,7 +208,7 @@ fn has_checks(pr: &ClientShellPullRequest) -> bool {
         || counts.skipped > 0
 }
 
-/// ` label ───── N`: the pull request count at the right edge, `…` before the
+/// ` label ───── N`: the open pull request count at the right edge, `…` before the
 /// first poll and `⚠` after a failed one.
 fn render_heading(
     buffer: &mut Buffer,
@@ -221,7 +223,11 @@ fn render_heading(
         ("…".to_owned(), Style::default().fg(palette.overlay0))
     } else {
         (
-            repo.pull_requests.len().to_string(),
+            repo.pull_requests
+                .iter()
+                .filter(|pr| !pr.merged)
+                .count()
+                .to_string(),
             Style::default().fg(palette.overlay1),
         )
     };
@@ -267,14 +273,7 @@ fn render_pull_request(
         .iter()
         .map(|span| span.content.width())
         .sum::<usize>();
-    let marker = if pr.queued {
-        Some(QUEUED)
-    } else if pr.draft {
-        Some(DRAFT)
-    } else {
-        None
-    };
-    let marker = marker.unwrap_or_default();
+    let marker = if pr.draft { DRAFT } else { "" };
     let number = format!("{marker}#{}", pr.number);
     let toggle_width = if has_checks(pr) { TOGGLE_WIDTH } else { 0 };
     let width = usize::from(row.width.saturating_sub(PR_INDENT)).saturating_sub(toggle_width);
@@ -289,20 +288,15 @@ fn render_pull_request(
             1 + branch.width()
         };
     let gap = width.saturating_sub(left_width + status_width);
-    let dim = if pr.draft {
+    let dim = if pr.draft || pr.merged {
         Modifier::DIM
     } else {
         Modifier::empty()
     };
-    let id_style = Style::default().fg(colors.id).add_modifier(dim);
-    let mut spans = vec![Span::raw(" ".repeat(usize::from(PR_INDENT)))];
-    match number.strip_prefix(marker).filter(|_| pr.queued) {
-        Some(id) => {
-            spans.push(Span::styled(marker, Style::default().fg(colors.queued)));
-            spans.push(Span::styled(id.to_owned(), id_style));
-        }
-        None => spans.push(Span::styled(number, id_style)),
-    }
+    let mut spans = vec![
+        Span::raw(" ".repeat(usize::from(PR_INDENT))),
+        Span::styled(number, Style::default().fg(colors.id).add_modifier(dim)),
+    ];
     if !branch.is_empty() {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
@@ -441,6 +435,7 @@ struct PullRequestColors {
     ci_fail: Color,
     ci_run: Color,
     queued: Color,
+    merged: Color,
     id: Color,
 }
 
@@ -467,12 +462,14 @@ impl PullRequestColors {
             ci_fail: colors.ci_fail.map_or(palette.red, |color| color.ratatui()),
             ci_run: colors.ci_run.map_or(palette.peach, |color| color.ratatui()),
             queued: colors.queued.map_or(palette.peach, |color| color.ratatui()),
+            merged: colors.merged.map_or(palette.mauve, |color| color.ratatui()),
             id: colors.id.map_or(palette.overlay1, |color| color.ratatui()),
         }
     }
 }
 
-/// Conflict, review, human threads, bot threads, checks, space separated.
+/// Conflict, review, human threads, bot threads, queued or merged, checks,
+/// space separated.
 fn status_spans(pr: &ClientShellPullRequest, colors: &PullRequestColors) -> Vec<Span<'static>> {
     let bold = Modifier::BOLD;
     let mut glyphs = Vec::<(String, Style)>::new();
@@ -506,6 +503,20 @@ fn status_spans(pr: &ClientShellPullRequest, colors: &PullRequestColors) -> Vec<
         glyphs.push((
             format!("{BOT_THREADS}{}", pr.bot_threads),
             Style::default().fg(colors.bot_threads),
+        ));
+    }
+    // Merge status, then checks: the checks glyph stays last, beside the
+    // checks toggle.
+    if pr.queued {
+        glyphs.push((
+            QUEUED.into(),
+            Style::default().fg(colors.queued).add_modifier(bold),
+        ));
+    }
+    if pr.merged {
+        glyphs.push((
+            MERGED.into(),
+            Style::default().fg(colors.merged).add_modifier(bold),
         ));
     }
     match pr.checks {

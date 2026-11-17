@@ -21,6 +21,8 @@ use crate::config::WatchedRepoConfig;
 
 /// Open pull requests fetched per repository.
 const MAX_PULL_REQUESTS_PER_REPO: usize = 50;
+/// Recently merged pull requests fetched per repository.
+const MAX_MERGED_PULL_REQUESTS_PER_REPO: usize = 10;
 /// Review threads read per pull request; counts are floors beyond this.
 const MAX_REVIEW_THREADS: usize = 100;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -42,11 +44,13 @@ impl ResolvedRepo {
     }
 }
 
-/// Fetches every watched repository's open pull requests. Repositories whose
-/// checkout cannot be resolved report an error without blocking the others.
+/// Fetches every watched repository's open pull requests, then those merged
+/// since `merged_since` when given. Repositories whose checkout cannot be
+/// resolved report an error without blocking the others.
 pub(super) fn fetch_pull_requests(
     repos: &[WatchedRepoConfig],
     gh_command: &str,
+    merged_since: Option<&str>,
 ) -> Vec<PullRequestRepoState> {
     let mut states = repos
         .iter()
@@ -69,10 +73,18 @@ pub(super) fn fetch_pull_requests(
     if resolved.is_empty() {
         return states;
     }
-    let queries = resolved
+    // `r0..rN` the open searches, then `rN..r2N` the merged ones.
+    let mut queries = resolved
         .iter()
-        .map(|(_, repo)| search_query(repo))
+        .map(|(_, repo)| (search_query(repo), MAX_PULL_REQUESTS_PER_REPO))
         .collect::<Vec<_>>();
+    if let Some(since) = merged_since {
+        queries.extend(
+            resolved
+                .iter()
+                .map(|(_, repo)| (merged_query(repo, since), MAX_MERGED_PULL_REQUESTS_PER_REPO)),
+        );
+    }
     let document = graphql_document(&queries);
     let response = run_command(
         Command::new(gh_command)
@@ -85,8 +97,18 @@ pub(super) fn fetch_pull_requests(
     });
     match response {
         Ok(value) => {
-            let results = parse_response(&value, resolved.len());
+            let mut results = parse_response(&value, queries.len());
+            let merged = results.split_off(resolved.len());
+            let mut merged = merged.into_iter();
             for ((index, _), result) in resolved.iter().zip(results) {
+                let result = match (result, merged.next()) {
+                    (Ok(mut open), Some(Ok(merged))) => {
+                        open.extend(merged);
+                        Ok(open)
+                    }
+                    (Ok(_), Some(Err(error))) | (Err(error), _) => Err(error),
+                    (Ok(open), None) => Ok(open),
+                };
                 match result {
                     Ok(pull_requests) => {
                         let state = &mut states[*index];
@@ -175,20 +197,50 @@ pub(super) fn search_query(repo: &ResolvedRepo) -> String {
     )
 }
 
-/// One GraphQL document searching every repository, aliased `r0`, `r1`, ...
-pub(super) fn graphql_document(queries: &[String]) -> String {
+/// The GitHub search for one repository's pull requests by its user merged
+/// since `since` (`YYYY-MM-DDTHH:MM:SSZ`).
+pub(super) fn merged_query(repo: &ResolvedRepo, since: &str) -> String {
+    format!(
+        "repo:{} is:pr is:merged author:{} merged:>={since} archived:false",
+        repo.slug(),
+        repo.user
+    )
+}
+
+/// The `merged:>=` bound `hours` before `now`, or `None` when merged pull
+/// requests are not listed.
+pub(super) fn merged_since(hours: u64, now: time::OffsetDateTime) -> Option<String> {
+    if hours == 0 {
+        return None;
+    }
+    let hours = i64::try_from(hours).ok()?;
+    let since = now.checked_sub(time::Duration::hours(hours))?;
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        since.year(),
+        u8::from(since.month()),
+        since.day(),
+        since.hour(),
+        since.minute(),
+        since.second()
+    ))
+}
+
+/// One GraphQL document running every `(search, page size)`, aliased `r0`,
+/// `r1`, ...
+pub(super) fn graphql_document(queries: &[(String, usize)]) -> String {
     let mut document = String::from("query {\n  viewer { login }\n");
-    for (index, query) in queries.iter().enumerate() {
+    for (index, (query, first)) in queries.iter().enumerate() {
         // A JSON string literal is a valid GraphQL string literal.
         let literal = serde_json::to_string(query).unwrap_or_else(|_| "\"\"".into());
         document.push_str(&format!(
-            "  r{index}: search(query: {literal}, type: ISSUE, first: {MAX_PULL_REQUESTS_PER_REPO}) {{ nodes {{ ...PR }} }}\n"
+            "  r{index}: search(query: {literal}, type: ISSUE, first: {first}) {{ nodes {{ ...PR }} }}\n"
         ));
     }
     document.push_str("}\n");
     document.push_str(&format!(
         "fragment PR on PullRequest {{
-  number title url isDraft createdAt mergeable headRefName reviewDecision
+  number title url isDraft createdAt merged mergedAt mergeable headRefName reviewDecision
   reviewRequests(first: 1) {{ totalCount }}
   latestOpinionatedReviews(first: 20) {{ nodes {{ state }} }}
   mergeQueueEntry {{ state }}
@@ -247,7 +299,8 @@ pub(super) fn parse_response(
         .collect()
 }
 
-/// One search node, keyed by its creation time. Nodes that are not pull
+/// One search node, keyed by its creation time, or its merge time once merged
+/// (a merged one carries only that it merged). Nodes that are not pull
 /// requests (issues match the inline fragment as empty objects) are dropped.
 fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestState)> {
     let number = node.get("number")?.as_u64()?;
@@ -292,6 +345,28 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
         .map(Vec::as_slice)
         .unwrap_or_default();
     let check_counts = check_counts(connection, contexts);
+    let merged = node.get("merged").and_then(Value::as_bool) == Some(true);
+    if merged {
+        return Some((
+            text("mergedAt"),
+            PullRequestState {
+                number,
+                title: text("title").trim().to_owned(),
+                url: text("url"),
+                branch: text("headRefName"),
+                draft: false,
+                merged: true,
+                conflict: false,
+                queued: false,
+                review: PullRequestReview::None,
+                checks: PullRequestChecks::None,
+                human_threads: 0,
+                bot_threads: 0,
+                check_runs: Vec::new(),
+                check_counts: PullRequestCheckCounts::default(),
+            },
+        ));
+    }
     Some((
         text("createdAt"),
         PullRequestState {
@@ -300,6 +375,7 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
             url: text("url"),
             branch: text("headRefName"),
             draft: node.get("isDraft").and_then(Value::as_bool) == Some(true),
+            merged: false,
             // UNKNOWN is computed lazily by GitHub; only CONFLICTING is news.
             conflict: node.get("mergeable").and_then(Value::as_str) == Some("CONFLICTING"),
             queued: node
@@ -558,14 +634,25 @@ mod tests {
             user: user.into(),
         };
         let queries = vec![
-            search_query(&repo("web", "@me")),
-            search_query(&repo("api", "hubot")),
+            (search_query(&repo("web", "@me")), 50),
+            (search_query(&repo("api", "hubot")), 50),
+            (
+                merged_query(&repo("web", "@me"), "2026-11-17T05:00:00Z"),
+                10,
+            ),
         ];
         assert_eq!(
-            queries[1],
+            queries[1].0,
             "repo:octo/api is:pr is:open author:hubot archived:false"
         );
+        assert_eq!(
+            queries[2].0,
+            "repo:octo/web is:pr is:merged author:@me merged:>=2026-11-17T05:00:00Z archived:false"
+        );
         let document = graphql_document(&queries);
+        assert!(document.contains(
+            "r2: search(query: \"repo:octo/web is:pr is:merged author:@me merged:>=2026-11-17T05:00:00Z archived:false\", type: ISSUE, first: 10)"
+        ));
         assert!(document.contains(
             "r0: search(query: \"repo:octo/web is:pr is:open author:@me archived:false\""
         ));
@@ -667,6 +754,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn merged_since_counts_back_from_now() {
+        // 2026-11-17T03:04:05.5Z
+        let now = time::OffsetDateTime::from_unix_timestamp_nanos(1_794_884_645_500_000_000)
+            .expect("timestamp");
+        assert_eq!(
+            merged_since(5, now).as_deref(),
+            Some("2026-11-16T22:04:05Z")
+        );
+        assert_eq!(merged_since(0, now), None);
+    }
+
     fn node(number: u64, created: &str) -> Value {
         json!({
             "number": number,
@@ -722,6 +821,29 @@ mod tests {
         assert_eq!(pr.review, PullRequestReview::ChangesRequested);
         assert_eq!((pr.human_threads, pr.bot_threads), (1, 1));
         assert_eq!(results[1], Ok(Vec::new()));
+    }
+
+    #[test]
+    fn merged_pull_requests_order_by_merge_time_and_drop_their_signals() {
+        let merged = |number: u64, at: &str| {
+            let mut pr = node(number, "2025-01-01T00:00:00Z");
+            pr["merged"] = json!(true);
+            pr["mergedAt"] = json!(at);
+            pr["mergeable"] = json!("CONFLICTING");
+            pr["reviewDecision"] = json!("APPROVED");
+            pr
+        };
+        let value = json!({ "data": { "r0": { "nodes": [
+            merged(4, "2026-11-17T02:00:00Z"),
+            merged(9, "2026-11-17T01:00:00Z"),
+        ] } } });
+        let prs = parse_response(&value, 1).remove(0).unwrap();
+        assert_eq!(
+            prs.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+            vec![9, 4]
+        );
+        assert!(prs[0].merged && !prs[0].conflict);
+        assert_eq!(prs[0].review, PullRequestReview::None);
     }
 
     #[test]
