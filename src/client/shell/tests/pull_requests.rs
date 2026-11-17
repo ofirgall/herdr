@@ -126,10 +126,10 @@ fn pull_requests_replace_the_agents_section() {
     );
     let (busy, row) = row_with(&rows, "#7214");
     assert_eq!(busy, heading + 1);
-    // `▸`: its checks can be listed.
-    assert!(row.starts_with("▸ #7214 fix-"), "{row}");
-    // Approved, two human threads and failing checks, right-aligned.
-    assert!(row.contains("\u{F0008} \u{F017A}2 \u{F530}"), "{row}");
+    assert!(row.starts_with("  #7214 fix-"), "{row}");
+    // Approved, two human threads and failing checks, then the `▸` that
+    // lists the checks at the right edge.
+    assert!(row.ends_with("\u{F0008} \u{F017A}2 \u{F530} ▸│"), "{row}");
     let (draft, row) = row_with(&rows, "#7221");
     assert_eq!(draft, busy + 1);
     assert!(row.contains("◌#7221 chore-voice"), "{row}");
@@ -242,11 +242,20 @@ fn the_toggle_lists_a_pull_requests_checks_failing_first() {
     let (busy, _) = row_with(&rows, "#7214");
     // Collapsed by default; a pull request without checks has no toggle.
     assert!(!rows.join("\n").contains("lint"));
-    assert!(row_with(&rows, "#7221").1.starts_with("  "));
+    assert!(!row_with(&rows, "#7221").1.contains('▸'));
+    let (toggle, _) = state
+        .hits
+        .pull_request_toggles
+        .iter()
+        .find(|(rect, _)| rect.y as usize == busy)
+        .expect("checks toggle")
+        .clone();
+    // The `▸` at the right edge and the checks glyph before it.
+    assert_eq!((toggle.right(), toggle.width), (25, 3));
 
-    assert!(press(&mut state, 0, busy as u16).is_empty());
+    assert!(press(&mut state, toggle.right() - 1, toggle.y).is_empty());
     let rows = sidebar_rows(&mut state);
-    assert!(rows[busy].starts_with("▾ #7214"), "{}", rows[busy]);
+    assert!(rows[busy].ends_with("\u{F530} ▾│"), "{}", rows[busy]);
     // Failing and running checks, then the rest counted: 2 failing + 1
     // running counted, 2 listed.
     let checks = &rows[busy + 1..busy + 4];
@@ -274,16 +283,9 @@ fn the_toggle_lists_a_pull_requests_checks_failing_first() {
         .iter()
         .any(|hit| hit.rect.y as usize == busy + 1 && hit.url == LINT_URL));
 
-    // The checks glyph at the right edge toggles too.
-    let (glyph, _) = state
-        .hits
-        .pull_request_toggles
-        .iter()
-        .find(|(rect, _)| rect.y as usize == busy && rect.x > 1)
-        .expect("checks glyph toggle")
-        .clone();
-    press(&mut state, glyph.x, glyph.y);
+    // The checks glyph toggles too.
+    assert!(press(&mut state, toggle.x, toggle.y).is_empty());
     let rows = sidebar_rows(&mut state);
-    assert!(rows[busy].starts_with("▸ #7214"), "{}", rows[busy]);
+    assert!(rows[busy].ends_with("▸│"), "{}", rows[busy]);
     assert!(!rows.join("\n").contains("lint"));
 }

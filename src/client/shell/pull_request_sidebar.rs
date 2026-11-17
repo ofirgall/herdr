@@ -6,8 +6,8 @@
 //! heading opens the repository's pull request list and a line opens its pull
 //! request, through the sidebar link click (`token_link_click`).
 //!
-//! A pull request with checks has a `▸` before it; clicking it, or the checks
-//! glyph, lists its failing and running checks (GitHub Actions jobs and commit
+//! A pull request with checks ends with a `▸` at the right edge; clicking it,
+//! or the checks glyph beside it, lists its failing and running checks (GitHub Actions jobs and commit
 //! statuses) below the line, each linking to its run, then a line counting the
 //! passed and skipped ones, linking to the pull request's checks page. Which
 //! lists are open is client state.
@@ -45,8 +45,10 @@ const WARNING: &str = "\u{26A0}";
 const CHECK_SKIPPED: &str = "\u{2013}";
 const EXPAND: &str = "\u{25B8}";
 const COLLAPSE: &str = "\u{25BE}";
-/// Columns before a pull request line's number; the expand toggle sits in them.
+/// Columns before a pull request line's number.
 const PR_INDENT: u16 = 2;
+/// Columns of the checks toggle at a pull request line's right edge: ` ▸`.
+const TOGGLE_WIDTH: usize = 2;
 /// Columns before a check line's glyph.
 const CHECK_INDENT: u16 = 4;
 
@@ -152,13 +154,8 @@ pub(super) fn render_pull_request_panel(
             }
             let row = Rect::new(body.x, y, body.width, 1);
             let open = expanded.contains(&pr.url);
-            let checks_glyph = render_pull_request(buffer, row, pr, open, config);
-            if has_checks(pr) {
-                let toggle = Rect::new(row.x, row.y, PR_INDENT.min(row.width), 1);
+            if let Some(toggle) = render_pull_request(buffer, row, pr, open, config) {
                 hits.pull_request_toggles.push((toggle, pr.url.clone()));
-                if let Some(glyph) = checks_glyph {
-                    hits.pull_request_toggles.push((glyph, pr.url.clone()));
-                }
             }
             if links {
                 hits.token_links.push(TokenLinkHit {
@@ -253,8 +250,9 @@ fn render_heading(
     Paragraph::new(line).render(row, buffer);
 }
 
-/// `▸ #N branch    status`: the status glyphs right-aligned; a draft is
-/// dimmed. Returns where the checks glyph was drawn.
+/// `  #N branch    status ▸`: the status glyphs right-aligned before the
+/// checks toggle; a draft is dimmed. Returns the toggle's click target: the
+/// `▸` and the checks glyph before it.
 fn render_pull_request(
     buffer: &mut Buffer,
     row: Rect,
@@ -276,7 +274,8 @@ fn render_pull_request(
         None
     };
     let number = format!("{}#{}", marker.unwrap_or_default(), pr.number);
-    let width = usize::from(row.width.saturating_sub(PR_INDENT));
+    let toggle_width = if has_checks(pr) { TOGGLE_WIDTH } else { 0 };
+    let width = usize::from(row.width.saturating_sub(PR_INDENT)).saturating_sub(toggle_width);
     let left_budget = width.saturating_sub(status_width + usize::from(status_width > 0));
     let number = crate::ui::truncate_end(&number, left_budget);
     let branch_budget = left_budget.saturating_sub(number.width() + 1);
@@ -293,14 +292,8 @@ fn render_pull_request(
     } else {
         Modifier::empty()
     };
-    let toggle = match (!has_checks(pr), open) {
-        (true, _) => " ",
-        (false, false) => EXPAND,
-        (false, true) => COLLAPSE,
-    };
     let mut spans = vec![
-        Span::styled(toggle, Style::default().fg(palette.overlay0)),
-        Span::raw(" ".repeat(usize::from(PR_INDENT - 1))),
+        Span::raw(" ".repeat(usize::from(PR_INDENT))),
         Span::styled(
             number,
             Style::default().fg(palette.overlay1).add_modifier(dim),
@@ -313,19 +306,29 @@ fn render_pull_request(
             Style::default().fg(palette.subtext0).add_modifier(dim),
         ));
     }
-    let mut checks_glyph = None;
+    let mut checks_glyph = false;
     if status_width > 0 && status_width <= width {
-        if pr.checks != ClientShellPullRequestChecks::None
-            && pr.checks != ClientShellPullRequestChecks::Unknown
-        {
-            // The checks glyph is the last status span, at the right edge.
-            checks_glyph = Some(Rect::new(row.right().saturating_sub(1), row.y, 1, 1));
-        }
+        // The checks glyph is the last status span.
+        checks_glyph = !matches!(
+            pr.checks,
+            ClientShellPullRequestChecks::None | ClientShellPullRequestChecks::Unknown
+        );
         spans.push(Span::raw(" ".repeat(gap)));
         spans.append(&mut status);
+    } else {
+        spans.push(Span::raw(" ".repeat(width.saturating_sub(left_width))));
     }
+    let toggle = (toggle_width > 0 && row.width as usize >= toggle_width).then(|| {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            if open { COLLAPSE } else { EXPAND },
+            Style::default().fg(palette.overlay1),
+        ));
+        let target = TOGGLE_WIDTH as u16 + u16::from(checks_glyph);
+        Rect::new(row.right().saturating_sub(target), row.y, target, 1)
+    });
     Paragraph::new(Line::from(spans)).render(row, buffer);
-    checks_glyph
+    toggle
 }
 
 /// `    ✓ 96  – 40  +2`: the passed and skipped checks, and failing or running
