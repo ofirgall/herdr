@@ -235,6 +235,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [worktrees]
 # directory = "~/.herdr/worktrees"
 
+# Open pull requests of watched repositories, shown in the sidebar when
+# [ui.sidebar.pull_requests] enabled = true. Needs a logged-in `gh`.
+# [pull_requests]
+# poll_seconds = 60
+# gh_command = "gh"
+# [[pull_requests.repos]]
+# path = "~/src/web"
+# user = "@me"
+# label = "web"
+
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
 # sidebar_width = 26

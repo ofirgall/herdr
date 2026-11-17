@@ -196,6 +196,11 @@ pub enum AppEvent {
         expected: crate::workspace::WorktreeSpaceMembership,
         valid: bool,
     },
+    /// A background poll of the watched repositories' pull requests finished.
+    PullRequestsRefreshed {
+        generation: u64,
+        repos: Vec<crate::app::pull_requests::PullRequestRepoState>,
+    },
     /// A configured tab bar status command finished.
     TabBarCommandFinished {
         generation: u64,

@@ -254,6 +254,7 @@ mod tests {
             panes: Vec::new(),
             agents: Vec::new(),
             commands: Vec::new(),
+            pull_requests: Vec::new(),
         }
     }
 

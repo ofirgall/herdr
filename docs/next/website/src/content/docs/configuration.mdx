@@ -110,6 +110,28 @@ Grouped worktrees still behave like normal Herdr workspaces: they can be focused
 
 To delete a worktree checkout, use `Delete worktree checkout...` on a grouped child workspace. Herdr runs `git worktree remove`, first asking Git to remove safely. If Git refuses because the checkout has modified or untracked files, Herdr asks again before running the forced remove. Branches are not deleted.
 
+## Pull requests
+
+Herdr can list the open pull requests of repositories you watch in a sidebar section. Add one `[[pull_requests.repos]]` table per repository, then enable the section:
+
+```toml
+[pull_requests]
+poll_seconds = 60  # 15 to 3600
+gh_command = "gh"
+
+[[pull_requests.repos]]
+path = "~/src/web"   # a local clone; its `origin` remote names the GitHub repository
+user = "@me"         # author to list: a GitHub login, or @me for the gh account
+label = "web"        # optional heading; defaults to the folder name
+
+[ui.sidebar.pull_requests]
+enabled = true
+```
+
+The server polls every watched repository in one `gh api graphql` request, so the [GitHub CLI](https://cli.github.com/) must be installed and logged in. Each repository is a heading with its open pull request count, followed by one line per pull request: its number, branch, and status glyphs at the right edge for a merge conflict, the review decision, unresolved human and bot review threads, and checks. Drafts are dimmed and marked `◌`; queued pull requests carry a merge queue mark. The glyphs need a Nerd Font.
+
+Clicking a heading opens the repository's pull requests on GitHub, and clicking a line opens that pull request, using the `ui.sidebar.token_link_click` mode. When a poll fails, the heading shows `⚠` with the error below it, and the last listed pull requests stay until a poll succeeds. Up to 32 repositories can be watched.
+
 ## Remote attach
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.
@@ -413,7 +435,9 @@ enabled = false
 
 A hidden section is not drawn in the expanded or collapsed sidebar and has no click targets. When one section is hidden, the other takes the whole sidebar height, and the divider between the sections disappears. Your saved split is kept and applies again once both sections are enabled. The `new` and `menu` controls and the collapse toggle stay available: with the spaces section hidden, `new` and `menu` appear on the bottom row of the sidebar.
 
-Hiding both sections is not allowed. Herdr reports a config warning naming both options and shows both sections. Changes take effect on config reload.
+The pull requests section (see [Pull requests](#pull-requests)) is off by default. It takes the place of the agents section, and when both are enabled they split the lower part of the sidebar evenly, agents on top. It is not drawn in the collapsed sidebar.
+
+Hiding every section is not allowed. Herdr reports a config warning naming both options and shows both sections. Changes take effect on config reload.
 
 ### Agents under spaces
 

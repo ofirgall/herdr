@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -979,6 +979,74 @@ pub struct ClientShellSnapshot {
     pub panes: Vec<ClientShellPane>,
     pub agents: Vec<ClientShellAgent>,
     pub commands: Vec<ClientShellCommand>,
+    /// Open pull requests of the endpoint's watched repositories, in config
+    /// order. Omitted from JSON when no repository is watched.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull_requests: Vec<ClientShellPullRequestRepo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellPullRequestRepo {
+    pub label: String,
+    /// The repository's pull request list on GitHub, once resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// No poll has finished for this repository yet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub loading: bool,
+    /// Why the latest poll failed; the pull requests are from an earlier poll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub pull_requests: Vec<ClientShellPullRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellPullRequest {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub branch: String,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub conflict: bool,
+    #[serde(default)]
+    pub queued: bool,
+    #[serde(default)]
+    pub review: ClientShellPullRequestReview,
+    #[serde(default)]
+    pub checks: ClientShellPullRequestChecks,
+    #[serde(default)]
+    pub human_threads: u32,
+    #[serde(default)]
+    pub bot_threads: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientShellPullRequestReview {
+    #[default]
+    None,
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+    /// A value from a newer endpoint; drawn as no review state.
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientShellPullRequestChecks {
+    #[default]
+    None,
+    Pass,
+    Fail,
+    Pending,
+    /// A value from a newer endpoint; drawn as no check state.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2831,6 +2899,23 @@ mod tests {
     }
 
     #[test]
+    fn pull_request_snapshot_fields_are_optional_and_unknown_states_are_tolerated() {
+        let repo: ClientShellPullRequestRepo = serde_json::from_str(
+            r#"{"label":"web","pull_requests":[{"number":1,"title":"t","url":"u","branch":"b","review":"dismissed","checks":"skipped"}]}"#,
+        )
+        .unwrap();
+        assert!(!repo.loading && repo.url.is_none() && repo.error.is_none());
+        let pr = &repo.pull_requests[0];
+        assert_eq!(pr.review, ClientShellPullRequestReview::Unknown);
+        assert_eq!(pr.checks, ClientShellPullRequestChecks::Unknown);
+        assert_eq!((pr.draft, pr.human_threads), (false, 0));
+        assert_eq!(
+            serde_json::to_value(ClientShellPullRequestReview::ChangesRequested).unwrap(),
+            "changes_requested"
+        );
+    }
+
+    #[test]
     fn client_shell_snapshot_roundtrip() {
         let msg = ServerMessage::ClientShellSnapshot(Box::new(ClientShellSnapshot {
             boot_id: "boot-1".into(),
@@ -2909,6 +2994,25 @@ mod tests {
                 binding_labels: vec!["prefix+z".into()],
                 action: ClientShellCommandAction::Shell,
                 description: Some("deploy".into()),
+            }],
+            pull_requests: vec![ClientShellPullRequestRepo {
+                label: "web".into(),
+                url: Some("https://github.com/octo/web/pulls".into()),
+                loading: true,
+                error: Some("gh: not logged in".into()),
+                pull_requests: vec![ClientShellPullRequest {
+                    number: 7,
+                    title: "Fix it".into(),
+                    url: "https://github.com/octo/web/pull/7".into(),
+                    branch: "fix".into(),
+                    draft: true,
+                    conflict: true,
+                    queued: true,
+                    review: ClientShellPullRequestReview::ChangesRequested,
+                    checks: ClientShellPullRequestChecks::Pending,
+                    human_threads: 2,
+                    bot_threads: 1,
+                }],
             }],
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();

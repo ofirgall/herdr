@@ -1211,6 +1211,12 @@
           "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
         },
         {
+          "key": "ui.sidebar.pull_requests.enabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show the Pull requests section, listing the open pull requests of the [[pull_requests.repos]] repositories, in the lower part of the expanded sidebar. With the agents section also enabled, the two split it evenly."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",
@@ -1650,6 +1656,24 @@
           "type": "string",
           "default": "\"~/.herdr/worktrees\"",
           "description": "Root directory under which Herdr creates <repo>/<branch-slug> checkouts."
+        }
+      ]
+    },
+    {
+      "id": "pull_requests",
+      "title": "Pull requests",
+      "keys": [
+        {
+          "key": "pull_requests.poll_seconds",
+          "type": "integer",
+          "default": "60",
+          "description": "Seconds between polls of the watched repositories' open pull requests. Accepted range: 15 to 3600."
+        },
+        {
+          "key": "pull_requests.gh_command",
+          "type": "string",
+          "default": "\"gh\"",
+          "description": "GitHub CLI executable used for `gh api graphql`. It must be logged in."
         }
       ]
     },

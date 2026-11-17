@@ -856,6 +856,8 @@ impl Serialize for TokenLinkClickConfig {
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// The pull requests section, listing the `[pull_requests]` repositories.
+    pub pull_requests: PullRequestsSidebarConfig,
     /// Which click opens the link of a metadata token that carries one.
     pub token_link_click: TokenLinkClickConfig,
     /// Whether a metadata token that carries a link is drawn underlined.
@@ -867,6 +869,7 @@ impl Default for SidebarConfig {
         Self {
             agents: AgentsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),
+            pull_requests: PullRequestsSidebarConfig::default(),
             token_link_click: TokenLinkClickConfig::default(),
             token_link_underline: true,
         }
@@ -876,8 +879,16 @@ impl Default for SidebarConfig {
 impl SidebarConfig {
     /// True when the config disables every sidebar section.
     pub fn all_sections_disabled(&self) -> bool {
-        !self.spaces.enabled && !self.agents.enabled
+        !self.spaces.enabled && !self.agents.enabled && !self.pull_requests.enabled
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PullRequestsSidebarConfig {
+    /// Whether the pull requests section is shown. It shares the lower part of
+    /// the sidebar with the agents section, below it when both are enabled.
+    pub enabled: bool,
 }
 
 #[cfg(test)]

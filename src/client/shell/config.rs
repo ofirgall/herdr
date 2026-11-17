@@ -125,6 +125,7 @@ impl ClientShellConfig {
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             spaces,
             agents,
+            pull_requests: config.ui.sidebar.pull_requests.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
             status_indicators: super::StatusIndicators::from_config(config),
             tab_status: super::TabStatus::from_config(config),
@@ -371,6 +372,7 @@ impl ClientShellConfig {
                     diagnostics.push(diagnostic);
                 }
                 (self.spaces, self.agents) = Self::sidebar_sections_from(&ui.sidebar);
+                self.pull_requests = ui.sidebar.pull_requests.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = super::StatusIndicators::from_config(config);
                 self.tab_status = super::TabStatus::from_config(config);

@@ -28,6 +28,7 @@ mod notification_policy;
 mod notifications;
 mod overlay_input;
 mod preferences;
+mod pull_request_sidebar;
 mod render;
 mod scroll;
 mod settings;
