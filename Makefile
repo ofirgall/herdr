@@ -27,7 +27,7 @@ else
 CONFIG_PLATFORM ?= mac
 endif
 
-.PHONY: setup build install run run-restart run-dev-plugins run-clean-config reload-config share-plugins check test clean
+.PHONY: setup build install run run-restart run-dev-plugins run-clean-config reload-config share-plugins sync-session check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -46,7 +46,7 @@ install:
 	ZIG=$(ZIG) cargo install --locked --path .
 
 # Debug build using the installed config and plugins.
-run: share-plugins
+run: share-plugins sync-session
 	$(RUN_SHARED) $(ARGS)
 
 # Rebuild, stop the running dev server (if any), and start `make run` again.
@@ -94,6 +94,23 @@ share-plugins:
 		echo "Restart it: make run-restart" >&2; \
 		exit 1; \
 	fi
+
+# Copy the installed server's spaces, tabs, and agents into the dev session, so a
+# freshly started dev server restores the same layout. Skipped while a dev server
+# is running (it owns its session and would overwrite the copy), and with
+# SYNC_SESSION=0. The dev session is replaced, not merged.
+SYNC_SESSION ?= 1
+sync-session:
+	@[ "$(SYNC_SESSION)" = 1 ] || exit 0; \
+	src="$(STABLE_CONFIG_DIR)/session.json"; dst="$(DEV_CONFIG_DIR)/session.json"; \
+	[ -f "$$src" ] || exit 0; \
+	if [ -S "$(DEV_CONFIG_DIR)/herdr.sock" ] && python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])' "$(DEV_CONFIG_DIR)/herdr.sock" 2>/dev/null; then \
+		echo "dev server is running; keeping its session (make run-restart to resync)" >&2; \
+		exit 0; \
+	fi; \
+	mkdir -p "$(DEV_CONFIG_DIR)"; \
+	cp "$$src" "$$dst.sync-tmp" && mv "$$dst.sync-tmp" "$$dst" && \
+	echo "dev session synced from $$src" >&2
 
 check:
 	ZIG=$(ZIG) cargo fmt --check
