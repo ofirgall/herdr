@@ -26,10 +26,6 @@ agent_rows = [["state_icon", "$pr"]]
 
 [ui.sidebar.agents]
 rows = [["workspace", "$pr"]]
-
-[[ui.sidebar.spaces.metadata]]
-match = {{ label = "*" }}
-tokens = {{ env = "static" }}
 "#
     ))
     .unwrap();
@@ -43,7 +39,10 @@ fn workspace(id: &str, number: usize, url: &str) -> ClientShellWorkspace {
     workspace.label = format!("space-{number}");
     workspace.branch = None;
     workspace.focused = number == 1;
-    workspace.tokens = vec![("pr".into(), "#7009".into())];
+    workspace.tokens = vec![
+        ("env".into(), "plain".into()),
+        ("pr".into(), "#7009".into()),
+    ];
     workspace.token_links = vec![("pr".into(), url.into())];
     workspace
 }
@@ -225,7 +224,7 @@ fn linked_tokens_are_underlined_exactly_over_their_hit_rects() {
         }
     }
     expected.sort_unstable();
-    // Nothing else is underlined: not the label, the static `env` token or
+    // Nothing else is underlined: not the label, the unlinked `env` token or
     // the state icon.
     let mut cells = underlined(&frame);
     cells.sort_unstable();
@@ -237,14 +236,14 @@ fn linked_tokens_are_underlined_exactly_over_their_hit_rects() {
 }
 
 #[test]
-fn static_metadata_tokens_are_not_linked() {
+fn tokens_without_links_are_not_linked() {
     let mut snapshot = link_snapshot(1);
-    snapshot.workspaces[0].tokens.clear();
+    snapshot.workspaces[0].tokens = vec![("env".into(), "plain".into())];
     snapshot.workspaces[0].token_links.clear();
     snapshot.agents.clear();
     let mut state = state_with(config_with(None), snapshot);
     let frame = state.compose(106, 40).expect("frame");
-    assert!(frame_rows(&frame).iter().any(|row| row.contains("static")));
+    assert!(frame_rows(&frame).iter().any(|row| row.contains("plain")));
     assert!(state.hits.token_links.is_empty());
     assert!(underlined(&frame).is_empty());
 }

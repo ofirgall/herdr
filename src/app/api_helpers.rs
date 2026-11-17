@@ -204,7 +204,8 @@ pub(super) const METADATA_SOURCE_MAX_CHARS: usize = 80;
 const METADATA_TTL_MIN_MS: u64 = 1;
 const MAX_METADATA_TOKEN_KEYS_PER_REQUEST: usize = 16;
 pub(super) const MAX_METADATA_TOKEN_KEYS_PER_RESOURCE: usize = 32;
-use crate::config::{is_valid_metadata_token_key, normalize_metadata_token_value};
+const MAX_METADATA_TOKEN_KEY_LEN: usize = 32;
+const MAX_METADATA_TOKEN_VALUE_LEN: usize = 80;
 
 pub(super) fn normalize_metadata_source(value: String) -> Result<String, &'static str> {
     let value = value.trim();
@@ -255,10 +256,23 @@ pub(super) fn normalize_metadata_tokens(
     tokens
         .into_iter()
         .map(|(key, value)| {
-            if !is_valid_metadata_token_key(&key) {
+            if key.is_empty()
+                || key.len() > MAX_METADATA_TOKEN_KEY_LEN
+                || !key
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+            {
                 return Err(format!("invalid metadata token key: {key}"));
             }
-            let value = value.and_then(|value| normalize_metadata_token_value(&value));
+            let value = value.and_then(|value| {
+                let normalized = value
+                    .trim()
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(MAX_METADATA_TOKEN_VALUE_LEN)
+                    .collect::<String>();
+                (!normalized.trim().is_empty()).then(|| normalized.trim().to_string())
+            });
             Ok((key, value))
         })
         .collect()
@@ -305,7 +319,6 @@ pub(super) fn attach_metadata_links(
 #[cfg(test)]
 mod metadata_token_tests {
     use super::*;
-    use crate::config::MAX_METADATA_TOKEN_KEY_LEN;
 
     #[test]
     fn token_normalization_sanitizes_values_and_turns_empty_into_clear() {

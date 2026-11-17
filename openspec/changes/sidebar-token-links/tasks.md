@@ -13,7 +13,7 @@
 
 ## 2. Client: resolve, fit and draw linked tokens
 
-- [x] 2.1 Add `link: Option<String>` to `ResolvedToken`. Set it in `space_rows` / `agent_rows` only for `Custom` tokens whose key has an API link. Make a static metadata token never carry one, and make an overriding API token bring its own link. Verify with token resolution unit tests.
+- [x] 2.1 Add `link: Option<String>` to `ResolvedToken`. Set it in `space_rows` / `agent_rows` only for `Custom` tokens whose key has an API link. Tokens without a link never carry one. Verify with token resolution unit tests.
 - [x] 2.2 Split `resolved_token_spans` into a layout step (visible tokens, start column, width) and a span-emit step. Keep the output identical for existing callers. Verify that the current sidebar render tests pass unchanged, and that a new unit test reports correct columns for visible, truncated and elided tokens.
 - [x] 2.3 Add `TokenLinkHit { rect, url }` to `ShellHitMap`. In space rows (`sidebar.rs`), agent rows (`agent_sidebar.rs`) and agent children (`space_agents.rs`), underline linked tokens and push one hit per visible linked token. Skip both when there are no links or the mode is `"off"`. Verify with render tests: underline cells, hit rects matching the token columns, and no hits or underline in collapsed and multi-machine sidebars.
 

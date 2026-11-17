@@ -1186,12 +1186,6 @@
           "description": "Show the Spaces section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
         },
         {
-          "key": "ui.sidebar.spaces.metadata",
-          "type": "list of tables",
-          "default": "[]",
-          "description": "Static $name tokens for Spaces. Each entry has match = { label = \"glob\" } or match = { path = \"dir\" } and a tokens table of strings. Matching entries apply in order, later entries win, and values reported with herdr workspace report-metadata override them. At most 64 entries and 16 tokens per entry."
-        },
-        {
           "key": "ui.sidebar.spaces.row_gap",
           "type": "integer",
           "default": "0",

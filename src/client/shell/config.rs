@@ -172,9 +172,6 @@ impl ClientShellConfig {
         sidebar: &crate::config::SidebarConfig,
     ) -> (SpacesSidebarConfig, crate::config::AgentsSidebarConfig) {
         let mut spaces = sidebar.spaces.clone();
-        // Diagnostics are reported through `Config::collect_diagnostics` and
-        // live reload; here only the validated entries are needed.
-        let _ = spaces.compile_metadata();
         let mut agents = sidebar.agents.clone();
         if sidebar.all_sections_disabled() {
             spaces.enabled = true;
@@ -372,7 +369,6 @@ impl ClientShellConfig {
                 if let Some(diagnostic) = config.all_sidebar_sections_disabled_diagnostic() {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(ui.sidebar.spaces.metadata_diagnostics());
                 (self.spaces, self.agents) = Self::sidebar_sections_from(&ui.sidebar);
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = super::StatusIndicators::from_config(config);

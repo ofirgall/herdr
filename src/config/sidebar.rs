@@ -1,12 +1,5 @@
-mod metadata;
 mod rules;
 
-pub use metadata::RawSpaceMetadataEntry;
-#[cfg(test)]
-pub(crate) use metadata::MAX_METADATA_TOKEN_KEY_LEN;
-pub(crate) use metadata::{
-    is_valid_metadata_token_key, normalize_metadata_token_value, SpaceMetadata,
-};
 pub use rules::SidebarTokenRule;
 
 use std::collections::BTreeMap;
@@ -485,11 +478,6 @@ pub struct SpacesSidebarConfig {
     /// Row layout of an agent child entry; reuses the agent token vocabulary.
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub agent_rows: AgentSidebarRows,
-    /// Static per-space tokens matched by label glob or path prefix.
-    pub metadata: Vec<RawSpaceMetadataEntry>,
-    /// Validated form of `metadata`, filled by [`Self::compile_metadata`].
-    #[serde(skip)]
-    pub(crate) compiled_metadata: SpaceMetadata,
 }
 
 /// Whether spaces show their agents as indented children by default.
@@ -528,23 +516,7 @@ impl Default for SpacesSidebarConfig {
             show_status: true,
             agents: SpaceAgentsMode::Off,
             agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],
-            metadata: Vec::new(),
-            compiled_metadata: SpaceMetadata::default(),
         }
-    }
-}
-
-impl SpacesSidebarConfig {
-    /// Diagnostics for ignored or truncated metadata entries.
-    pub(crate) fn metadata_diagnostics(&self) -> Vec<String> {
-        metadata::compile(&self.metadata).1
-    }
-
-    /// Validates `metadata` into `compiled_metadata`, returning diagnostics.
-    pub(crate) fn compile_metadata(&mut self) -> Vec<String> {
-        let (compiled, diagnostics) = metadata::compile(&self.metadata);
-        self.compiled_metadata = compiled;
-        diagnostics
     }
 }
 
@@ -661,31 +633,6 @@ impl SidebarConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn documented_metadata_example_parses() {
-        let config: crate::config::Config = toml::from_str(
-            r#"
-[ui.sidebar.spaces]
-rows = [["workspace", "$env"], ["$owner"]]
-
-[[ui.sidebar.spaces.metadata]]
-match = { label = "api-*" }
-tokens = { env = "staging", owner = "platform" }
-
-[[ui.sidebar.spaces.metadata]]
-match = { path = "~/work/herdr" }
-tokens = { env = "dev" }
-"#,
-        )
-        .unwrap();
-        let spaces = &config.ui.sidebar.spaces;
-        assert_eq!(spaces.metadata.len(), 2);
-        assert_eq!(spaces.metadata[0].matcher.label.as_deref(), Some("api-*"));
-        assert_eq!(spaces.metadata[1].tokens["env"], "dev");
-        assert!(spaces.metadata_diagnostics().is_empty());
-        assert!(config.collect_diagnostics().is_empty());
-    }
 
     #[test]
     fn token_link_click_parses_every_accepted_form() {

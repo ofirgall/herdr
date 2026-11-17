@@ -832,16 +832,7 @@ pub(in crate::client::shell) fn workspace_rows(
     } else {
         &workspace.label
     };
-    // Static metadata first, then API-reported tokens so the API wins.
-    let mut token_values = HashMap::with_capacity(workspace.tokens.len());
-    if !config.compiled_metadata.is_empty() {
-        config.compiled_metadata.apply(
-            &workspace.label,
-            &workspace.new_workspace_cwd,
-            &mut token_values,
-        );
-    }
-    token_values.extend(workspace.tokens.iter().cloned());
+    let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
     crate::ui::sidebar_space_rows(
         config,
         crate::ui::SpaceTokenContext {

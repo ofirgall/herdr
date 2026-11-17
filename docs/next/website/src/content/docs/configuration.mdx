@@ -542,30 +542,9 @@ herdr pane report-metadata <pane_id> \
 
 Use `herdr workspace report-metadata` in the same way for custom Space tokens. Unreported custom tokens disappear.
 
-Declare fixed Space tokens in config with `[[ui.sidebar.spaces.metadata]]`, so scripts do not have to report them every session:
-
-```toml
-[ui.sidebar.spaces]
-rows = [["state_icon", "workspace", "$env"], ["branch", "git_status"]]
-
-[[ui.sidebar.spaces.metadata]]
-match = { label = "api-*" }
-tokens = { env = "staging", owner = "platform" }
-
-[[ui.sidebar.spaces.metadata]]
-match = { path = "~/work/herdr" }
-tokens = { env = "dev" }
-```
-
-Each entry has a `match` table with exactly one of `label` or `path`, and a `tokens` table of string values. `label` is a case-sensitive glob against the Space label, where `*` matches any run of characters and `?` matches one. `path` is a directory prefix, with `~` expanded, matched by whole path components against the Space's current working directory: `~/work/herdr` matches `~/work/herdr/src` but not `~/work/herdr-old`. The working directory follows the Space's active tab.
-
-Static tokens work anywhere a `$name` token works in Space rows, including styles, `rules`, and `hide`, for Spaces from every connected machine. Keys follow the same rules as reported metadata keys (ASCII letters, digits, `_`, `-`; up to 32 characters). Values are trimmed, stripped of control characters, and cut to 80 characters; empty values are ignored. A config may hold up to 64 entries with up to 16 tokens each; extra entries and tokens are ignored with a diagnostic, and so is any entry with an invalid key or a `match` that does not set exactly one of `label` and `path`. The rest of the config still loads.
-
-All matching entries apply in order, and later entries override earlier ones for the same key. A value reported with `herdr workspace report-metadata` always overrides the static value for that Space and key. When the reported value is cleared or expires, the static value shows again. Static metadata is client-side presentation only: the server does not store it and workspace API queries do not return it. Changes apply on config reload.
-
 Metadata reporters provide values only; styling stays in the local sidebar configuration. See [CLI reference: report metadata](/docs/cli-reference/#panes) for limits, clearing, sequencing, and expiry.
 
-A reporter can attach a web link to a custom token with `--link NAME=URL`, for example `herdr workspace report-metadata --token pr='#7009' --link pr=https://github.com/acme/app/pull/7009`. In Space rows, agent rows, and agent children, a `$name` token that has a link is drawn underlined, and clicking it opens the URL in the browser on the machine running Herdr, including when the Space lives on an SSH machine. The click does not select the Space or focus the agent, and a press that turns into a drag still reorders Spaces. Only the visible columns of the token are clickable: a token cut short by a narrow sidebar is clickable on what is left of it, and an omitted token is not clickable. Static `[[ui.sidebar.spaces.metadata]]` tokens, built-in tokens, and the collapsed and multi-machine sidebars never have links. A link lives and expires with its token; see [CLI reference: report metadata](/docs/cli-reference/#panes).
+A reporter can attach a web link to a custom token with `--link NAME=URL`, for example `herdr workspace report-metadata --token pr='#7009' --link pr=https://github.com/acme/app/pull/7009`. In Space rows, agent rows, and agent children, a `$name` token that has a link is drawn underlined, and clicking it opens the URL in the browser on the machine running Herdr, including when the Space lives on an SSH machine. The click does not select the Space or focus the agent, and a press that turns into a drag still reorders Spaces. Only the visible columns of the token are clickable: a token cut short by a narrow sidebar is clickable on what is left of it, and an omitted token is not clickable. Built-in tokens and the collapsed and multi-machine sidebars never have links. A link lives and expires with its token; see [CLI reference: report metadata](/docs/cli-reference/#panes).
 
 Choose which click opens a link with `token_link_click` under `[ui.sidebar]`:
 

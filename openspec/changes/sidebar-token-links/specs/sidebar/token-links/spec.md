@@ -7,14 +7,14 @@ Makes sidebar tokens that carry a link clickable, so a token such as a PR number
 ## ADDED Requirements
 
 ### Requirement: Linked tokens are marked
-In space rows, agent rows and agent child rows of the expanded single-machine sidebar, a custom `$name` token whose metadata has a link SHALL be drawn underlined, on top of its configured style. Tokens without a link, and tokens from static config metadata, SHALL render as today.
+In space rows, agent rows and agent child rows of the expanded single-machine sidebar, a custom `$name` token whose metadata has a link SHALL be drawn underlined, on top of its configured style. Tokens without a link SHALL render as today.
 
 #### Scenario: Linked token
 - **WHEN** space row `["workspace", "$pr"]` shows token `pr` that has a link
 - **THEN** the `pr` value SHALL be underlined and the workspace label SHALL NOT
 
-#### Scenario: Static metadata has no link
-- **WHEN** token `env` comes only from `[[ui.sidebar.spaces.metadata]]`
+#### Scenario: Token without a link
+- **WHEN** token `env` was reported without `--link`
 - **THEN** it SHALL NOT be underlined or clickable
 
 ### Requirement: Click setting

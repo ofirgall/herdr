@@ -6,7 +6,6 @@ use crate::protocol::{
 };
 use crossterm::event::MouseEvent;
 mod space_agents;
-mod space_metadata;
 mod text_editing;
 mod token_links;
 

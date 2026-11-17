@@ -16,13 +16,13 @@ The snapshot already carries everything this change needs: `agents[]` (with `wor
 
 **Goals:**
 - Every feature is client-only presentation, with no protocol, API or server changes.
-- Reuse the existing token pipeline for child rows and static metadata rather than adding new rendering paths.
+- Reuse the existing token pipeline for child rows rather than adding a new rendering path.
 - With default config, rendered output stays byte-identical.
 
 **Non-Goals:**
 - Agent children in the collapsed or multi-machine sidebars.
 - OSC 9;4 percentage progress. "Progress" here means agent status.
-- Exposing static metadata through the API or persisting it server-side.
+- Static per-space metadata from config. It was implemented and then removed from this change; runtime `report-metadata` tokens remain the only source of custom space tokens.
 - A runtime keybinding to hide or show whole sections.
 
 ## Decisions
@@ -50,17 +50,7 @@ The toggle glyph (`▾`/`▸`) is drawn at the right edge of the space's first r
 
 The context menu adds "Show agents" / "Hide agents" for spaces with agents when the mode is not `Off`.
 
-### 5. Static metadata merged in the client before resolution
-`SpacesSidebarConfig.metadata: Vec<SpaceMetadataEntry { matcher: Label(glob) | Path(PathBuf), tokens: Vec<(String, String)> }>`. It is validated at deserialize time; invalid entries are dropped and a diagnostic is reported (see Risks).
-
-In `workspace_rows`, the token map is built as `static (in config order) ← snapshot workspace.tokens`, so API values win.
-- Label glob: a minimal `*`/`?` matcher, implemented locally with no new dependency, case-sensitive, matched against `workspace.label`.
-- Path prefix: `~` is expanded once at config load, then compared component-wise via `Path::starts_with` against `new_workspace_cwd`, which is the cwd the server already resolves for the workspace's active tab.
-
-Key and value normalization reuses the API's rules. That function is private to `app::api_helpers`, so the rule is extracted into a shared helper (`crate::metadata_tokens` or `config::sidebar`) used by both callers.
-- *Alternative:* push static metadata to the server as workspace tokens. That would leak presentation config into runtime state, contradicting the runtime/client boundary guardrail. Rejected.
-
-### 6. Performance
+### 5. Performance
 Everything happens per rendered space and agent in client render, so cost scales with spaces × agents.
 - The token map merge allocates once per visible space, as today.
 - Glob and path matching per space per frame is bounded: at most 64 entries, and only for spaces actually iterated.
@@ -71,8 +61,6 @@ No server-side or per-PTY work is added.
 ## Risks / Trade-offs
 
 - [Row counts change when agents appear or disappear, so the spaces list jumps] → Scroll state is already clamped by `list_scroll_metrics`, and reveal-on-focus keeps the focused space visible.
-- [`new_workspace_cwd` follows the active tab, so a path match can change as the user switches tabs] → Documented as "matches the space's current working directory". This is acceptable for labels and avoids a wire change.
-- [Diagnostics for invalid metadata entries: serde would reject the whole config on a bad entry] → Deserialize entries leniently into a raw form, then validate in `ClientShellConfig` construction, collecting per-entry diagnostics. This matches the requirement that only the bad entry is ignored.
 - [Toggle glyph steals one column from the space's first row] → It is only drawn when the mode is not `Off` and the space has agents. Token fitting uses the reduced width.
 
 ## Migration Plan

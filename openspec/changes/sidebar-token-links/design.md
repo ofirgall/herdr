@@ -16,7 +16,6 @@
 - No extra work in the sidebar render loop for rows without linked tokens.
 
 **Non-Goals:**
-- Links on static `[[ui.sidebar.spaces.metadata]]` tokens (a later, client-only addition).
 - Plugin actions as click targets. Only URLs.
 - Links in the collapsed or multi-machine sidebars, or on built-in tokens (`branch`, `workspace`, ...).
 - Hover feedback or tooltips showing the URL.
@@ -36,7 +35,7 @@ An older server ignores `links` and still reports success. This is the public JS
 `ClientShellWorkspace` and `ClientShellAgent` gain `#[serde(default, skip_serializing_if = "Vec::is_empty")] token_links: Vec<(String, String)>`, sorted like `tokens`. Existing fields are not reshaped (no `(name, value, link)` triples), so the generation-1 fixture, the bincode digests and older clients are unaffected. No `PROTOCOL_VERSION` bump: the field is additive and defaulted.
 
 ### 4. Resolution carries the link; fitting reports columns
-`ResolvedToken` gains `link: Option<String>`. It is set only for `Custom` tokens whose key is in the row's API links. Static metadata never has one, and when an API token overrides a static one, the API link wins together with the API value. Space rows read the workspace's links. Agent rows and agent children read the agent's.
+`ResolvedToken` gains `link: Option<String>`. It is set only for `Custom` tokens whose key is in the row's API links. Space rows read the workspace's links. Agent rows and agent children read the agent's.
 
 `resolved_token_spans` is split into a layout step that returns, per visible token, its start column and width, and an emit step that builds spans from that layout. When a row has no linked token, callers use the existing path unchanged. Otherwise the renderer pushes one `TokenLinkHit { rect, url }` per visible linked token into `ShellHitMap`. The underline is added to the span style there. The layout is computed once per row, so the cost is the same pass that already runs, plus one small allocation only for rows with links. This is per space and per agent row, never per pane or per byte.
 

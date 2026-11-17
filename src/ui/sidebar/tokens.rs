@@ -4,7 +4,7 @@ use crate::config::{AgentSidebarToken, SidebarTokenStyle, SpaceSidebarToken, Spa
 pub(crate) struct ResolvedToken {
     pub kind: ResolvedTokenKind,
     pub style: SidebarTokenStyle,
-    /// Web URL reported with a custom API token; never set for static metadata.
+    /// Web URL reported with a custom API token.
     pub link: Option<String>,
 }
 
@@ -72,7 +72,7 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
-    /// API-reported links by token name; static tokens have none.
+    /// API-reported links by token name.
     pub(crate) links: &'a [(String, String)],
 }
 
@@ -146,7 +146,7 @@ pub(crate) struct SpaceTokenContext<'a> {
     pub(crate) state_text: &'a str,
     pub(crate) ahead_behind: Option<(usize, usize)>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
-    /// API-reported links by token name; static metadata has none.
+    /// API-reported links by token name.
     pub(crate) links: &'a [(String, String)],
     pub(crate) suppress_git_details: bool,
 }
@@ -726,9 +726,8 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
         assert_eq!(rows[0][1].link.as_deref(), Some("https://example.com/7"));
         assert_eq!(rows[0][2].link, None);
 
-        // Static metadata (here: "env" is only in the token map, as the
-        // client merges it) has no entry in the API links, so no link; an API
-        // token that overrides it brings its own link.
+        // A token without an entry in the links has no link; adding one links
+        // exactly that token.
         let mut tokens = entry.tokens.clone();
         tokens.insert("env".into(), "staging".into());
         let space = |tokens: &std::collections::HashMap<String, String>,
