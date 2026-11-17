@@ -36,6 +36,7 @@ fn agent(
         state_change_seq,
         state_labels: Vec::new(),
         tokens: Vec::new(),
+        token_links: Default::default(),
         focused: true,
     }
 }

@@ -63,6 +63,8 @@ pub(super) fn snapshot_with_completions(
         .map(|(workspace_index, (workspace, state))| {
             let mut tokens = workspace.tokens.into_iter().collect::<Vec<_>>();
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut token_links = workspace.links.into_iter().collect::<Vec<_>>();
+            token_links.sort_by(|left, right| left.0.cmp(&right.0));
             let workspace_id = workspace.workspace_id;
             let active_tab_id = location
                 .and_then(|location| location.active_tab_ids.get(&workspace_id))
@@ -87,6 +89,8 @@ pub(super) fn snapshot_with_completions(
                 branch: state.branch(),
                 git_ahead_behind: state.git_ahead_behind(),
                 tokens,
+                token_links,
+                skip_index: workspace.skip_index,
                 worktree: workspace
                     .worktree
                     .map(|worktree| protocol::ClientShellWorktree {
@@ -158,6 +162,8 @@ pub(super) fn snapshot_with_completions(
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut token_links = agent.links.into_iter().collect::<Vec<_>>();
+            token_links.sort_by(|left, right| left.0.cmp(&right.0));
             protocol::ClientShellAgent {
                 pane_id,
                 workspace_id: agent.workspace_id,
@@ -172,6 +178,7 @@ pub(super) fn snapshot_with_completions(
                 state_change_seq: agent.state_change_seq,
                 state_labels,
                 tokens,
+                token_links,
                 focused,
             }
         })

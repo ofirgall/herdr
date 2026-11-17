@@ -23,7 +23,7 @@ impl ClientShellState {
 
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
         let divider = self.hits.sidebar_divider;
-        if divider.height == 0 {
+        if divider.height == 0 || self.hits.sidebar_section_divider.is_empty() {
             return;
         }
         let ratio = row.saturating_sub(divider.y) as f32 / divider.height as f32;
@@ -572,7 +572,7 @@ impl ClientShellState {
                     .get(entry.index)
                     .map(|workspace| workspace.workspace_id.clone())
             });
-            let row = last_hit.rect.bottom();
+            let row = last_hit.rect.bottom().saturating_add(last_hit.child_rows);
             if row < self.hits.new_workspace.y {
                 slots.push((before, row));
             }
@@ -1369,7 +1369,25 @@ impl ClientShellState {
                 }
                 return;
             }
+            if let Some(link) = self.token_link_press.take() {
+                if super::contains(link.rect, point) {
+                    outcome
+                        .actions
+                        .push(ClientShellAction::OpenSafeWebUrl(link.url));
+                }
+                return;
+            }
             if let Some(press) = self.workspace_press.take() {
+                if let Some(link) = press
+                    .token_link
+                    .as_ref()
+                    .filter(|link| super::contains(link.rect, point))
+                {
+                    outcome
+                        .actions
+                        .push(ClientShellAction::OpenSafeWebUrl(link.url.clone()));
+                    return;
+                }
                 self.finish_endpoint_workspace_press(press, outcome);
                 return;
             }
@@ -1938,6 +1956,7 @@ impl ClientShellState {
                 self.word_selection_gesture = None;
                 let previous_pane_click = self.last_pane_click.take();
                 self.workspace_press = None;
+                self.token_link_press = None;
                 self.tab_press = None;
                 self.chrome_drag = None;
                 // The toggle is painted over the agent scrollbar's last cell.
@@ -2088,6 +2107,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                let agent_toggle = self.hits.workspaces.iter().find_map(|hit| {
+                    let rect = hit.agent_toggle?;
+                    super::contains(rect, point).then(|| hit.workspace_id.clone())
+                });
+                if let Some(workspace_id) = agent_toggle {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.toggle_space_agents(&endpoint_id, &workspace_id);
+                    outcome.repaint = true;
+                    self.persist_chrome_preferences(outcome);
+                    return;
+                }
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
                     let (rect, key) = hit.group_toggle.as_ref()?;
                     super::contains(*rect, point).then(|| (hit.endpoint_id.clone(), key.clone()))
@@ -2108,6 +2138,7 @@ impl ClientShellState {
                         workspace_id: hit.workspace_id.clone(),
                         start_column: mouse.column,
                         start_row: mouse.row,
+                        token_link: self.token_link_at(point, mouse.modifiers),
                     });
                 if let Some(workspace_press) = workspace_press {
                     self.workspace_press = Some(workspace_press);
@@ -2144,10 +2175,15 @@ impl ClientShellState {
                 if self.handle_endpoint_agent_click(point, outcome) {
                     return;
                 }
+                if let Some(link) = self.token_link_at(point, mouse.modifiers) {
+                    self.token_link_press = Some(link);
+                    return;
+                }
                 let agent_pane_id = self
                     .hits
                     .agents
                     .iter()
+                    .chain(self.hits.space_agents.iter())
                     .find(|(rect, _)| super::contains(*rect, point))
                     .map(|(_, pane_id)| pane_id.clone());
                 if let Some(pane_id) = agent_pane_id {

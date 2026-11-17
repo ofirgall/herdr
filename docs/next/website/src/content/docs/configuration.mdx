@@ -185,6 +185,22 @@ switch_workspace = "prefix+shift+1..9"
 focus_agent = "prefix+alt+1..9"
 ```
 
+`switch_workspace` also accepts `0..9`, which binds `1`-`9` and a tenth key on `0`, and a single binding on `0`:
+
+```toml
+[keys]
+switch_workspace = "ctrl+0..9"
+```
+
+Spaces can be left out of the numbering. `toggle_space_index` is unbound by default and skips or restores the focused space; the space context menu offers the same as "Skip jump number" / "Use jump number". The setting is stored in the session, so every client sees the same numbers, and previous/next workspace still visit skipped spaces. Use the `index` space token to show the numbers in the sidebar; the collapsed sidebar always shows them.
+
+```toml
+[keys]
+toggle_space_index = "prefix+i"
+```
+
+`1..9` never binds `0`. `switch_tab` and `focus_agent` only accept `1..9`; a `0` binding there is reported as an indexed-keybinding diagnostic and disabled. In navigate mode the plain `0` key also selects the tenth space.
+
 The legacy `[keys.indexed]` table is still parsed for compatibility, but new configs should prefer the explicit action fields.
 
 ## Custom command keybindings
@@ -286,7 +302,7 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
+`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. `index_focused` colors only the focused space's number, falling back to `index` and then to the highlight color, so you can give the focused number its own color with or without `index`. A token's own `fg`, including one from a rule, still wins. Both are accepted in `[theme.custom]` and in the light and dark subtables.
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
@@ -383,6 +399,48 @@ done = "#58cbe1"
 idle = "#9eda26"
 ```
 
+### Sidebar sections
+
+The expanded sidebar shows a spaces section above an agents section. Hide either one with `enabled`; both default to `true`:
+
+```toml
+[ui.sidebar.spaces]
+enabled = true
+
+[ui.sidebar.agents]
+enabled = false
+```
+
+A hidden section is not drawn in the expanded or collapsed sidebar and has no click targets. When one section is hidden, the other takes the whole sidebar height, and the divider between the sections disappears. Your saved split is kept and applies again once both sections are enabled. The `new` and `menu` controls and the collapse toggle stay available: with the spaces section hidden, `new` and `menu` appear on the bottom row of the sidebar.
+
+Hiding both sections is not allowed. Herdr reports a config warning naming both options and shows both sections. Changes take effect on config reload.
+
+### Agents under spaces
+
+Spaces can list their own agents as indented child entries. Set `agents` under `[ui.sidebar.spaces]` to `"off"` (the default), `"collapsed"`, or `"expanded"`, and optionally change the child layout with `agent_rows`:
+
+```toml
+[ui.sidebar.spaces]
+agents = "expanded"
+agent_rows = [
+  ["state_icon", "tab"],
+]
+```
+
+With `"off"` the sidebar looks exactly as before. With `"collapsed"` or `"expanded"`, each space that has agents shows a `▾` (children shown) or `▸` (children hidden) toggle at the right edge of its first row, one column left of the worktree group toggle when both apply. The mode sets the default for every space. Clicking the toggle, or choosing "Hide agents" / "Show agents" in the space's context menu, flips only that space and does not change the focused space. Each choice is remembered per machine and space across restarts, and forgotten when the space is closed.
+
+Each child shows one agent. Children are ordered by tab, then by the agents' order within the tab, and are not affected by an agent view filter. `agent_rows` accepts the same tokens, inline styles, `rules`, and limits as `[ui.sidebar.agents] rows`, and defaults to `[["state_icon", "tab"]]`. `state_icon` and `state_text` show that agent's own status, not the space's rolled-up status. The `tab` token always shows the tab's name, even when the space has a single unnamed tab. Clicking a child focuses that agent's space, tab, and pane.
+
+A space and its children form one list item: they scroll together, and `row_gap` applies between spaces, not between a space and its children. Children of spaces hidden by a collapsed worktree group are hidden too. Children appear only in the expanded sidebar of a single machine; the collapsed sidebar and the multi-machine sidebar are unchanged.
+
+When each agent shows its own status under its space, the space's rolled-up status can be redundant. Set `show_status = false` to hide the `state_icon` and `state_text` tokens on space rows; agent children keep their own status:
+
+```toml
+[ui.sidebar.spaces]
+agents = "expanded"
+show_status = false
+```
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:
@@ -410,6 +468,7 @@ Agent rows accept these built-in tokens:
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.
+- `tab_stripped` — the tab name without the jump number a rename plugin wrote into it, for example `1| zsh` becomes `zsh` and `[2] build` becomes `build`. It is hidden whenever `tab` is, and the tab bar, the API and `tab` keep the full name. Only the tab's own number is removed: its position among its space's tabs, the number `switch_tab` uses. The number may be wrapped in `[]` or `()`, may be followed by at most one punctuation or symbol character, and must be followed by whitespace, so `2024 report`, `3d model` and another tab's number are shown unchanged. A styled token accepts `prefix`, the exact text your plugin writes with `{}` for the tab's position, for example `{ token = "tab_stripped", prefix = "{}| " }` removes `2| ` from the second tab. With `prefix`, only that exact text is removed and the built-in rule is not used, so plugin formats with several symbols or spaces work. The prefix must contain exactly one `{}`, no other braces and no control characters, and be at most 32 characters. Rules match the stripped name. `prefix` is rejected on other tokens. It is not in the default rows.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `agent_index` — the agent's 1-based position in the agents panel list.
@@ -419,6 +478,7 @@ Agent rows accept these built-in tokens:
 
 Space rows accept these built-in tokens:
 
+- `index` — the space's jump number: `1` to `9`, then `0` for the tenth. It is hidden for spaces without a number (skipped spaces and the eleventh and later spaces). The focused space's number is bold, like its name; `focused = { bold = false }` on the token turns that off. It is not in the default rows. A styled `index` token accepts `format`, a template where `{}` stands for the number, for example `{ token = "index", format = "[{}]" }` renders `[1]`. The format must contain exactly one `{}`, no other braces and no control characters, and be at most 16 characters; a space without a number hides the whole token, including the text around `{}`. Rules match the bare number, and `fg`, `bold` and `dim` apply to the whole formatted text. `format` is rejected on other tokens.
 - `state_icon` — colored icon for the space's rolled-up agent state.
 - `state_text` — text for the rolled-up agent state.
 - `workspace` — workspace name.
@@ -458,6 +518,17 @@ The first matching rule wins. Its specified style fields override the occurrence
 `gt` and `lt` take finite numeric thresholds and compare strictly greater or less, not equal. Values must parse completely as finite numbers; decimal and exponent forms work, but whitespace, units, `NaN`, and infinity do not match. `ignore_case` is not accepted on numeric rules. Comparisons use floating-point numbers, not exact large-integer arithmetic.
 
 Rules work with text-valued built-ins and custom `$name` tokens in Agent rows, `rows_by_agent` overrides, and Space rows. Custom tokens match their reported value: `$load` reporting `"90"` selects red and bold above, `"60"` selects yellow, and `"90%"` keeps white. Unreported tokens still disappear. `state_icon` and composite `git_status` accept fixed styles only, not rules. Unknown conditions and malformed rules are rejected when loading config; regex, fuzzy matching, and scripts are not supported.
+
+Space-row tokens also accept `focused`, a table of `fg`, `bold`, and `dim` applied only on the focused space, over the token's own style and any matching rule:
+
+```toml
+[ui.sidebar.spaces]
+rows = [
+  [{ token = "index", format = "{}.", focused = { fg = "#cba6f7", bold = false } }, "workspace"],
+]
+```
+
+Unspecified fields keep the token's style. Agent rows reject `focused`.
 
 `row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
 
@@ -501,6 +572,20 @@ herdr pane report-metadata <pane_id> \
 Use `herdr workspace report-metadata` in the same way for custom Space tokens. Unreported custom tokens disappear.
 
 Metadata reporters provide values only; styling stays in the local sidebar configuration. See [CLI reference: report metadata](/docs/cli-reference/#panes) for limits, clearing, sequencing, and expiry.
+
+A reporter can attach a web link to a custom token with `--link NAME=URL`, for example `herdr workspace report-metadata --token pr='#7009' --link pr=https://github.com/acme/app/pull/7009`. In Space rows, agent rows, and agent children, a `$name` token that has a link is drawn underlined, and clicking it opens the URL in the browser on the machine running Herdr, including when the Space lives on an SSH machine. The click does not select the Space or focus the agent, and a press that turns into a drag still reorders Spaces. Only the visible columns of the token are clickable: a token cut short by a narrow sidebar is clickable on what is left of it, and an omitted token is not clickable. Built-in tokens and the collapsed and multi-machine sidebars never have links. A link lives and expires with its token; see [CLI reference: report metadata](/docs/cli-reference/#panes).
+
+Choose which click opens a link with `token_link_click` under `[ui.sidebar]`:
+
+```toml
+[ui.sidebar]
+token_link_click = "click"   # default: a plain click opens the link
+# token_link_click = "alt"        # only alt-click opens it; a plain click selects the row as usual
+# token_link_click = "ctrl+alt"   # modifiers combine with +
+# token_link_click = "off"        # no underline and no link clicks
+```
+
+Accepted modifiers are `ctrl` (`control`), `alt` (`option`), `cmd` (`command`, `super`), `meta`, and `hyper`; `shift` is not accepted. With a modifier, the click must hold exactly that modifier. Any other value is reported by `herdr config check` and the default is kept. Many terminals do not forward cmd-click on macOS, and ctrl-click can be turned into a right click, so the default is a plain click and `alt` and `ctrl` are the practical modifiers; you may need to enable the modifier for mouse reporting in your terminal.
 
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 

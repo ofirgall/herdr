@@ -29,8 +29,8 @@ pub use self::{
         ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
-        SpaceSidebarToken, SpacesSidebarConfig,
+        AgentSidebarToken, AgentsSidebarConfig, PlaceholderTemplate, SidebarConfig,
+        SidebarTokenStyle, SpaceAgentsMode, SpaceSidebarToken, SpacesSidebarConfig, TokenLinkClick,
     },
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,
@@ -122,6 +122,7 @@ impl Config {
             .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
+            .chain(self.all_sidebar_sections_disabled_diagnostic())
             .chain(self.invalid_headless_size_diagnostic())
             .collect()
     }
@@ -140,6 +141,12 @@ impl Config {
                 "server.headless_cols and server.headless_rows must be greater than zero (got {}x{})",
                 self.server.headless_cols, self.server.headless_rows
             )
+        })
+    }
+
+    pub(crate) fn all_sidebar_sections_disabled_diagnostic(&self) -> Option<String> {
+        self.ui.sidebar.all_sections_disabled().then(|| {
+            "ui.sidebar.spaces.enabled and ui.sidebar.agents.enabled are both false; showing both sections".to_owned()
         })
     }
 

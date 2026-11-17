@@ -931,12 +931,7 @@ impl ClientShellState {
                 Some(Method::PaneFocus(PaneTarget { pane_id }))
             }
             KeybindAction::SwitchWorkspace(index) => {
-                let entries = self.navigation_workspace_entries(snapshot);
-                let workspace_id = snapshot
-                    .workspaces
-                    .get(entries.get(index)?.index)?
-                    .workspace_id
-                    .clone();
+                let workspace_id = self.jump_target_workspace_id(snapshot, index + 1)?;
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }
@@ -1114,6 +1109,19 @@ impl ClientShellState {
                 direction: direction(action)?,
                 amount: None,
             })),
+            KeybindAction::ToggleSpaceIndex => {
+                let skip = !snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == focused_workspace)?
+                    .skip_index;
+                Some(Method::WorkspaceSetSkipIndex(
+                    crate::api::schema::WorkspaceSetSkipIndexParams {
+                        workspace_id: focused_workspace,
+                        skip,
+                    },
+                ))
+            }
             _ => None,
         }
     }

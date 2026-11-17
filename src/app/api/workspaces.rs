@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceReportMetadataParams, WorkspaceSetSkipIndexParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -122,6 +122,35 @@ impl App {
                 label: params.label,
             },
         });
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
+    pub(super) fn handle_workspace_set_skip_index(
+        &mut self,
+        id: String,
+        params: WorkspaceSetSkipIndexParams,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let Some(ws) = self.state.workspaces.get_mut(index) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        if ws.skip_index != params.skip {
+            ws.skip_index = params.skip;
+            self.schedule_session_save();
+            let workspace = self.workspace_info(index);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+        }
 
         encode_success(
             id,
@@ -257,6 +286,10 @@ impl App {
         let tokens = match super::super::api_helpers::normalize_metadata_tokens(params.tokens) {
             Ok(tokens) => tokens,
             Err(message) => return encode_error(id, "invalid_metadata_token", message),
+        };
+        let tokens = match super::super::api_helpers::attach_metadata_links(tokens, params.links) {
+            Ok(tokens) => tokens,
+            Err(message) => return encode_error(id, "invalid_metadata_link", message),
         };
         let Some(workspace) = self.state.workspaces.get_mut(index) else {
             return workspace_not_found(id, &params.workspace_id);
@@ -959,6 +992,7 @@ mod tests {
                         workspace_id: workspace_id.clone(),
                         source: "user:test".into(),
                         tokens,
+                        links: Default::default(),
                         seq: None,
                         ttl_ms: None,
                     },
@@ -975,6 +1009,180 @@ mod tests {
                 if workspace.tokens.get("summary").map(String::as_str) == Some("done")
                     && !workspace.tokens.contains_key("jj_status")
         )));
+    }
+
+    fn workspace_report(
+        app: &mut App,
+        workspace_id: &str,
+        tokens: &[(&str, Option<&str>)],
+        links: &[(&str, &str)],
+    ) -> String {
+        app.handle_workspace_report_metadata(
+            "req".into(),
+            WorkspaceReportMetadataParams {
+                workspace_id: workspace_id.into(),
+                source: "user:test".into(),
+                tokens: tokens
+                    .iter()
+                    .map(|(key, value)| ((*key).into(), value.map(str::to_string)))
+                    .collect(),
+                links: links
+                    .iter()
+                    .map(|(key, url)| ((*key).into(), (*url).into()))
+                    .collect(),
+                seq: None,
+                ttl_ms: None,
+            },
+        )
+    }
+
+    #[test]
+    fn workspace_token_links_are_exposed_in_info_and_events_and_follow_the_token() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        let workspace_id = app.public_workspace_id(0);
+        let url = "https://github.com/o/r/pull/7009";
+
+        let response = workspace_report(
+            &mut app,
+            &workspace_id,
+            &[("pr", Some("#7009"))],
+            &[("pr", url)],
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        let info = app.workspace_info(0);
+        assert_eq!(info.tokens["pr"], "#7009");
+        assert_eq!(info.links["pr"], url);
+        assert!(event_hub.events_after(0).iter().any(|(_, event)| matches!(
+            &event.data,
+            EventData::WorkspaceMetadataUpdated { workspace }
+                if workspace.links.get("pr").map(String::as_str) == Some(url)
+        )));
+
+        // Setting the value again without a link clears the link.
+        workspace_report(&mut app, &workspace_id, &[("pr", Some("#7010"))], &[]);
+        let info = app.workspace_info(0);
+        assert_eq!(info.tokens["pr"], "#7010");
+        assert!(info.links.is_empty());
+        let json = serde_json::to_value(&info).unwrap();
+        assert!(json.get("links").is_none());
+    }
+
+    fn skip_index_app() -> (App, crate::api::EventHub) {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        (app, event_hub)
+    }
+
+    fn set_skip_index(app: &mut App, workspace_id: &str, skip: bool) -> String {
+        app.handle_workspace_set_skip_index(
+            "req".into(),
+            WorkspaceSetSkipIndexParams {
+                workspace_id: workspace_id.into(),
+                skip,
+            },
+        )
+    }
+
+    fn workspace_updated_events(event_hub: &crate::api::EventHub) -> usize {
+        event_hub
+            .events_after(0)
+            .iter()
+            .filter(|(_, event)| matches!(&event.data, EventData::WorkspaceUpdated { .. }))
+            .count()
+    }
+
+    #[test]
+    fn workspace_set_skip_index_sets_clears_and_emits_only_on_change() {
+        let (mut app, event_hub) = skip_index_app();
+        let workspace_id = app.public_workspace_id(0);
+        assert!(!app.workspace_info(0).skip_index);
+
+        let response = set_skip_index(&mut app, &workspace_id, true);
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceInfo { ref workspace } if workspace.skip_index
+        ));
+        assert!(app.state.workspaces[0].skip_index);
+        assert_eq!(workspace_updated_events(&event_hub), 1);
+        assert!(event_hub.events_after(0).iter().any(|(_, event)| matches!(
+            &event.data,
+            EventData::WorkspaceUpdated { workspace } if workspace.skip_index
+        )));
+
+        // Setting the same value again is a no-op without an event.
+        set_skip_index(&mut app, &workspace_id, true);
+        assert_eq!(workspace_updated_events(&event_hub), 1);
+
+        set_skip_index(&mut app, &workspace_id, false);
+        assert!(!app.state.workspaces[0].skip_index);
+        assert_eq!(workspace_updated_events(&event_hub), 2);
+        let json = serde_json::to_value(app.workspace_info(0)).unwrap();
+        assert!(json.get("skip_index").is_none());
+    }
+
+    #[test]
+    fn workspace_set_skip_index_rejects_unknown_workspace() {
+        let (mut app, event_hub) = skip_index_app();
+        let response = set_skip_index(&mut app, "missing", true);
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "workspace_not_found");
+        assert_eq!(workspace_updated_events(&event_hub), 0);
+    }
+
+    #[test]
+    fn workspace_invalid_links_reject_the_whole_request() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        let workspace_id = app.public_workspace_id(0);
+        workspace_report(&mut app, &workspace_id, &[("keep", Some("one"))], &[]);
+        let too_long = format!("https://example.com/{}", "a".repeat(2048));
+
+        type LinkCase<'a> = (&'a [(&'a str, Option<&'a str>)], &'a [(&'a str, &'a str)]);
+        let cases: [LinkCase; 4] = [
+            (&[("other", Some("x"))], &[("pr", "https://example.com")]),
+            (&[("pr", None)], &[("pr", "https://example.com")]),
+            (&[("pr", Some("#1"))], &[("pr", "file:///etc/passwd")]),
+            (&[("pr", Some("#1"))], &[("pr", too_long.as_str())]),
+        ];
+        for (tokens, links) in cases {
+            let response = workspace_report(&mut app, &workspace_id, tokens, links);
+            let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+            assert_eq!(error.error.code, "invalid_metadata_link");
+            assert!(error.error.message.contains("pr") || error.error.message.contains("link"));
+            let info = app.workspace_info(0);
+            assert_eq!(
+                info.tokens,
+                std::collections::HashMap::from([("keep".into(), "one".into())])
+            );
+            assert!(info.links.is_empty());
+        }
     }
 
     #[test]
@@ -999,6 +1207,7 @@ mod tests {
                     "summary".into(),
                     Some("temporary".into()),
                 )]),
+                links: Default::default(),
                 seq: None,
                 ttl_ms: Some(1),
             },

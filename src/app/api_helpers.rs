@@ -278,6 +278,44 @@ pub(super) fn normalize_metadata_tokens(
         .collect()
 }
 
+pub(super) const MAX_METADATA_LINK_BYTES: usize = 2048;
+
+/// Combines normalized token patches with the request's links. Fails before
+/// any state is touched when a link has no value in the same request or is not
+/// a web URL within the size limit.
+pub(super) fn attach_metadata_links(
+    tokens: std::collections::HashMap<String, Option<String>>,
+    mut links: std::collections::HashMap<String, String>,
+) -> Result<crate::metadata_tokens::MetadataTokenPatch, String> {
+    for (key, url) in &links {
+        if !matches!(tokens.get(key), Some(Some(_))) {
+            return Err(format!(
+                "link for metadata token {key} requires the same request to set that token"
+            ));
+        }
+        if url.len() > MAX_METADATA_LINK_BYTES {
+            return Err(format!(
+                "link for metadata token {key} must be at most {MAX_METADATA_LINK_BYTES} bytes"
+            ));
+        }
+        if crate::app::actions::safe_web_url(url).is_none() {
+            return Err(format!(
+                "link for metadata token {key} must be an http or https URL"
+            ));
+        }
+    }
+    Ok(tokens
+        .into_iter()
+        .map(|(key, value)| {
+            let value = value.map(|value| {
+                let link = links.remove(&key);
+                (value, link)
+            });
+            (key, value)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod metadata_token_tests {
     use super::*;

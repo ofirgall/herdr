@@ -33,8 +33,10 @@ pub(crate) use self::scrollbar::{
     scrollbar_offset_from_drag_row, scrollbar_offset_from_row, scrollbar_thumb,
     scrollbar_thumb_grab_offset,
 };
+pub(crate) use self::sidebar::strip_tab_number;
 pub(crate) use self::sidebar::{
-    agent_panel_entries_from, expanded_sidebar_sections, resolved_token_spans, sidebar_agent_rows,
+    agent_panel_entries_from, expanded_sidebar_sections, resolved_token_spans,
+    resolved_token_spans_with_links, sidebar_agent_rows, sidebar_content_rect,
     sidebar_section_divider_rect, sidebar_space_rows, AgentPanelEntry, AgentTokenContext,
     ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
 };

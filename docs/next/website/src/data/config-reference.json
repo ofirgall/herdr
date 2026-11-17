@@ -179,6 +179,18 @@
           "description": "Override the peach color token on top of the base theme. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for space jump numbers (the index sidebar token and the collapsed sidebar). Unset keeps the focused-space highlight and muted secondary colors; when set, it applies to every row. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for the focused space's jump number. Falls back to theme.custom.index, then to the focused-space highlight color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -291,6 +303,18 @@
           "type": "color",
           "default": "unset",
           "description": "Override the peach color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -417,6 +441,18 @@
           "type": "string",
           "default": "\"\"",
           "description": "Executable used for new interactive panes. Empty means SHELL, then /bin/sh; on Windows, pwsh.exe when present on PATH, otherwise powershell.exe."
+        },
+        {
+          "key": "theme.custom.dark.index",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",
@@ -836,6 +872,12 @@
           "description": "Resize the focused pane toward the right. Unset by default."
         },
         {
+          "key": "keys.toggle_space_index",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Skip or restore the focused space in jump numbers. Unset by default. The same toggle is in the space context menu."
+        },
+        {
           "key": "keys.toggle_sidebar",
           "type": "keybinding",
           "default": "\"prefix+b\"",
@@ -1133,6 +1175,18 @@
           "description": "Tab color for the idle state: hex, named color, or rgb(r,g,b). Unset or empty uses the theme's green."
         },
         {
+          "key": "ui.sidebar.token_link_click",
+          "type": "string",
+          "default": "\"click\"",
+          "description": "Which click opens the web link of a sidebar token reported with --link. \"click\" opens it on a plain click, a modifier (ctrl, alt, cmd, meta, hyper, or a + combination such as ctrl+alt, never shift) requires exactly that modifier and leaves a plain click to select the row, and \"off\" removes the underline and the link click. Many terminals do not forward cmd-click on macOS and ctrl-click can become a right click. Invalid values are reported by herdr config check and keep the default."
+        },
+        {
+          "key": "ui.sidebar.agents.enabled",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",
@@ -1142,13 +1196,36 @@
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
-          "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. At most 16 rows and 16 tokens per row."
+          "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. Agent rows also accept a tab_stripped token showing the tab name without its jump-number prefix (the tab's own position, optionally in [] or (), at most one symbol, then whitespace); a styled tab_stripped token accepts prefix, a template with exactly one {} for the position (at most 32 characters), such as \"{}| \", which replaces the built-in rule. At most 16 rows and 16 tokens per row."
         },
         {
           "key": "ui.sidebar.agents.rows_by_agent",
           "type": "table of token rows",
           "default": "{}",
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
+        },
+        {
+          "key": "ui.sidebar.spaces.agent_rows",
+          "type": "list of token rows",
+          "default": "[[\"state_icon\", \"tab\"]]",
+          "description": "Layout of each agent shown under its Space when ui.sidebar.spaces.agents is not \"off\". Accepts the same tokens, styles, and rules as ui.sidebar.agents.rows; state_icon and state_text show that agent's own status. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.spaces.agents",
+          "type": "enum",
+          "default": "\"off\"",
+          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered.",
+          "values": [
+            "off",
+            "collapsed",
+            "expanded"
+          ]
+        },
+        {
+          "key": "ui.sidebar.spaces.enabled",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the Spaces section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
         },
         {
           "key": "ui.sidebar.spaces.row_gap",
@@ -1160,7 +1237,13 @@
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. At most 16 rows and 16 tokens per row."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. Any space-row token accepts focused, a { fg, bold, dim } table applied only on the focused space over the token's style and rules. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.spaces.show_status",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show each Space's aggregate agent status (the state_icon and state_text tokens) in Space rows. Agents shown under a Space keep their own status either way."
         },
         {
           "key": "ui.accent",

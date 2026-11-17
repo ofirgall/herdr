@@ -805,6 +805,18 @@
                 "null"
               ]
             },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "pane_id": {
               "type": "string"
             },
@@ -1088,6 +1100,18 @@
             "label": {
               "type": "string"
             },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "number": {
               "format": "uint",
               "minimum": 0,
@@ -1097,6 +1121,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "skip_index": {
+              "description": "Excluded from numbered jump keys. Omitted when false.",
+              "type": "boolean"
             },
             "tab_count": {
               "format": "uint",
@@ -3029,6 +3057,19 @@
                 "null"
               ]
             },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "description": "Optional web URL per token name; only valid for tokens set in the same request.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "pane_id": {
               "type": "string"
             },
@@ -4468,6 +4509,19 @@
         },
         "WorkspaceReportMetadataParams": {
           "properties": {
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "description": "Optional web URL per token name; only valid for tokens set in the same request.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "seq": {
               "format": "uint64",
               "minimum": 0,
@@ -4509,6 +4563,22 @@
             "workspace_id",
             "source",
             "tokens"
+          ],
+          "type": "object"
+        },
+        "WorkspaceSetSkipIndexParams": {
+          "properties": {
+            "skip": {
+              "description": "True excludes the space from numbered jump keys.",
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "skip"
           ],
           "type": "object"
         },
@@ -6312,6 +6382,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.set_skip_index",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSetSkipIndexParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -6596,6 +6682,18 @@
             },
             "launch_pending": {
               "type": "boolean"
+            },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "name": {
               "type": [
@@ -7912,6 +8010,18 @@
                 "string",
                 "null"
               ]
+            },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "pane_id": {
               "type": "string"
@@ -10587,6 +10697,18 @@
             "label": {
               "type": "string"
             },
+            "links": {
+              "additionalProperties": {
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "number": {
               "format": "uint",
               "minimum": 0,
@@ -10596,6 +10718,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "skip_index": {
+              "description": "Excluded from numbered jump keys. Omitted when false.",
+              "type": "boolean"
             },
             "tab_count": {
               "format": "uint",

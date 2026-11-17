@@ -21,7 +21,8 @@ pub(super) fn render_collapsed(
 ) {
     let palette = &config.palette;
     super::render::render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = super::sidebar::collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) =
+        super::sidebar::collapsed_sidebar_sections(area, true, true);
     let mut total_rows = 0usize;
     let mut selected_row = None;
     let reveal = std::mem::take(state.reveal_navigation_workspace);
@@ -192,6 +193,8 @@ pub(super) fn render_collapsed(
                 workspace_id: workspace.workspace_id.clone(),
                 indented: false,
                 group_toggle: None,
+                agent_toggle: None,
+                child_rows: 0,
             });
             y = y.saturating_add(1);
         }
@@ -250,9 +253,9 @@ pub(super) fn render_expanded(
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
     let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split, true, true);
     hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split, true, true);
     put_text(
         buffer,
         workspace_area.x,
@@ -323,6 +326,7 @@ pub(super) fn render_expanded(
                                     collapsed_groups,
                                 ),
                                 entry.indented,
+                                None,
                                 &config.spaces,
                             )
                             .len()
@@ -451,6 +455,7 @@ pub(super) fn render_expanded(
                     workspace,
                     status,
                     entry.indented,
+                    None,
                     &config.spaces,
                 );
                 let height = (tokens.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
@@ -480,6 +485,7 @@ pub(super) fn render_expanded(
                     state.selected_workspace_id.is_some(),
                     false,
                     palette,
+                    None,
                 );
                 if endpoint.status != ClientEndpointStatus::Online {
                     buffer.set_style(
@@ -503,6 +509,8 @@ pub(super) fn render_expanded(
                     workspace_id: workspace.workspace_id.clone(),
                     indented: entry.indented,
                     group_toggle,
+                    agent_toggle: None,
+                    child_rows: 0,
                 });
                 y = y
                     .saturating_add(height)

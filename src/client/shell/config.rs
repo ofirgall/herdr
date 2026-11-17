@@ -61,6 +61,7 @@ impl ClientShellState {
                 .then_some(self.config.agent_panel_sort),
             collapsed_groups,
             remote_collapsed_groups,
+            space_agent_overrides: self.space_agent_overrides_for_preferences(),
         };
         if let Err(error) = preferences::store(path, preferences) {
             self.set_endpoint_error(error);
@@ -112,6 +113,7 @@ impl ClientShellState {
 impl ClientShellConfig {
     pub(crate) fn from_config(config: &Config) -> Self {
         let theme_runtime = crate::app::client_theme_runtime_from_config(config);
+        let (spaces, agents) = Self::sidebar_sections_from(&config.ui.sidebar);
         Self {
             sidebar_width: config.ui.sidebar_width,
             sidebar_min_width: config.ui.sidebar_min_width,
@@ -121,8 +123,8 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
-            spaces: config.ui.sidebar.spaces.clone(),
-            agents: config.ui.sidebar.agents.clone(),
+            spaces,
+            agents,
             agent_panel_sort: config.ui.agent_panel_sort,
             status_indicators: super::StatusIndicators::from_config(config),
             tab_status: super::TabStatus::from_config(config),
@@ -151,6 +153,7 @@ impl ClientShellConfig {
             mouse_capture: config.ui.mouse_capture,
             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
+            token_link_click: config.ui.sidebar.token_link_click.mode(),
             redraw_on_focus_gained: config.ui.redraw_on_focus_gained,
             switch_ascii_input_source_in_prefix: config
                 .experimental
@@ -161,6 +164,20 @@ impl ClientShellConfig {
             startup_config_diagnostic: None,
             startup_onboarding: false,
         }
+    }
+
+    /// Clones the sidebar section configs, re-enabling both sections when the
+    /// config would disable every section. The diagnostic is reported separately.
+    fn sidebar_sections_from(
+        sidebar: &crate::config::SidebarConfig,
+    ) -> (SpacesSidebarConfig, crate::config::AgentsSidebarConfig) {
+        let mut spaces = sidebar.spaces.clone();
+        let mut agents = sidebar.agents.clone();
+        if sidebar.all_sections_disabled() {
+            spaces.enabled = true;
+            agents.enabled = true;
+        }
+        (spaces, agents)
     }
 
     pub(crate) fn with_startup_config_diagnostic(mut self, diagnostic: Option<String>) -> Self {
@@ -349,8 +366,10 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
-                self.spaces = ui.sidebar.spaces.clone();
-                self.agents = ui.sidebar.agents.clone();
+                if let Some(diagnostic) = config.all_sidebar_sections_disabled_diagnostic() {
+                    diagnostics.push(diagnostic);
+                }
+                (self.spaces, self.agents) = Self::sidebar_sections_from(&ui.sidebar);
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = super::StatusIndicators::from_config(config);
                 self.tab_status = super::TabStatus::from_config(config);
@@ -367,6 +386,7 @@ impl ClientShellConfig {
                 self.mouse_capture = ui.mouse_capture;
                 self.mouse_scroll_lines = ui.mouse_scroll_lines();
                 self.right_click_passthrough_modifiers = ui.right_click_passthrough_modifiers();
+                self.token_link_click = ui.sidebar.token_link_click.mode();
                 self.redraw_on_focus_gained = ui.redraw_on_focus_gained;
             }
         }

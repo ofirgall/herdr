@@ -18,8 +18,16 @@ RUN_ENV := env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_CONFIG_
 # present (installed config plus dev-only overrides, generated outside this repo).
 DEV_CONFIG_FILE ?= $(firstword $(wildcard $(STABLE_CONFIG_DIR)/config-dev.generated.toml) $(STABLE_CONFIG_DIR)/config.toml)
 RUN_SHARED := $(RUN_ENV) HERDR_CONFIG_PATH="$(DEV_CONFIG_FILE)" cargo run --
+# Optional generator outside this repo that rebuilds config.toml and
+# config-dev.generated.toml from per-platform sources.
+CONFIG_GENERATOR ?= $(STABLE_CONFIG_DIR)/generate-config.sh
+ifeq ($(OS),Windows_NT)
+CONFIG_PLATFORM ?= windows
+else
+CONFIG_PLATFORM ?= mac
+endif
 
-.PHONY: setup build install run run-restart run-dev-plugins run-clean-config share-plugins check test clean
+.PHONY: setup build install run run-restart run-dev-plugins run-clean-config reload-config share-plugins check test clean
 
 setup:
 ifeq ($(OS),Windows_NT)
@@ -51,6 +59,12 @@ run-restart:
 # registry is left alone, so dev can point a plugin at a local checkout.
 run-dev-plugins:
 	@$(MAKE) --no-print-directory run SHARED_PLUGIN_ENTRIES="plugins .plugins.lock"
+
+# Regenerate the config (when $(CONFIG_GENERATOR) exists) and reload the running
+# dev server without restarting it. The installed server is untouched.
+reload-config:
+	@if [ -f "$(CONFIG_GENERATOR)" ]; then bash "$(CONFIG_GENERATOR)" $(CONFIG_PLATFORM); fi
+	$(RUN_SHARED) server reload-config
 
 # Debug build with default config and no plugins, in its own config/state dirs and
 # server. Panes inherit the XDG overrides. Reset by deleting $(CLEAN_RUN_DIR).

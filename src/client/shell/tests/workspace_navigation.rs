@@ -1026,3 +1026,486 @@ fn kitty_ctrl_bracket_cancels_a_blocked_foreign_preview() {
     assert_ne!(state.mode, ClientShellMode::Navigate);
     assert!(state.navigate_workspace_id.is_none());
 }
+
+fn jump_digits(state: &ClientShellState, projected: &ClientShellSnapshot) -> Vec<Option<char>> {
+    let entries = state.navigation_workspace_entries(projected);
+    render::space_jump_numbers(&entries, projected)
+        .into_iter()
+        .map(|number| number.map(render::JumpNumber::digit))
+        .collect()
+}
+
+fn local_state(projected: ClientShellSnapshot) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state
+}
+
+fn switch_target(state: &mut ClientShellState, index: usize) -> Option<String> {
+    let mut input = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::SwitchWorkspace(index)),
+        &mut input,
+    );
+    input.actions.iter().find_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => match &request.method {
+            crate::api::schema::Method::WorkspaceFocus(target) => Some(target.workspace_id.clone()),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+#[test]
+fn jump_numbers_without_skips_match_positions() {
+    let projected = workspaces(3);
+    let state = local_state(projected.clone());
+    assert_eq!(
+        jump_digits(&state, &projected),
+        [Some('1'), Some('2'), Some('3')]
+    );
+}
+
+#[test]
+fn jump_numbers_pass_over_a_skipped_space() {
+    let mut projected = workspaces(3);
+    projected.workspaces[1].skip_index = true;
+    let state = local_state(projected.clone());
+    assert_eq!(
+        jump_digits(&state, &projected),
+        [Some('1'), None, Some('2')]
+    );
+    let entries = state.navigation_workspace_entries(&projected);
+    let entry = render::entry_for_jump_number(&entries, &projected, 2).unwrap();
+    assert_eq!(projected.workspaces[entry.index].workspace_id, "ws_3");
+    assert!(render::entry_for_jump_number(&entries, &projected, 3).is_none());
+}
+
+#[test]
+fn jump_numbers_stop_after_the_tenth_space_which_is_zero() {
+    let projected = workspaces(11);
+    let state = local_state(projected.clone());
+    let digits = jump_digits(&state, &projected);
+    assert_eq!(digits[8], Some('9'));
+    assert_eq!(digits[9], Some('0'));
+    assert_eq!(digits[10], None);
+    let entries = state.navigation_workspace_entries(&projected);
+    let tenth = render::entry_for_jump_number(&entries, &projected, 10).unwrap();
+    assert_eq!(projected.workspaces[tenth.index].workspace_id, "ws_10");
+    assert!(render::entry_for_jump_number(&entries, &projected, 11).is_none());
+    assert!(render::entry_for_jump_number(&entries, &projected, 0).is_none());
+}
+
+#[test]
+fn jump_numbers_follow_visible_entries_of_a_collapsed_group() {
+    let projected = grouped_workspaces();
+    let mut state = local_state(projected.clone());
+    assert_eq!(
+        jump_digits(&state, &projected),
+        [Some('1'), Some('2'), Some('3')]
+    );
+    state.toggle_collapsed_group(&ClientEndpointId::Local, "repo".into());
+    // The linked child (ws_3) is hidden, so ws_2 is the second entry.
+    let entries = state.navigation_workspace_entries(&projected);
+    let digits = render::space_jump_numbers(&entries, &projected);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(digits.len(), 2);
+    assert_eq!(digits[1].map(render::JumpNumber::digit), Some('2'));
+    assert_eq!(projected.workspaces[entries[1].index].workspace_id, "ws_2");
+}
+
+#[test]
+fn switch_workspace_key_passes_over_a_skipped_space() {
+    let mut projected = workspaces(3);
+    projected.workspaces[1].skip_index = true;
+    let mut state = local_state(projected);
+    assert_eq!(switch_target(&mut state, 0).as_deref(), Some("ws_1"));
+    assert_eq!(switch_target(&mut state, 1).as_deref(), Some("ws_3"));
+}
+
+#[test]
+fn switch_workspace_key_without_a_matching_space_does_nothing() {
+    let mut projected = workspaces(3);
+    projected.workspaces[1].skip_index = true;
+    let mut state = local_state(projected);
+    assert_eq!(switch_target(&mut state, 2), None);
+    assert!(
+        !state.indexed_navigation_target_exists(&crate::input::KeybindMatch::Action(
+            crate::input::KeybindAction::SwitchWorkspace(2)
+        ))
+    );
+    assert!(
+        state.indexed_navigation_target_exists(&crate::input::KeybindMatch::Action(
+            crate::input::KeybindAction::SwitchWorkspace(1)
+        ))
+    );
+}
+
+#[test]
+fn navigate_zero_selects_the_tenth_space() {
+    let mut state = local_state(workspaces(11));
+    enter_navigation(&mut state);
+    let outcome = state.handle_input_bytes(b"0");
+    assert!(
+        outcome.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(
+                    &request.method,
+                    crate::api::schema::Method::WorkspaceFocus(target)
+                        if target.workspace_id == "ws_10"
+                )
+        )),
+        "navigate 0 must focus the tenth space"
+    );
+}
+
+#[test]
+fn navigate_zero_does_nothing_without_a_tenth_space() {
+    let mut state = local_state(workspaces(3));
+    enter_navigation(&mut state);
+    let outcome = state.handle_input_bytes(b"0");
+    assert!(outcome.actions.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+}
+
+#[test]
+fn previous_and_next_workspace_still_visit_skipped_spaces() {
+    let mut projected = workspaces(3);
+    projected.workspaces[1].skip_index = true;
+    let mut state = local_state(projected);
+    let mut input = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextWorkspace),
+        &mut input,
+    );
+    assert!(input.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::WorkspaceFocus(target)
+                    if target.workspace_id == "ws_2"
+            )
+    )));
+}
+
+fn labeled_workspaces(labels: &[&str]) -> ClientShellSnapshot {
+    let mut projected = workspaces(labels.len());
+    for (workspace, label) in projected.workspaces.iter_mut().zip(labels) {
+        workspace.label = (*label).into();
+        workspace.branch = None;
+    }
+    projected
+}
+
+fn index_rows_state(projected: ClientShellSnapshot) -> ClientShellState {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.rows = vec![vec![
+        crate::config::SpaceSidebarToken::Index,
+        crate::config::SpaceSidebarToken::Workspace,
+    ]];
+    config.ui.sidebar.spaces.agents = crate::config::SpaceAgentsMode::Off;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state
+}
+
+fn sidebar_lines(
+    state: &mut ClientShellState,
+    skip: usize,
+    width: usize,
+    count: usize,
+) -> Vec<String> {
+    let frame = state.compose(106, 30).expect("composed frame");
+    frame_rows(&frame)
+        .into_iter()
+        .map(|row| row.chars().take(width).collect::<String>())
+        .skip(skip)
+        .take(count)
+        .collect()
+}
+
+#[test]
+fn index_token_shows_jump_numbers_and_elides_skipped_spaces() {
+    let mut projected = labeled_workspaces(&["A", "B", "C"]);
+    projected.workspaces[1].skip_index = true;
+    let mut state = index_rows_state(projected);
+    let lines = sidebar_lines(&mut state, 2, 12, 3);
+    let trimmed = lines.iter().map(|line| line.trim()).collect::<Vec<_>>();
+    assert_eq!(trimmed, ["1 A", "B", "2 C"], "{lines:#?}");
+}
+
+#[test]
+fn index_token_shows_zero_for_the_tenth_space_and_nothing_after() {
+    let labels = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+    let mut state = index_rows_state(labeled_workspaces(&labels));
+    let lines = sidebar_lines(&mut state, 2, 12, 11);
+    let trimmed = lines.iter().map(|line| line.trim()).collect::<Vec<_>>();
+    assert_eq!(trimmed[8], "9 i", "{lines:#?}");
+    assert_eq!(trimmed[9], "0 j", "{lines:#?}");
+    assert_eq!(trimmed[10], "k", "{lines:#?}");
+}
+
+#[test]
+fn collapsed_sidebar_draws_jump_numbers_and_blanks_for_skipped_spaces() {
+    let mut projected = labeled_workspaces(&["A", "B", "C"]);
+    projected.workspaces[1].skip_index = true;
+    let mut state = index_rows_state(projected);
+    state.sidebar_collapsed = true;
+    let lines = sidebar_lines(&mut state, 0, 2, 3);
+    let trimmed = lines.iter().map(|line| line.trim()).collect::<Vec<_>>();
+    assert_eq!(trimmed, ["1", "", "2"], "{lines:#?}");
+}
+
+fn toggle_index_outcome(state: &mut ClientShellState) -> ClientShellInput {
+    let mut input = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSpaceIndex),
+        &mut input,
+    );
+    input
+}
+
+fn skip_index_request(input: &ClientShellInput) -> Option<(String, bool)> {
+    input.actions.iter().find_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => match &request.method {
+            crate::api::schema::Method::WorkspaceSetSkipIndex(params) => {
+                Some((params.workspace_id.clone(), params.skip))
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+#[test]
+fn toggle_space_index_pushes_the_negated_flag_of_the_focused_space() {
+    let mut state = local_state(workspaces(2));
+    assert_eq!(
+        skip_index_request(&toggle_index_outcome(&mut state)),
+        Some(("ws_1".into(), true))
+    );
+
+    let mut projected = workspaces(2);
+    projected.workspaces[0].skip_index = true;
+    let mut state = local_state(projected);
+    assert_eq!(
+        skip_index_request(&toggle_index_outcome(&mut state)),
+        Some(("ws_1".into(), false))
+    );
+}
+
+#[test]
+fn toggle_space_index_on_an_old_server_shows_the_unsupported_notice() {
+    let mut state = local_state(workspaces(2));
+    state.set_endpoint_methods(Some(vec!["workspace.focus".into()]));
+    let input = toggle_index_outcome(&mut state);
+    assert!(input.actions.is_empty());
+    let notice = state
+        .visible_endpoint_notice
+        .as_ref()
+        .expect("unsupported action notice");
+    assert_eq!(notice.key.kind, ClientEndpointNoticeKind::Unsupported);
+    assert_eq!(notice.key.code, "workspace.set_skip_index");
+}
+
+#[test]
+fn space_context_menu_labels_and_pushes_the_skip_toggle() {
+    let mut projected = workspaces(2);
+    projected.workspaces[1].skip_index = true;
+    let mut state = local_state(projected);
+    let find = |state: &ClientShellState| match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .into_iter()
+            .enumerate()
+            .find(|(_, item)| item.action == ClientContextMenuAction::ToggleSkipIndex),
+        _ => panic!("workspace context menu"),
+    };
+
+    state.open_workspace_context_menu("ws_1".into(), 0, 0);
+    let (index, item) = find(&state).expect("skip item");
+    assert_eq!(item.label, "Skip jump number");
+    let mut input = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut input);
+    assert_eq!(skip_index_request(&input), Some(("ws_1".into(), true)));
+
+    state.open_workspace_context_menu("ws_2".into(), 0, 0);
+    let (index, item) = find(&state).expect("use item");
+    assert_eq!(item.label, "Use jump number");
+    let mut input = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut input);
+    assert_eq!(skip_index_request(&input), Some(("ws_2".into(), false)));
+}
+
+fn index_rows_state_with(
+    projected: ClientShellSnapshot,
+    rows: Vec<Vec<crate::config::SpaceSidebarToken>>,
+) -> ClientShellState {
+    let mut state = index_rows_state(projected);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.rows = rows;
+    config.ui.sidebar.spaces.agents = crate::config::SpaceAgentsMode::Off;
+    let palette = state.config.palette.clone();
+    state.config = ClientShellConfig::from_config(&config);
+    state.config.palette = palette;
+    state
+}
+
+fn space_rows_config(rows: &str) -> Vec<Vec<crate::config::SpaceSidebarToken>> {
+    toml::from_str::<crate::config::SpacesSidebarConfig>(&format!("rows = {rows}"))
+        .expect("rows parse")
+        .rows
+}
+
+/// Foreground of the first cell drawing `symbol` in the sidebar column.
+fn sidebar_symbol_fg(
+    state: &mut ClientShellState,
+    symbol: &str,
+    row: usize,
+) -> ratatui::style::Color {
+    let frame = state.compose(106, 30).expect("composed frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let width = frame.width;
+    (0..12u16)
+        .map(|x| &buffer[(x, row as u16)])
+        .find(|cell| cell.symbol() == symbol)
+        .unwrap_or_else(|| panic!("no {symbol:?} in row {row} of {width} columns"))
+        .fg
+}
+
+fn sidebar_symbol_bold(state: &mut ClientShellState, symbol: &str, row: usize) -> bool {
+    let frame = state.compose(106, 30).expect("composed frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    (0..12u16)
+        .map(|x| &buffer[(x, row as u16)])
+        .find(|cell| cell.symbol() == symbol)
+        .unwrap_or_else(|| panic!("no {symbol:?} in row {row}"))
+        .modifier
+        .contains(ratatui::style::Modifier::BOLD)
+}
+
+#[test]
+fn focused_space_number_is_bold_unless_the_token_turns_it_off() {
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+    assert!(!sidebar_symbol_bold(&mut state, "2", 3));
+    state.config.palette.index_focused = Some(ratatui::style::Color::Rgb(0x87, 0x63, 0xc8));
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[[{token = "index", bold = false}, "workspace"]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[[{token = "index", focused = {bold = false}}, "workspace"]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "1", 2));
+
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    assert!(sidebar_symbol_bold(&mut state, "1", 0));
+    assert!(!sidebar_symbol_bold(&mut state, "2", 1));
+}
+
+#[test]
+fn focused_token_style_applies_only_on_the_focused_space() {
+    let rows = space_rows_config(
+        r##"[[{token = "index", fg = "#0000ff", focused = {fg = "#00ff00", dim = true}}, "workspace"]]"##,
+    );
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert_eq!(
+        sidebar_symbol_fg(&mut state, "1", 2),
+        ratatui::style::Color::Rgb(0, 0xff, 0)
+    );
+    assert_eq!(
+        sidebar_symbol_fg(&mut state, "2", 3),
+        ratatui::style::Color::Rgb(0, 0, 0xff)
+    );
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[["index", {token = "workspace", focused = {bold = false}}]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "A", 2));
+}
+
+#[test]
+fn formatted_index_token_wraps_numbers_and_elides_skipped_spaces() {
+    let mut projected = labeled_workspaces(&["A", "B", "C"]);
+    projected.workspaces[1].skip_index = true;
+    let rows = space_rows_config(r#"[[{token = "index", format = "[{}]"}, "workspace"]]"#);
+    let mut state = index_rows_state_with(projected, rows);
+    let lines = sidebar_lines(&mut state, 2, 14, 3);
+    let trimmed = lines.iter().map(|line| line.trim()).collect::<Vec<_>>();
+    assert_eq!(trimmed, ["[1] A", "B", "[2] C"], "{lines:#?}");
+}
+
+#[test]
+fn index_number_keeps_mauve_focused_and_overlay0_unfocused_without_a_theme_color() {
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    assert_eq!(state.config.palette.index, None);
+    let palette = state.config.palette.clone();
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), palette.mauve);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), palette.overlay0);
+}
+
+#[test]
+fn index_theme_color_applies_to_every_row_and_token_fg_wins() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), theme);
+
+    let rows = space_rows_config(r##"[[{token = "index", fg = "#0000ff"}, "workspace"]]"##);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    state.config.palette.index = Some(theme);
+    let blue = ratatui::style::Color::Rgb(0, 0, 0xff);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), blue);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), blue);
+}
+
+#[test]
+fn index_focused_colors_only_the_focused_number_and_falls_back_to_index() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let focused = ratatui::style::Color::Rgb(0x87, 0x63, 0xc8);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    let palette = state.config.palette.clone();
+    state.config.palette.index_focused = Some(focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), palette.overlay0);
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), theme);
+
+    let rows = space_rows_config(r##"[[{token = "index", fg = "#0000ff"}, "workspace"]]"##);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    state.config.palette.index_focused = Some(focused);
+    let blue = ratatui::style::Color::Rgb(0, 0, 0xff);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), blue);
+}
+
+#[test]
+fn collapsed_sidebar_uses_index_focused_on_the_focused_space() {
+    let focused = ratatui::style::Color::Rgb(0x87, 0x63, 0xc8);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    let palette = state.config.palette.clone();
+    state.config.palette.index_focused = Some(focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 0), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), palette.overlay0);
+}
+
+#[test]
+fn collapsed_sidebar_numbers_use_the_theme_index_color_when_set() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    let palette = state.config.palette.clone();
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), palette.overlay0);
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 0), theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), theme);
+}

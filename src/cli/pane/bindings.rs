@@ -308,6 +308,15 @@ pub(crate) fn clear_token() -> Input<HashMap<String, Option<String>>> {
     })
 }
 
+pub(crate) fn link() -> Input<HashMap<String, String>> {
+    Input::<HashMap<String, String>>::value("link", "NAME=URL", |slot, value| {
+        let (key, url) = crate::cli::parse_link_assignment(value)?;
+        slot.insert(key, url);
+        Ok(())
+    })
+    .help("Attach a web URL to a token set in the same request")
+}
+
 pub(crate) fn state_label() -> Input<HashMap<String, String>> {
     Input::<HashMap<String, String>>::value("state-label", "STATUS=TEXT", |slot, value| {
         let Some((status, label)) = value.split_once('=') else {

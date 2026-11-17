@@ -45,6 +45,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) mouse_capture: bool,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
+    pub(super) token_link_click: crate::config::TokenLinkClick,
     pub(super) redraw_on_focus_gained: bool,
     pub(super) switch_ascii_input_source_in_prefix: bool,
     pub(super) local_config_path: std::path::PathBuf,
@@ -95,6 +96,10 @@ pub(super) struct ShellHitMap {
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
+    /// Agent children nested under spaces: `(rect, pane_id)`.
+    pub(super) space_agents: Vec<(Rect, String)>,
+    /// Visible linked sidebar tokens; empty in the collapsed and multi-machine sidebars.
+    pub(super) token_links: Vec<TokenLinkHit>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
@@ -141,6 +146,13 @@ pub(super) struct ShellHitMap {
     pub(super) release_notes_max_scroll: usize,
 }
 
+/// Columns a linked sidebar token occupies after width fitting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TokenLinkHit {
+    pub(super) rect: Rect,
+    pub(super) url: String,
+}
+
 #[derive(Clone)]
 pub(super) struct PaneHit {
     pub(super) rect: Rect,
@@ -178,6 +190,9 @@ pub(super) struct ClientWorkspacePress {
     pub(super) workspace_id: String,
     pub(super) start_column: u16,
     pub(super) start_row: u16,
+    /// Linked token under the press; opens on release inside its rect when no
+    /// drag happened, instead of selecting the space.
+    pub(super) token_link: Option<TokenLinkHit>,
 }
 
 pub(super) struct ClientTabPress {
@@ -238,6 +253,10 @@ pub(super) struct WorkspaceHit {
     pub(super) workspace_id: String,
     pub(super) indented: bool,
     pub(super) group_toggle: Option<(Rect, String)>,
+    /// Toggle that shows or hides this space's agent children.
+    pub(super) agent_toggle: Option<Rect>,
+    /// Rows of agent children drawn directly below `rect`, part of the same list item.
+    pub(super) child_rows: u16,
 }
 
 #[derive(Debug)]
@@ -517,6 +536,8 @@ pub(super) enum ClientContextMenuAction {
     OpenWorktree,
     RemoveWorktree,
     ToggleGroup,
+    ToggleAgents,
+    ToggleSkipIndex,
     NewTab,
     RenamePane,
     ClearPaneName,
@@ -537,6 +558,9 @@ pub(super) enum ClientContextMenuTarget {
         has_worktree_children: bool,
         close_group: bool,
         collapsed: bool,
+        /// `Some(expanded)` when the space can show agent children.
+        agents_expanded: Option<bool>,
+        skip_index: bool,
     },
     Tab {
         tab_id: String,
@@ -880,9 +904,13 @@ pub(crate) struct ClientShellState {
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
+    /// Pending press on a linked token of an agent row or child.
+    pub(super) token_link_press: Option<TokenLinkHit>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
+    /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
+    pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
@@ -1032,6 +1060,23 @@ impl ClientShellState {
                 .or_default()
                 .extend(saved.collapsed_groups);
         }
+        let mut space_agent_overrides = HashMap::<ClientEndpointId, HashMap<String, bool>>::new();
+        for saved in preferences.space_agent_overrides {
+            let endpoint_id = match saved.profile_id {
+                None => ClientEndpointId::Local,
+                Some(profile_id) => {
+                    let Ok(profile_id) = crate::client::endpoint::ProfileId::parse(profile_id)
+                    else {
+                        continue;
+                    };
+                    ClientEndpointId::Ssh(profile_id)
+                }
+            };
+            space_agent_overrides
+                .entry(endpoint_id)
+                .or_default()
+                .insert(saved.workspace_id, saved.expanded);
+        }
         Self {
             machine_diagnostics: Default::default(),
             config,
@@ -1056,9 +1101,11 @@ impl ClientShellState {
             last_sidebar_divider_click: None,
             chrome_drag: None,
             workspace_press: None,
+            token_link_press: None,
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
+            space_agent_overrides,
             workspace_scroll: 0,
             agent_scroll: 0,
             pending_agent_reveal: None,
@@ -1203,6 +1250,17 @@ impl ClientShellState {
         }
     }
 
+    /// Workspace id reached by one-based jump number `number`, if any.
+    pub(super) fn jump_target_workspace_id(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        number: usize,
+    ) -> Option<String> {
+        let entries = self.navigation_workspace_entries(snapshot);
+        let entry = render::entry_for_jump_number(&entries, snapshot, number)?;
+        Some(snapshot.workspaces.get(entry.index)?.workspace_id.clone())
+    }
+
     pub(super) fn reveal_workspace(&mut self, workspace_id: &str) {
         if self
             .hits
@@ -1248,6 +1306,7 @@ impl ClientShellState {
         self.popup_terminal_id = None;
         self.chrome_drag = None;
         self.workspace_press = None;
+        self.token_link_press = None;
         self.tab_press = None;
         self.workspace_scroll = 0;
         self.agent_scroll = 0;
@@ -1702,6 +1761,7 @@ impl ClientShellState {
             self.reset_copy_pipeline();
             self.chrome_drag = None;
             self.workspace_press = None;
+            self.token_link_press = None;
             self.tab_press = None;
             if self.pane_mouse_gesture.as_ref().is_some_and(|gesture| {
                 gesture.hit.popup && previous_popup.as_deref() == Some(gesture.hit.pane_id.as_str())

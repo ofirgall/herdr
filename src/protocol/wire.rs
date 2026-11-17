@@ -1059,6 +1059,12 @@ pub struct ClientShellWorkspace {
     pub branch: Option<String>,
     pub git_ahead_behind: Option<(usize, usize)>,
     pub tokens: Vec<(String, String)>,
+    /// Web links of the tokens that have one, sorted like `tokens`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_links: Vec<(String, String)>,
+    /// Excluded from numbered jump keys. Omitted from JSON when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_index: bool,
     pub worktree: Option<ClientShellWorktree>,
     pub focused: bool,
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
@@ -1113,6 +1119,9 @@ pub struct ClientShellAgent {
     pub state_change_seq: u64,
     pub state_labels: Vec<(String, String)>,
     pub tokens: Vec<(String, String)>,
+    /// Web links of the tokens that have one, sorted like `tokens`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_links: Vec<(String, String)>,
     pub focused: bool,
 }
 
@@ -2864,7 +2873,11 @@ mod tests {
                 custom_label: false,
                 branch: Some("main".into()),
                 git_ahead_behind: None,
-                tokens: Vec::new(),
+                tokens: vec![("pr".into(), "#1".into())],
+                // The legacy bincode path cannot skip fields, so this roundtrip
+                // carries populated values. JSON skips them when empty or false.
+                token_links: vec![("pr".into(), "https://example.com/1".into())],
+                skip_index: true,
                 worktree: None,
                 focused: true,
                 agent_status: crate::api::schema::AgentStatus::Idle,
@@ -3746,5 +3759,96 @@ mod tests {
             self.pos += to_read;
             Ok(to_read)
         }
+    }
+
+    #[test]
+    fn client_shell_skip_index_is_present_only_when_true() {
+        let json = serde_json::json!({
+            "workspace_id": "w1",
+            "active_tab_id": "w1:t1",
+            "new_workspace_cwd": "/tmp",
+            "number": 1,
+            "label": "shell",
+            "custom_label": false,
+            "branch": null,
+            "git_ahead_behind": null,
+            "tokens": [],
+            "worktree": null,
+            "focused": true,
+            "agent_status": "idle",
+        });
+        let workspace: ClientShellWorkspace = serde_json::from_value(json.clone()).unwrap();
+        assert!(!workspace.skip_index);
+        assert!(serde_json::to_value(&workspace)
+            .unwrap()
+            .get("skip_index")
+            .is_none());
+
+        let mut skipped = json;
+        skipped["skip_index"] = serde_json::json!(true);
+        let workspace: ClientShellWorkspace = serde_json::from_value(skipped.clone()).unwrap();
+        assert!(workspace.skip_index);
+        assert_eq!(serde_json::to_value(&workspace).unwrap(), skipped);
+    }
+
+    #[test]
+    fn client_shell_token_links_are_optional_in_json() {
+        let json = serde_json::json!({
+            "workspace_id": "w1",
+            "active_tab_id": "w1:t1",
+            "new_workspace_cwd": "/tmp",
+            "number": 1,
+            "label": "shell",
+            "custom_label": false,
+            "branch": null,
+            "git_ahead_behind": null,
+            "tokens": [["pr", "#1"]],
+            "worktree": null,
+            "focused": true,
+            "agent_status": "idle",
+        });
+        // A payload without the field decodes to an empty list and re-encodes without it.
+        let workspace: ClientShellWorkspace = serde_json::from_value(json.clone()).unwrap();
+        assert!(workspace.token_links.is_empty());
+        assert!(serde_json::to_value(&workspace)
+            .unwrap()
+            .get("token_links")
+            .is_none());
+
+        // A payload with links decodes and round-trips.
+        let mut with_links = json;
+        with_links["token_links"] = serde_json::json!([["pr", "https://example.com/1"]]);
+        let workspace: ClientShellWorkspace = serde_json::from_value(with_links.clone()).unwrap();
+        assert_eq!(
+            workspace.token_links,
+            vec![("pr".to_string(), "https://example.com/1".to_string())]
+        );
+        assert_eq!(serde_json::to_value(&workspace).unwrap(), with_links);
+
+        let agent = ClientShellAgent {
+            pane_id: "w1:p1".into(),
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            name: None,
+            display_agent: None,
+            agent: None,
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: crate::api::schema::AgentStatus::Idle,
+            state_change_seq: 0,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            token_links: Vec::new(),
+            focused: false,
+        };
+        assert!(serde_json::to_value(&agent)
+            .unwrap()
+            .get("token_links")
+            .is_none());
+        let mut value = serde_json::to_value(&agent).unwrap();
+        value["token_links"] = serde_json::json!([["pr", "https://example.com/1"]]);
+        let decoded: ClientShellAgent = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.token_links.len(), 1);
     }
 }

@@ -461,6 +461,10 @@ crate::cli::projection::cli_params! {
         #[serde(default, skip_serializing_if = "HashMap::is_empty")]
         #[schemars(schema_with = "super::common::metadata_token_patch_schema")]
         pub tokens: HashMap<String, Option<String>> => Field::new(HashMap::new()).input(binding::token()).input(binding::clear_token()),
+        /// Optional web URL per token name; only valid for tokens set in the same request.
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        #[schemars(schema_with = "super::common::metadata_link_values_schema")]
+        pub links: HashMap<String, String> => Field::new(HashMap::new()).input(binding::link()),
         #[serde(default)]
         pub clear_title: bool => Field::new(false).input(binding::boolean("clear-title", true)),
         #[serde(default)]
@@ -526,6 +530,9 @@ pub struct PaneInfo {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[schemars(schema_with = "super::common::metadata_token_values_schema")]
     pub tokens: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[schemars(schema_with = "super::common::metadata_link_values_schema")]
+    pub links: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

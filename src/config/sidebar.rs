@@ -4,6 +4,7 @@ pub use rules::SidebarTokenRule;
 
 use std::collections::BTreeMap;
 
+use crossterm::event::KeyModifiers;
 use serde::{Deserialize, Serialize};
 
 use crate::detect::Agent;
@@ -104,6 +105,80 @@ pub struct SidebarTokenStyle {
     pub dim: Option<bool>,
 }
 
+impl SidebarTokenStyle {
+    /// This style with every field `over` sets replaced by `over`'s value.
+    pub(crate) fn overlaid(self, over: Self) -> Self {
+        Self {
+            fg: over.fg.or(self.fg),
+            bold: over.bold.or(self.bold),
+            dim: over.dim.or(self.dim),
+        }
+    }
+}
+
+struct SerializedTokenStyle(SidebarTokenStyle);
+
+impl Serialize for SerializedTokenStyle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(fg) = self.0.fg {
+            map.serialize_entry("fg", &fg)?;
+        }
+        if let Some(bold) = self.0.bold {
+            map.serialize_entry("bold", &bold)?;
+        }
+        if let Some(dim) = self.0.dim {
+            map.serialize_entry("dim", &dim)?;
+        }
+        map.end()
+    }
+}
+
+/// A validated `{}` template (the `index` token's `format`, the
+/// `tab_stripped` token's `prefix`), split around the placeholder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaceholderTemplate {
+    pub before: String,
+    pub after: String,
+}
+
+const MAX_INDEX_FORMAT_CHARS: usize = 16;
+const MAX_TAB_PREFIX_CHARS: usize = 32;
+
+impl PlaceholderTemplate {
+    /// `subject` names the option in error messages, for example
+    /// "the `index` format".
+    fn parse(value: &str, subject: &str, max_chars: usize) -> Result<Self, String> {
+        if value.chars().count() > max_chars {
+            return Err(format!(
+                "{subject} may contain at most {max_chars} characters"
+            ));
+        }
+        if value.chars().any(char::is_control) {
+            return Err(format!("{subject} must not contain control characters"));
+        }
+        let placeholder_error = || format!("{subject} must contain exactly one `{{}}`");
+        let Some((before, after)) = value.split_once("{}") else {
+            return Err(placeholder_error());
+        };
+        if before.contains(['{', '}']) || after.contains(['{', '}']) {
+            return Err(placeholder_error());
+        }
+        Ok(Self {
+            before: before.to_string(),
+            after: after.to_string(),
+        })
+    }
+
+    fn template(&self) -> String {
+        format!("{}{{}}{}", self.before, self.after)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSidebarToken {
     StateIcon,
@@ -116,16 +191,21 @@ pub enum AgentSidebarToken {
     AgentIndex,
     TerminalTitle,
     TerminalTitleStripped,
+    /// The tab name without its leading jump-number prefix.
+    TabStripped,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
+        /// Exact prefix template for `tab_stripped`.
+        prefix: Option<PlaceholderTemplate>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpaceSidebarToken {
+    Index,
     StateIcon,
     StateText,
     Workspace,
@@ -136,10 +216,20 @@ pub enum SpaceSidebarToken {
         token: Box<SpaceSidebarToken>,
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
+        format: Option<PlaceholderTemplate>,
+        /// Style applied over `style` and rules on the focused space.
+        focused: Option<SidebarTokenStyle>,
     },
 }
 
 impl AgentSidebarToken {
+    pub(crate) fn tab_prefix(&self) -> Option<&PlaceholderTemplate> {
+        match self {
+            Self::Styled { prefix, .. } => prefix.as_ref(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn style_for_value(&self, value: &str) -> Option<SidebarTokenStyle> {
         match self {
             Self::Styled { style, rules, .. } => rules::matching_style(rules, *style, value),
@@ -156,6 +246,20 @@ impl AgentSidebarToken {
 }
 
 impl SpaceSidebarToken {
+    pub(crate) fn focused_style(&self) -> Option<SidebarTokenStyle> {
+        match self {
+            Self::Styled { focused, .. } => *focused,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn index_format(&self) -> Option<&PlaceholderTemplate> {
+        match self {
+            Self::Styled { format, .. } => format.as_ref(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn style_for_value(&self, value: &str) -> Option<SidebarTokenStyle> {
         match self {
             Self::Styled { style, rules, .. } => rules::matching_style(rules, *style, value),
@@ -183,7 +287,33 @@ struct RawStyledSidebarToken {
     dim: Option<bool>,
     #[serde(default)]
     rules: Vec<SidebarTokenRule>,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    prefix: Option<String>,
+    #[serde(default)]
+    focused: Option<RawFocusedStyle>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFocusedStyle {
+    #[serde(default)]
+    fg: Option<SidebarTokenColor>,
+    #[serde(default)]
+    bold: Option<bool>,
+    #[serde(default)]
+    dim: Option<bool>,
+}
+
+type ParsedSidebarToken = (
+    String,
+    Option<SidebarTokenStyle>,
+    Vec<SidebarTokenRule>,
+    Option<PlaceholderTemplate>,
+    Option<PlaceholderTemplate>,
+    Option<SidebarTokenStyle>,
+);
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -193,9 +323,9 @@ enum RawSidebarToken {
 }
 
 impl RawSidebarToken {
-    fn parts(self) -> Result<(String, Option<SidebarTokenStyle>, Vec<SidebarTokenRule>), String> {
+    fn parts(self) -> Result<ParsedSidebarToken, String> {
         match self {
-            Self::Plain(token) => Ok((token, None, Vec::new())),
+            Self::Plain(token) => Ok((token, None, Vec::new(), None, None, None)),
             Self::Styled(token) => {
                 if token.rules.len() > 16 {
                     return Err("sidebar tokens may contain at most 16 rules".into());
@@ -205,6 +335,28 @@ impl RawSidebarToken {
                 {
                     return Err("sidebar rules require a text-valued token".into());
                 }
+                let format = match token.format.as_deref() {
+                    None => None,
+                    Some(_) if token.token != "index" => {
+                        return Err("`format` is only supported on the `index` token".into());
+                    }
+                    Some(value) => Some(PlaceholderTemplate::parse(
+                        value,
+                        "the `index` format",
+                        MAX_INDEX_FORMAT_CHARS,
+                    )?),
+                };
+                let prefix = match token.prefix.as_deref() {
+                    None => None,
+                    Some(_) if token.token != "tab_stripped" => {
+                        return Err("`prefix` is only supported on the `tab_stripped` token".into());
+                    }
+                    Some(value) => Some(PlaceholderTemplate::parse(
+                        value,
+                        "the `tab_stripped` prefix",
+                        MAX_TAB_PREFIX_CHARS,
+                    )?),
+                };
                 Ok((
                     token.token,
                     Some(SidebarTokenStyle {
@@ -213,6 +365,13 @@ impl RawSidebarToken {
                         dim: token.dim,
                     }),
                     token.rules,
+                    format,
+                    prefix,
+                    token.focused.map(|focused| SidebarTokenStyle {
+                        fg: focused.fg,
+                        bold: focused.bold,
+                        dim: focused.dim,
+                    }),
                 ))
             }
         }
@@ -246,6 +405,9 @@ fn serialize_styled_token<S>(
     name: String,
     style: SidebarTokenStyle,
     rules: &[SidebarTokenRule],
+    format: Option<&PlaceholderTemplate>,
+    prefix: Option<&PlaceholderTemplate>,
+    focused: Option<SidebarTokenStyle>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -266,6 +428,15 @@ where
     if !rules.is_empty() {
         map.serialize_entry("rules", rules)?;
     }
+    if let Some(format) = format {
+        map.serialize_entry("format", &format.template())?;
+    }
+    if let Some(prefix) = prefix {
+        map.serialize_entry("prefix", &prefix.template())?;
+    }
+    if let Some(focused) = focused {
+        map.serialize_entry("focused", &SerializedTokenStyle(focused))?;
+    }
     map.end()
 }
 
@@ -281,6 +452,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::AgentIndex => "agent_index".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
+        AgentSidebarToken::TabStripped => "tab_stripped".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -288,6 +460,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
 
 fn space_token_name(token: &SpaceSidebarToken) -> String {
     match token {
+        SpaceSidebarToken::Index => "index".into(),
         SpaceSidebarToken::StateIcon => "state_icon".into(),
         SpaceSidebarToken::StateText => "state_text".into(),
         SpaceSidebarToken::Workspace => "workspace".into(),
@@ -308,7 +481,16 @@ impl Serialize for AgentSidebarToken {
                 token,
                 style,
                 rules,
-            } => serialize_styled_token(agent_token_name(token), *style, rules, serializer),
+                prefix,
+            } => serialize_styled_token(
+                agent_token_name(token),
+                *style,
+                rules,
+                None,
+                prefix.as_ref(),
+                None,
+                serializer,
+            ),
             token => serializer.serialize_str(&agent_token_name(token)),
         }
     }
@@ -325,9 +507,14 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, _, prefix, focused) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
+        if focused.is_some() {
+            return Err(serde::de::Error::custom(
+                "`focused` is only supported on space row tokens",
+            ));
+        }
         let token = parse_sidebar_token(
             value,
             &[
@@ -341,6 +528,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("agent_index", Self::AgentIndex),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
+                ("tab_stripped", Self::TabStripped),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -348,6 +536,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
             token: Box::new(token),
             style,
             rules,
+            prefix,
         }))
     }
 }
@@ -362,7 +551,17 @@ impl Serialize for SpaceSidebarToken {
                 token,
                 style,
                 rules,
-            } => serialize_styled_token(space_token_name(token), *style, rules, serializer),
+                format,
+                focused,
+            } => serialize_styled_token(
+                space_token_name(token),
+                *style,
+                rules,
+                format.as_ref(),
+                None,
+                *focused,
+                serializer,
+            ),
             token => serializer.serialize_str(&space_token_name(token)),
         }
     }
@@ -379,12 +578,13 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, format, _, focused) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
             value,
             &[
+                ("index", Self::Index),
                 ("state_icon", Self::StateIcon),
                 ("state_text", Self::StateText),
                 ("workspace", Self::Workspace),
@@ -397,6 +597,8 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
             token: Box::new(token),
             style,
             rules,
+            format,
+            focused,
         }))
     }
 }
@@ -425,6 +627,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentsSidebarConfig {
+    /// Whether the agents section is shown in the sidebar.
+    pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: AgentSidebarRows,
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
@@ -443,6 +647,7 @@ impl AgentsSidebarConfig {
 impl Default for AgentsSidebarConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             rows: vec![
                 vec![
                     AgentSidebarToken::StateIcon,
@@ -461,20 +666,152 @@ impl Default for AgentsSidebarConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SpacesSidebarConfig {
+    /// Whether the spaces section is shown in the sidebar.
+    pub enabled: bool,
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
     pub row_gap: u16,
+    /// Whether space rows render their aggregate agent status (`state_icon`
+    /// and `state_text`). Agent children keep their own status either way.
+    pub show_status: bool,
+    /// Default visibility of each space's agents as child entries.
+    pub agents: SpaceAgentsMode,
+    /// Row layout of an agent child entry; reuses the agent token vocabulary.
+    #[serde(deserialize_with = "deserialize_sidebar_rows")]
+    pub agent_rows: AgentSidebarRows,
+}
+
+/// Whether spaces show their agents as indented children by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpaceAgentsMode {
+    /// No children and no per-space toggle.
+    #[default]
+    Off,
+    /// Children are hidden until a space is expanded.
+    Collapsed,
+    /// Children are shown until a space is collapsed.
+    Expanded,
+}
+
+impl SpaceAgentsMode {
+    /// Effective visibility of one space's children given a user override.
+    pub(crate) fn expanded(self, override_expanded: Option<bool>) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Collapsed => override_expanded.unwrap_or(false),
+            Self::Expanded => override_expanded.unwrap_or(true),
+        }
+    }
 }
 
 impl Default for SpacesSidebarConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             rows: vec![
                 vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            show_status: true,
+            agents: SpaceAgentsMode::Off,
+            agent_rows: vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]],
         }
+    }
+}
+
+/// Which click opens the link of a sidebar token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TokenLinkClick {
+    /// A plain click (no ctrl/alt/super/meta/hyper) opens the link.
+    #[default]
+    Click,
+    /// A click holding exactly these modifiers opens the link.
+    Modifier(KeyModifiers),
+    /// Links are neither underlined nor clickable.
+    Off,
+}
+
+impl TokenLinkClick {
+    fn parse(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("click") {
+            return Some(Self::Click);
+        }
+        if trimmed.eq_ignore_ascii_case("off") {
+            return Some(Self::Off);
+        }
+        super::model::parse_modifier_combination(trimmed).map(Self::Modifier)
+    }
+
+    fn as_config_string(self) -> String {
+        match self {
+            Self::Click => "click".to_owned(),
+            Self::Off => "off".to_owned(),
+            Self::Modifier(modifiers) => [
+                (KeyModifiers::CONTROL, "ctrl"),
+                (KeyModifiers::ALT, "alt"),
+                (KeyModifiers::SUPER, "cmd"),
+                (KeyModifiers::META, "meta"),
+                (KeyModifiers::HYPER, "hyper"),
+            ]
+            .into_iter()
+            .filter(|(modifier, _)| modifiers.contains(*modifier))
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>()
+            .join("+"),
+        }
+    }
+
+    /// Whether a left click carrying `modifiers` opens a token link.
+    /// Shift is ignored: terminals commonly reserve shift-click for their own
+    /// selection, so it neither enables nor blocks the click.
+    pub fn matches(self, modifiers: KeyModifiers) -> bool {
+        let modifiers = modifiers - KeyModifiers::SHIFT;
+        match self {
+            Self::Click => modifiers.is_empty(),
+            Self::Modifier(required) => modifiers == required,
+            Self::Off => false,
+        }
+    }
+
+    pub fn is_off(self) -> bool {
+        self == Self::Off
+    }
+}
+
+/// Serde form of [`TokenLinkClick`]: a string, so the config reference lists
+/// it as a string rather than an enum.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenLinkClickConfig(TokenLinkClick);
+
+impl TokenLinkClickConfig {
+    pub fn mode(self) -> TokenLinkClick {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenLinkClickConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        TokenLinkClick::parse(&value).map(Self).ok_or_else(|| {
+            serde::de::Error::custom(
+                "token_link_click must be click, off, ctrl/control, alt/option, cmd/command/super, meta, hyper, or a + separated combination without shift",
+            )
+        })
+    }
+}
+
+impl Serialize for TokenLinkClickConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0.as_config_string())
     }
 }
 
@@ -483,11 +820,196 @@ impl Default for SpacesSidebarConfig {
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// Which click opens the link of a metadata token that carries one.
+    pub token_link_click: TokenLinkClickConfig,
+}
+
+impl SidebarConfig {
+    /// True when the config disables every sidebar section.
+    pub fn all_sections_disabled(&self) -> bool {
+        !self.spaces.enabled && !self.agents.enabled
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_link_click_parses_every_accepted_form() {
+        let parse = |value: &str| -> Result<TokenLinkClick, _> {
+            toml::from_str::<SidebarConfig>(&format!("token_link_click = \"{value}\""))
+                .map(|config| config.token_link_click.mode())
+        };
+        assert_eq!(
+            SidebarConfig::default().token_link_click.mode(),
+            TokenLinkClick::Click
+        );
+        assert_eq!(parse("click").unwrap(), TokenLinkClick::Click);
+        assert_eq!(parse("off").unwrap(), TokenLinkClick::Off);
+        assert_eq!(
+            parse("ctrl").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::CONTROL)
+        );
+        assert_eq!(
+            parse("Option").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::ALT)
+        );
+        assert_eq!(
+            parse("cmd+alt").unwrap(),
+            TokenLinkClick::Modifier(KeyModifiers::SUPER | KeyModifiers::ALT)
+        );
+        for value in ["super", "command", "meta", "hyper", "control+alt"] {
+            assert!(
+                matches!(parse(value).unwrap(), TokenLinkClick::Modifier(_)),
+                "{value}"
+            );
+        }
+        for value in ["shift", "ctrl+shift", "banana", "", "ctrl+", "none"] {
+            assert!(parse(value).is_err(), "{value:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn token_link_click_round_trips_and_serializes() {
+        for value in ["click", "off", "ctrl", "ctrl+alt", "cmd+meta+hyper"] {
+            let config: SidebarConfig =
+                toml::from_str(&format!("token_link_click = \"{value}\"")).unwrap();
+            let round: SidebarConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(round, config, "{value}");
+        }
+    }
+
+    #[test]
+    fn token_link_click_matching_ignores_shift_and_requires_exact_modifiers() {
+        let none = KeyModifiers::empty();
+        assert!(TokenLinkClick::Click.matches(none));
+        assert!(TokenLinkClick::Click.matches(KeyModifiers::SHIFT));
+        assert!(!TokenLinkClick::Click.matches(KeyModifiers::CONTROL));
+        let ctrl = TokenLinkClick::Modifier(KeyModifiers::CONTROL);
+        assert!(!ctrl.matches(none));
+        assert!(ctrl.matches(KeyModifiers::CONTROL));
+        assert!(ctrl.matches(KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+        assert!(!ctrl.matches(KeyModifiers::CONTROL | KeyModifiers::ALT));
+        assert!(!TokenLinkClick::Off.matches(none));
+    }
+
+    #[test]
+    fn documented_sections_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            "[ui.sidebar.spaces]\nenabled = true\n\n[ui.sidebar.agents]\nenabled = false\n",
+        )
+        .unwrap();
+        assert!(config.ui.sidebar.spaces.enabled);
+        assert!(!config.ui.sidebar.agents.enabled);
+        assert!(!config.ui.sidebar.all_sections_disabled());
+    }
+
+    #[test]
+    fn sections_are_enabled_by_default_and_parse_enabled_false() {
+        let config = SidebarConfig::default();
+        assert!(config.spaces.enabled && config.agents.enabled);
+        assert!(!config.all_sections_disabled());
+
+        let agents: AgentsSidebarConfig = toml::from_str("enabled = false").unwrap();
+        assert!(!agents.enabled);
+        assert_eq!(agents.rows, AgentsSidebarConfig::default().rows);
+        let spaces: SpacesSidebarConfig = toml::from_str("enabled = false\nrow_gap = 1").unwrap();
+        assert!(!spaces.enabled);
+        assert_eq!(spaces.row_gap, 1);
+
+        let both: SidebarConfig =
+            toml::from_str("[agents]\nenabled = false\n[spaces]\nenabled = false").unwrap();
+        assert!(both.all_sections_disabled());
+        let round: SidebarConfig = toml::from_str(&toml::to_string(&both).unwrap()).unwrap();
+        assert_eq!(round, both);
+    }
+
+    #[test]
+    fn space_agents_default_to_off_with_state_icon_and_tab_rows() {
+        let spaces = SpacesSidebarConfig::default();
+        assert_eq!(spaces.agents, SpaceAgentsMode::Off);
+        assert_eq!(
+            spaces.agent_rows,
+            vec![vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab]]
+        );
+        let parsed: SpacesSidebarConfig = toml::from_str("row_gap = 1").unwrap();
+        assert_eq!(parsed.agents, SpaceAgentsMode::Off);
+        assert_eq!(parsed.agent_rows, spaces.agent_rows);
+    }
+
+    #[test]
+    fn space_agents_parse_modes_and_custom_rows() {
+        for (value, mode) in [
+            ("off", SpaceAgentsMode::Off),
+            ("collapsed", SpaceAgentsMode::Collapsed),
+            ("expanded", SpaceAgentsMode::Expanded),
+        ] {
+            let spaces: SpacesSidebarConfig =
+                toml::from_str(&format!("agents = \"{value}\"")).unwrap();
+            assert_eq!(spaces.agents, mode);
+        }
+        let spaces: SpacesSidebarConfig = toml::from_str(
+            "agents = \"expanded\"\nagent_rows = [[\"state_icon\", \"tab\", \"agent\"], [\"$task\"]]",
+        )
+        .unwrap();
+        assert_eq!(spaces.agent_rows.len(), 2);
+        assert_eq!(
+            spaces.agent_rows[1],
+            vec![AgentSidebarToken::Custom("task".into())]
+        );
+        let round: SpacesSidebarConfig =
+            toml::from_str(&toml::to_string(&spaces).unwrap()).unwrap();
+        assert_eq!(round, spaces);
+    }
+
+    #[test]
+    fn space_agents_reject_unknown_modes_and_oversized_rows() {
+        for value in ["\"always\"", "true", "\"Expanded\""] {
+            assert!(
+                toml::from_str::<SpacesSidebarConfig>(&format!("agents = {value}")).is_err(),
+                "accepted {value}"
+            );
+        }
+        let too_many_rows = std::iter::repeat_n("[\"tab\"]", MAX_SIDEBAR_ROWS + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            toml::from_str::<SpacesSidebarConfig>(&format!("agent_rows = [{too_many_rows}]"))
+                .is_err()
+        );
+        let too_many_tokens = std::iter::repeat_n("\"tab\"", MAX_SIDEBAR_TOKENS_PER_ROW + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(toml::from_str::<SpacesSidebarConfig>(&format!(
+            "agent_rows = [[{too_many_tokens}]]"
+        ))
+        .is_err());
+        assert!(toml::from_str::<SpacesSidebarConfig>("agent_rows = [[\"bogus\"]]").is_err());
+    }
+
+    #[test]
+    fn documented_space_agents_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            "[ui.sidebar.spaces]\nagents = \"expanded\"\nagent_rows = [\n  [\"state_icon\", \"tab\"],\n]\n",
+        )
+        .unwrap();
+        assert_eq!(config.ui.sidebar.spaces.agents, SpaceAgentsMode::Expanded);
+        assert_eq!(
+            config.ui.sidebar.spaces.agent_rows,
+            SpacesSidebarConfig::default().agent_rows
+        );
+    }
+
+    #[test]
+    fn space_agents_mode_resolves_effective_expansion() {
+        use SpaceAgentsMode::*;
+        assert!(!Off.expanded(Some(true)));
+        assert!(!Collapsed.expanded(None));
+        assert!(Collapsed.expanded(Some(true)));
+        assert!(Expanded.expanded(None));
+        assert!(!Expanded.expanded(Some(false)));
+    }
 
     #[test]
     fn defaults_match_the_compact_agent_and_existing_space_layouts() {
@@ -736,5 +1258,228 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                 "accepted key {key:?}"
             );
         }
+    }
+
+    fn parse_space_row_token(token: &str) -> Result<SpaceSidebarToken, String> {
+        toml::from_str::<SpacesSidebarConfig>(&format!("rows = [[{token}]]"))
+            .map(|config| config.rows[0][0].clone())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn index_format_parses_around_the_placeholder() {
+        for (format, before, after) in [("[{}]", "[", "]"), ("{}.", "", "."), ("{}", "", "")] {
+            let token =
+                parse_space_row_token(&format!("{{token = \"index\", format = \"{format}\"}}"))
+                    .unwrap();
+            assert_eq!(
+                token.index_format(),
+                Some(&PlaceholderTemplate {
+                    before: before.into(),
+                    after: after.into()
+                }),
+                "{format}"
+            );
+            let round: SpacesSidebarConfig = toml::from_str(
+                &toml::to_string(&SpacesSidebarConfig {
+                    rows: vec![vec![token.clone()]],
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(round.rows[0][0], token, "{format}");
+        }
+    }
+
+    #[test]
+    fn plain_index_token_has_no_format() {
+        let token = parse_space_row_token("\"index\"").unwrap();
+        assert_eq!(token, SpaceSidebarToken::Index);
+        assert_eq!(token.index_format(), None);
+        let styled = parse_space_row_token("{token = \"index\", bold = true}").unwrap();
+        assert_eq!(styled.index_format(), None);
+    }
+
+    #[test]
+    fn invalid_index_formats_are_rejected_with_their_messages() {
+        let placeholder = "exactly one `{}`";
+        for (format, message) in [
+            ("#", placeholder),
+            ("{}{}", placeholder),
+            ("{x}", placeholder),
+            ("{}}", placeholder),
+            ("{ {}", placeholder),
+            ("{}0123456789abcde", "at most 16 characters"),
+            ("{}\\n", "control characters"),
+        ] {
+            let error =
+                parse_space_row_token(&format!("{{token = \"index\", format = \"{format}\"}}"))
+                    .unwrap_err();
+            assert!(error.contains(message), "{format:?}: {error}");
+        }
+        // Exactly 16 characters is fine.
+        assert!(
+            parse_space_row_token("{token = \"index\", format = \"{}0123456789abcd\"}").is_ok()
+        );
+    }
+
+    #[test]
+    fn format_is_rejected_on_other_tokens() {
+        let error = parse_space_row_token("{token = \"workspace\", format = \"{}:\"}").unwrap_err();
+        assert!(
+            error.contains("only supported on the `index` token"),
+            "{error}"
+        );
+        let agent = toml::from_str::<AgentsSidebarConfig>(
+            "rows = [[{token = \"workspace\", format = \"{}:\"}]]",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            agent.contains("only supported on the `index` token"),
+            "{agent}"
+        );
+    }
+
+    fn parse_agent_row_token(token: &str) -> Result<AgentSidebarToken, String> {
+        toml::from_str::<AgentsSidebarConfig>(&format!("rows = [[{token}]]"))
+            .map(|config| config.rows[0][0].clone())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn tab_stripped_name_round_trips() {
+        let token = parse_agent_row_token("\"tab_stripped\"").unwrap();
+        assert_eq!(token, AgentSidebarToken::TabStripped);
+        assert_eq!(token.tab_prefix(), None);
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![token.clone()]],
+            ..Default::default()
+        };
+        assert!(toml::to_string(&config)
+            .unwrap()
+            .contains("\"tab_stripped\""));
+        let round: AgentsSidebarConfig =
+            toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(round.rows[0][0], token);
+    }
+
+    #[test]
+    fn tab_stripped_prefix_parses_and_round_trips() {
+        for (prefix, before, after) in [
+            ("{}| ", "", "| "),
+            ("[{}] ", "[", "] "),
+            ("{}    \u{f0142} \u{2502} ", "", "    \u{f0142} \u{2502} "),
+        ] {
+            let token = parse_agent_row_token(&format!(
+                "{{token = \"tab_stripped\", prefix = \"{prefix}\"}}"
+            ))
+            .unwrap();
+            assert_eq!(
+                token.tab_prefix(),
+                Some(&PlaceholderTemplate {
+                    before: before.into(),
+                    after: after.into()
+                })
+            );
+            let round: AgentsSidebarConfig = toml::from_str(
+                &toml::to_string(&AgentsSidebarConfig {
+                    rows: vec![vec![token.clone()]],
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(round.rows[0][0], token, "{prefix}");
+        }
+    }
+
+    #[test]
+    fn invalid_tab_prefixes_are_rejected_with_their_messages() {
+        let placeholder = "`tab_stripped` prefix must contain exactly one `{}`";
+        for (prefix, message) in [
+            ("| ", placeholder),
+            ("{}{}", placeholder),
+            ("{x}", placeholder),
+            (
+                "{}0123456789abcdef0123456789abcdef",
+                "at most 32 characters",
+            ),
+            ("{}\\n", "control characters"),
+        ] {
+            let error = parse_agent_row_token(&format!(
+                "{{token = \"tab_stripped\", prefix = \"{prefix}\"}}"
+            ))
+            .unwrap_err();
+            assert!(error.contains(message), "{prefix:?}: {error}");
+        }
+        // Exactly 32 characters is fine.
+        assert!(parse_agent_row_token(
+            "{token = \"tab_stripped\", prefix = \"{}0123456789abcdef0123456789abcd\"}"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn prefix_is_rejected_on_other_tokens() {
+        for token in ["tab", "workspace"] {
+            let error =
+                parse_agent_row_token(&format!("{{token = \"{token}\", prefix = \"{{}}| \"}}"))
+                    .unwrap_err();
+            assert!(
+                error.contains("only supported on the `tab_stripped` token"),
+                "{error}"
+            );
+        }
+        let space = parse_space_row_token("{token = \"index\", prefix = \"{}| \"}").unwrap_err();
+        assert!(
+            space.contains("only supported on the `tab_stripped` token"),
+            "{space}"
+        );
+    }
+
+    #[test]
+    fn focused_style_parses_and_round_trips() {
+        let token = parse_space_row_token(
+            "{token = \"index\", focused = {bold = false, fg = \"#8763c8\"}}",
+        )
+        .unwrap();
+        assert_eq!(
+            token.focused_style(),
+            Some(SidebarTokenStyle {
+                fg: Some(SidebarTokenColor {
+                    r: 0x87,
+                    g: 0x63,
+                    b: 0xc8
+                }),
+                bold: Some(false),
+                dim: None,
+            })
+        );
+        let round: SpacesSidebarConfig = toml::from_str(
+            &toml::to_string(&SpacesSidebarConfig {
+                rows: vec![vec![token.clone()]],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(round.rows[0][0], token);
+        assert_eq!(
+            parse_space_row_token("\"index\"").unwrap().focused_style(),
+            None
+        );
+    }
+
+    #[test]
+    fn focused_style_is_rejected_on_agent_rows_and_with_unknown_keys() {
+        let error =
+            parse_agent_row_token("{token = \"tab\", focused = {bold = true}}").unwrap_err();
+        assert!(
+            error.contains("`focused` is only supported on space row tokens"),
+            "{error}"
+        );
+        assert!(parse_space_row_token("{token = \"index\", focused = {italic = true}}").is_err());
     }
 }

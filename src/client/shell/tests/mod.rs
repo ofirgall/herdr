@@ -5,7 +5,9 @@ use crate::protocol::{
     PaneSurfaceSplit, PaneSurfaceSplitDirection, SurfaceRect,
 };
 use crossterm::event::MouseEvent;
+mod space_agents;
 mod text_editing;
+mod token_links;
 
 pub(super) fn snapshot() -> ClientShellSnapshot {
     ClientShellSnapshot {
@@ -37,6 +39,8 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             branch: Some("main".into()),
             git_ahead_behind: None,
             tokens: Vec::new(),
+            token_links: Default::default(),
+            skip_index: false,
             worktree: None,
             focused: true,
             agent_status: AgentStatus::Idle,
@@ -193,6 +197,7 @@ fn pane_scroll_result(
             agent_status: crate::api::schema::AgentStatus::Unknown,
             state_labels: HashMap::new(),
             tokens: HashMap::new(),
+            links: Default::default(),
             agent_session: None,
             scroll: Some(crate::api::schema::PaneScrollInfo {
                 offset_from_bottom,
@@ -261,6 +266,7 @@ mod link_hover;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod sidebar_sections;
 mod startup_overlays;
 
 #[test]

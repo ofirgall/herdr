@@ -119,6 +119,8 @@ pub struct CustomThemeColors {
     pub blue: Option<String>,
     pub teal: Option<String>,
     pub peach: Option<String>,
+    pub index: Option<String>,
+    pub index_focused: Option<String>,
     /// Overrides applied when `auto_switch` selects a light appearance.
     pub light: Option<ModeThemeColors>,
     /// Overrides applied when `auto_switch` selects a dark appearance.
@@ -148,6 +150,8 @@ pub struct ModeThemeColors {
     pub blue: Option<String>,
     pub teal: Option<String>,
     pub peach: Option<String>,
+    pub index: Option<String>,
+    pub index_focused: Option<String>,
 }
 
 /// Parse a color string into a ratatui Color.
