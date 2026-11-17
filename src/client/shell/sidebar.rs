@@ -116,7 +116,7 @@ pub(crate) fn render_collapsed_sidebar(
             Style::default().fg(palette.overlay0)
         };
         let number_style = palette
-            .index
+            .index_color(workspace.focused)
             .map_or(number_style, |color| number_style.fg(color));
         put_text(
             buffer,
@@ -1003,6 +1003,18 @@ pub(in crate::client::shell) fn render_workspace_rows(
         } else {
             palette.overlay0
         });
+        // Token spans read `palette.index`; the focused row swaps in its own
+        // number color. Cloned only for that one row.
+        let focused_palette;
+        let token_palette = if focused && palette.index_focused.is_some() {
+            focused_palette = Palette {
+                index: palette.index_color(true),
+                ..palette.clone()
+            };
+            &focused_palette
+        } else {
+            palette
+        };
         let spans = super::agent_sidebar::token_row_spans(
             row,
             (
@@ -1013,7 +1025,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
             workspace_style,
             secondary_style,
             Style::default().fg(palette.overlay1),
-            palette,
+            token_palette,
             area.right().saturating_sub(2).saturating_sub(x) as usize,
             links
                 .as_deref_mut()

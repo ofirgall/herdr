@@ -3487,4 +3487,28 @@ mod tests {
             Some(ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a))
         );
     }
+
+    #[test]
+    fn index_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        assert_eq!(state::Palette::catppuccin().index_focused, None);
+        let custom = "[theme]\nauto_switch = true\n[theme.custom]\nindex_focused = \"#8763c8\"\n";
+        assert_eq!(
+            palette(custom, HostAppearance::Dark).index_focused,
+            Some(ratatui::style::Color::Rgb(0x87, 0x63, 0xc8))
+        );
+        let with_light = format!("{custom}[theme.custom.light]\nindex_focused = \"#444444\"\n");
+        assert_eq!(
+            palette(&with_light, HostAppearance::Light).index_focused,
+            Some(ratatui::style::Color::Rgb(0x44, 0x44, 0x44))
+        );
+        let index_only = "[theme.custom]\nindex = \"#f8921a\"\n";
+        let fallback = palette(index_only, HostAppearance::Dark);
+        assert_eq!(fallback.index_color(true), fallback.index);
+    }
 }

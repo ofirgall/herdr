@@ -185,6 +185,12 @@
           "description": "Color for space jump numbers (the index sidebar token and the collapsed sidebar). Unset keeps the focused-space highlight and muted secondary colors; when set, it applies to every row. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for the focused space's jump number. Falls back to theme.custom.index, then to the focused-space highlight color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -303,6 +309,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the index color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -435,6 +447,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the index color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.index_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the index_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",

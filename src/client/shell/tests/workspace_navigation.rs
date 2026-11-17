@@ -1414,6 +1414,37 @@ fn index_theme_color_applies_to_every_row_and_token_fg_wins() {
 }
 
 #[test]
+fn index_focused_colors_only_the_focused_number_and_falls_back_to_index() {
+    let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
+    let focused = ratatui::style::Color::Rgb(0x87, 0x63, 0xc8);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    let palette = state.config.palette.clone();
+    state.config.palette.index_focused = Some(focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), palette.overlay0);
+    state.config.palette.index = Some(theme);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 3), theme);
+
+    let rows = space_rows_config(r##"[[{token = "index", fg = "#0000ff"}, "workspace"]]"##);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    state.config.palette.index_focused = Some(focused);
+    let blue = ratatui::style::Color::Rgb(0, 0, 0xff);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 2), blue);
+}
+
+#[test]
+fn collapsed_sidebar_uses_index_focused_on_the_focused_space() {
+    let focused = ratatui::style::Color::Rgb(0x87, 0x63, 0xc8);
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    let palette = state.config.palette.clone();
+    state.config.palette.index_focused = Some(focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "1", 0), focused);
+    assert_eq!(sidebar_symbol_fg(&mut state, "2", 1), palette.overlay0);
+}
+
+#[test]
 fn collapsed_sidebar_numbers_use_the_theme_index_color_when_set() {
     let theme = ratatui::style::Color::Rgb(0xf8, 0x92, 0x1a);
     let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
