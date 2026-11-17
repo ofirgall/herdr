@@ -324,12 +324,14 @@ pub(super) struct LinkSink<'a> {
     pub(super) hits: &'a mut Vec<TokenLinkHit>,
     pub(super) x: u16,
     pub(super) y: u16,
+    /// Draw linked tokens underlined (`token_link_underline`).
+    pub(super) underline: bool,
 }
 
 /// Token spans of one row. Rows without a linked token, and callers that pass
 /// no `links` sink (links off, or a sidebar without link support), take the
-/// plain path with no extra work; otherwise linked tokens are underlined and
-/// one hit per visible linked token is recorded.
+/// plain path with no extra work; otherwise linked tokens are underlined when
+/// the sink asks for it and one hit per visible linked token is recorded.
 pub(super) fn token_row_spans(
     tokens: &[crate::ui::ResolvedToken],
     icon: (&str, Style),
@@ -352,6 +354,7 @@ pub(super) fn token_row_spans(
                 custom,
                 palette,
                 max_width,
+                sink.underline,
             );
             for column in columns {
                 let Some(url) = tokens[column.index].link.clone() else {
@@ -483,6 +486,7 @@ pub(super) fn render_agent_row(
                 hits,
                 x: rect.x.saturating_add(indent as u16),
                 y: rect.y + index as u16,
+                underline: config.token_link_underline,
             }),
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(

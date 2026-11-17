@@ -508,6 +508,7 @@ fn render_spaces_section(
             dragged,
             palette,
             (!config.token_link_click.is_off()).then_some(&mut hits.token_links),
+            config.token_link_underline,
         );
         let group_toggle = render_parent_group_toggle(
             buffer,
@@ -960,6 +961,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     dragged: bool,
     palette: &Palette,
     mut links: Option<&mut Vec<TokenLinkHit>>,
+    underline_links: bool,
 ) {
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y + row_index as u16;
@@ -1035,7 +1037,12 @@ pub(in crate::client::shell) fn render_workspace_rows(
             area.right().saturating_sub(2).saturating_sub(x) as usize,
             links
                 .as_deref_mut()
-                .map(|hits| super::agent_sidebar::LinkSink { hits, x, y }),
+                .map(|hits| super::agent_sidebar::LinkSink {
+                    hits,
+                    x,
+                    y,
+                    underline: underline_links,
+                }),
         );
         Paragraph::new(Line::from(spans)).render(
             Rect::new(x, y, area.right().saturating_sub(2).saturating_sub(x), 1),

@@ -357,6 +357,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # do not forward cmd-click and ctrl-click can become a right click.
 # [ui.sidebar]
 # token_link_click = "click"
+# Draw linked tokens underlined. Set false to keep their configured style; links still open.
+# token_link_underline = true
 
 # Expanded agent rows. Built-ins are state_icon, state_text, machine, workspace, tab,
 # pane, agent, terminal_title, terminal_title_stripped, and tab_stripped.

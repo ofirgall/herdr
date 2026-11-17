@@ -154,6 +154,7 @@ impl ClientShellConfig {
             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
             token_link_click: config.ui.sidebar.token_link_click.mode(),
+            token_link_underline: config.ui.sidebar.token_link_underline,
             redraw_on_focus_gained: config.ui.redraw_on_focus_gained,
             switch_ascii_input_source_in_prefix: config
                 .experimental
@@ -387,6 +388,7 @@ impl ClientShellConfig {
                 self.mouse_scroll_lines = ui.mouse_scroll_lines();
                 self.right_click_passthrough_modifiers = ui.right_click_passthrough_modifiers();
                 self.token_link_click = ui.sidebar.token_link_click.mode();
+                self.token_link_underline = ui.sidebar.token_link_underline;
                 self.redraw_on_focus_gained = ui.redraw_on_focus_gained;
             }
         }

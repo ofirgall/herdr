@@ -235,6 +235,7 @@ pub(super) fn render_children(
                     hits: &mut hits.token_links,
                     x: area.x + indent,
                     y: y + index as u16,
+                    underline: config.token_link_underline,
                 }),
             ));
             Paragraph::new(Line::from(spans)).render(

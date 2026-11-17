@@ -587,6 +587,8 @@ token_link_click = "click"   # default: a plain click opens the link
 
 Accepted modifiers are `ctrl` (`control`), `alt` (`option`), `cmd` (`command`, `super`), `meta`, and `hyper`; `shift` is not accepted. With a modifier, the click must hold exactly that modifier. Any other value is reported by `herdr config check` and the default is kept. Many terminals do not forward cmd-click on macOS, and ctrl-click can be turned into a right click, so the default is a plain click and `alt` and `ctrl` are the practical modifiers; you may need to enable the modifier for mouse reporting in your terminal.
 
+Linked tokens are underlined by default. Set `token_link_underline = false` under `[ui.sidebar]` to draw them in their configured style only; the link still opens on the click `token_link_click` selects.
+
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 
 ## Notifications

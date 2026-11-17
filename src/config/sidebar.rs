@@ -815,13 +815,26 @@ impl Serialize for TokenLinkClickConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
     /// Which click opens the link of a metadata token that carries one.
     pub token_link_click: TokenLinkClickConfig,
+    /// Whether a metadata token that carries a link is drawn underlined.
+    pub token_link_underline: bool,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            agents: AgentsSidebarConfig::default(),
+            spaces: SpacesSidebarConfig::default(),
+            token_link_click: TokenLinkClickConfig::default(),
+            token_link_underline: true,
+        }
+    }
 }
 
 impl SidebarConfig {
@@ -868,6 +881,21 @@ mod tests {
         for value in ["shift", "ctrl+shift", "banana", "", "ctrl+", "none"] {
             assert!(parse(value).is_err(), "{value:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn token_link_underline_defaults_on_and_can_be_disabled() {
+        assert!(SidebarConfig::default().token_link_underline);
+        assert!(
+            toml::from_str::<SidebarConfig>("")
+                .unwrap()
+                .token_link_underline
+        );
+        assert!(
+            !toml::from_str::<SidebarConfig>("token_link_underline = false")
+                .unwrap()
+                .token_link_underline
+        );
     }
 
     #[test]

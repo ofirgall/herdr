@@ -151,13 +151,14 @@ pub(crate) fn resolved_token_spans(
         custom_style,
         palette,
         false,
+        false,
     )
     .0
 }
 
-/// Like [`resolved_token_spans`], but underlines tokens that carry a link and
-/// reports the columns of each visible linked token. Callers use it only for
-/// rows with at least one linked token.
+/// Like [`resolved_token_spans`], but reports the columns of each visible
+/// linked token and, when `underline_links` is set, underlines those tokens.
+/// Callers use it only for rows with at least one linked token.
 pub(crate) fn resolved_token_spans_with_links(
     resolved: &[ResolvedToken],
     state_icon: (&str, Style),
@@ -167,6 +168,7 @@ pub(crate) fn resolved_token_spans_with_links(
     custom_style: Style,
     palette: &Palette,
     max_width: usize,
+    underline_links: bool,
 ) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
     let layout = layout_tokens(resolved, state_icon.0, max_width);
     emit_token_spans(
@@ -179,6 +181,7 @@ pub(crate) fn resolved_token_spans_with_links(
         custom_style,
         palette,
         true,
+        underline_links,
     )
 }
 
@@ -319,6 +322,7 @@ fn emit_token_spans(
     secondary_style: Style,
     custom_style: Style,
     palette: &Palette,
+    record_links: bool,
     underline_links: bool,
 ) -> (Vec<Span<'static>>, Vec<TokenColumns>) {
     let mut spans = Vec::new();
@@ -401,15 +405,17 @@ fn emit_token_spans(
                 ));
             }
         }
-        if underline_links && token.link.is_some() {
+        if record_links && token.link.is_some() {
             let width_of = |spans: &[Span<'static>]| {
                 spans
                     .iter()
                     .map(|span| display_width(&span.content))
                     .sum::<usize>()
             };
-            for span in &mut spans[first_span..] {
-                span.style = span.style.add_modifier(Modifier::UNDERLINED);
+            if underline_links {
+                for span in &mut spans[first_span..] {
+                    span.style = span.style.add_modifier(Modifier::UNDERLINED);
+                }
             }
             columns.push(TokenColumns {
                 index,
@@ -519,6 +525,7 @@ mod token_link_layout_tests {
             style,
             &Palette::catppuccin(),
             width,
+            true,
         )
     }
 
@@ -560,6 +567,36 @@ mod token_link_layout_tests {
             ]
         );
         assert_eq!(underlined(&spans), vec!["#7009", "ci"]);
+    }
+
+    #[test]
+    fn linked_tokens_keep_their_columns_without_underline_when_disabled() {
+        let row = vec![
+            token(ResolvedTokenKind::Workspace("repo".into()), false),
+            token(ResolvedTokenKind::Custom("#7009".into()), true),
+        ];
+        let style = Style::default();
+        let (spans, columns) = resolved_token_spans_with_links(
+            &row,
+            ("*", style),
+            style,
+            style,
+            style,
+            style,
+            &Palette::catppuccin(),
+            40,
+            false,
+        );
+        assert_eq!(text(&spans), "repo #7009");
+        assert_eq!(
+            columns,
+            vec![TokenColumns {
+                index: 1,
+                start: 5,
+                width: 5
+            }]
+        );
+        assert!(underlined(&spans).is_empty());
     }
 
     #[test]
