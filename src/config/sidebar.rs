@@ -105,6 +105,39 @@ pub struct SidebarTokenStyle {
     pub dim: Option<bool>,
 }
 
+impl SidebarTokenStyle {
+    /// This style with every field `over` sets replaced by `over`'s value.
+    pub(crate) fn overlaid(self, over: Self) -> Self {
+        Self {
+            fg: over.fg.or(self.fg),
+            bold: over.bold.or(self.bold),
+            dim: over.dim.or(self.dim),
+        }
+    }
+}
+
+struct SerializedTokenStyle(SidebarTokenStyle);
+
+impl Serialize for SerializedTokenStyle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(fg) = self.0.fg {
+            map.serialize_entry("fg", &fg)?;
+        }
+        if let Some(bold) = self.0.bold {
+            map.serialize_entry("bold", &bold)?;
+        }
+        if let Some(dim) = self.0.dim {
+            map.serialize_entry("dim", &dim)?;
+        }
+        map.end()
+    }
+}
+
 /// A validated `{}` template (the `index` token's `format`, the
 /// `tab_stripped` token's `prefix`), split around the placeholder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +217,8 @@ pub enum SpaceSidebarToken {
         style: SidebarTokenStyle,
         rules: Vec<SidebarTokenRule>,
         format: Option<PlaceholderTemplate>,
+        /// Style applied over `style` and rules on the focused space.
+        focused: Option<SidebarTokenStyle>,
     },
 }
 
@@ -211,6 +246,13 @@ impl AgentSidebarToken {
 }
 
 impl SpaceSidebarToken {
+    pub(crate) fn focused_style(&self) -> Option<SidebarTokenStyle> {
+        match self {
+            Self::Styled { focused, .. } => *focused,
+            _ => None,
+        }
+    }
+
     pub(crate) fn index_format(&self) -> Option<&PlaceholderTemplate> {
         match self {
             Self::Styled { format, .. } => format.as_ref(),
@@ -249,6 +291,19 @@ struct RawStyledSidebarToken {
     format: Option<String>,
     #[serde(default)]
     prefix: Option<String>,
+    #[serde(default)]
+    focused: Option<RawFocusedStyle>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFocusedStyle {
+    #[serde(default)]
+    fg: Option<SidebarTokenColor>,
+    #[serde(default)]
+    bold: Option<bool>,
+    #[serde(default)]
+    dim: Option<bool>,
 }
 
 type ParsedSidebarToken = (
@@ -257,6 +312,7 @@ type ParsedSidebarToken = (
     Vec<SidebarTokenRule>,
     Option<PlaceholderTemplate>,
     Option<PlaceholderTemplate>,
+    Option<SidebarTokenStyle>,
 );
 
 #[derive(Deserialize)]
@@ -269,7 +325,7 @@ enum RawSidebarToken {
 impl RawSidebarToken {
     fn parts(self) -> Result<ParsedSidebarToken, String> {
         match self {
-            Self::Plain(token) => Ok((token, None, Vec::new(), None, None)),
+            Self::Plain(token) => Ok((token, None, Vec::new(), None, None, None)),
             Self::Styled(token) => {
                 if token.rules.len() > 16 {
                     return Err("sidebar tokens may contain at most 16 rules".into());
@@ -311,6 +367,11 @@ impl RawSidebarToken {
                     token.rules,
                     format,
                     prefix,
+                    token.focused.map(|focused| SidebarTokenStyle {
+                        fg: focused.fg,
+                        bold: focused.bold,
+                        dim: focused.dim,
+                    }),
                 ))
             }
         }
@@ -346,6 +407,7 @@ fn serialize_styled_token<S>(
     rules: &[SidebarTokenRule],
     format: Option<&PlaceholderTemplate>,
     prefix: Option<&PlaceholderTemplate>,
+    focused: Option<SidebarTokenStyle>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -371,6 +433,9 @@ where
     }
     if let Some(prefix) = prefix {
         map.serialize_entry("prefix", &prefix.template())?;
+    }
+    if let Some(focused) = focused {
+        map.serialize_entry("focused", &SerializedTokenStyle(focused))?;
     }
     map.end()
 }
@@ -423,6 +488,7 @@ impl Serialize for AgentSidebarToken {
                 rules,
                 None,
                 prefix.as_ref(),
+                None,
                 serializer,
             ),
             token => serializer.serialize_str(&agent_token_name(token)),
@@ -441,9 +507,14 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules, _, prefix) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, _, prefix, focused) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
+        if focused.is_some() {
+            return Err(serde::de::Error::custom(
+                "`focused` is only supported on space row tokens",
+            ));
+        }
         let token = parse_sidebar_token(
             value,
             &[
@@ -481,12 +552,14 @@ impl Serialize for SpaceSidebarToken {
                 style,
                 rules,
                 format,
+                focused,
             } => serialize_styled_token(
                 space_token_name(token),
                 *style,
                 rules,
                 format.as_ref(),
                 None,
+                *focused,
                 serializer,
             ),
             token => serializer.serialize_str(&space_token_name(token)),
@@ -505,7 +578,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
     where
         D: serde::Deserializer<'de>,
     {
-        let (value, style, rules, format, _) = RawSidebarToken::deserialize(deserializer)?
+        let (value, style, rules, format, _, focused) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
         let token = parse_sidebar_token(
@@ -525,6 +598,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
             style,
             rules,
             format,
+            focused,
         }))
     }
 }
@@ -1363,5 +1437,49 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
             space.contains("only supported on the `tab_stripped` token"),
             "{space}"
         );
+    }
+
+    #[test]
+    fn focused_style_parses_and_round_trips() {
+        let token = parse_space_row_token(
+            "{token = \"index\", focused = {bold = false, fg = \"#8763c8\"}}",
+        )
+        .unwrap();
+        assert_eq!(
+            token.focused_style(),
+            Some(SidebarTokenStyle {
+                fg: Some(SidebarTokenColor {
+                    r: 0x87,
+                    g: 0x63,
+                    b: 0xc8
+                }),
+                bold: Some(false),
+                dim: None,
+            })
+        );
+        let round: SpacesSidebarConfig = toml::from_str(
+            &toml::to_string(&SpacesSidebarConfig {
+                rows: vec![vec![token.clone()]],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(round.rows[0][0], token);
+        assert_eq!(
+            parse_space_row_token("\"index\"").unwrap().focused_style(),
+            None
+        );
+    }
+
+    #[test]
+    fn focused_style_is_rejected_on_agent_rows_and_with_unknown_keys() {
+        let error =
+            parse_agent_row_token("{token = \"tab\", focused = {bold = true}}").unwrap_err();
+        assert!(
+            error.contains("`focused` is only supported on space row tokens"),
+            "{error}"
+        );
+        assert!(parse_space_row_token("{token = \"index\", focused = {italic = true}}").is_err());
     }
 }

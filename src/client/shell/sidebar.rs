@@ -118,6 +118,11 @@ pub(crate) fn render_collapsed_sidebar(
         let number_style = palette
             .index_color(workspace.focused)
             .map_or(number_style, |color| number_style.fg(color));
+        let number_style = if workspace.focused {
+            number_style.add_modifier(Modifier::BOLD)
+        } else {
+            number_style
+        };
         put_text(
             buffer,
             rect.x,
@@ -934,6 +939,7 @@ pub(in crate::client::shell) fn workspace_rows(
             tokens: &token_values,
             links: &workspace.token_links,
             suppress_git_details: indented,
+            focused: workspace.focused,
         },
     )
 }

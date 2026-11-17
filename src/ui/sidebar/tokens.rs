@@ -246,6 +246,8 @@ pub(crate) struct SpaceTokenContext<'a> {
     /// API-reported links by token name.
     pub(crate) links: &'a [(String, String)],
     pub(crate) suppress_git_details: bool,
+    /// Whether this is the focused space, for tokens' `focused` styles.
+    pub(crate) focused: bool,
 }
 
 pub(crate) fn space_rows(
@@ -309,6 +311,10 @@ pub(crate) fn space_rows(
                         _ => kind
                             .text_value()
                             .map_or(Some(style), |value| configured.style_for_value(value))?,
+                    };
+                    let style = match configured.focused_style() {
+                        Some(focused) if context.focused => style.overlaid(focused),
+                        _ => style,
                     };
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
@@ -492,6 +498,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                     state_text: "working",
                     ahead_behind: None,
                     suppress_git_details: false,
+                    focused: false,
                     tokens: &entry.tokens,
                     links: &entry.links,
                 },
@@ -543,6 +550,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     state_text: "working",
                     ahead_behind: None,
                     suppress_git_details: false,
+                    focused: false,
                     tokens: &entry.tokens,
                     links: &entry.links,
                 },
@@ -757,6 +765,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     tokens: &std::collections::HashMap::new(),
                     links: &[],
                     suppress_git_details: true,
+                    focused: false,
                 },
             ),
             vec![vec![
@@ -785,6 +794,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     tokens: &tokens,
                     links: &[],
                     suppress_git_details: false,
+                    focused: false,
                 },
             )
         };
@@ -826,6 +836,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     tokens: &tokens,
                     links: &[],
                     suppress_git_details: false,
+                    focused: false,
                 },
             ),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Custom(
@@ -858,6 +869,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                     tokens: &std::collections::HashMap::new(),
                     links: &[],
                     suppress_git_details: false,
+                    focused: false,
                 },
             ),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
@@ -907,6 +919,7 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
                     tokens,
                     links,
                     suppress_git_details: false,
+                    focused: false,
                 },
             )
         };
@@ -939,6 +952,7 @@ rows = [["workspace", "$pr", "$plain", "$env"]]
                     tokens: &tokens,
                     links: &[],
                     suppress_git_details: false,
+                    focused: false,
                 },
             )
         };

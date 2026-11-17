@@ -365,9 +365,12 @@ fn emit_token_spans(
             ResolvedTokenKind::Index { text, .. } => spans.push(Span::styled(
                 text.clone(),
                 apply_token_style(
+                    // The number follows the space name's weight: bold on the
+                    // focused space.
                     palette
                         .index
-                        .map_or(secondary_style, |color| Style::default().fg(color)),
+                        .map_or(secondary_style, |color| Style::default().fg(color))
+                        .add_modifier(workspace_style.add_modifier & Modifier::BOLD),
                     token.style,
                 ),
             )),

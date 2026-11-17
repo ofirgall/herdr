@@ -1377,6 +1377,60 @@ fn sidebar_symbol_fg(
         .fg
 }
 
+fn sidebar_symbol_bold(state: &mut ClientShellState, symbol: &str, row: usize) -> bool {
+    let frame = state.compose(106, 30).expect("composed frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    (0..12u16)
+        .map(|x| &buffer[(x, row as u16)])
+        .find(|cell| cell.symbol() == symbol)
+        .unwrap_or_else(|| panic!("no {symbol:?} in row {row}"))
+        .modifier
+        .contains(ratatui::style::Modifier::BOLD)
+}
+
+#[test]
+fn focused_space_number_is_bold_unless_the_token_turns_it_off() {
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+    assert!(!sidebar_symbol_bold(&mut state, "2", 3));
+    state.config.palette.index_focused = Some(ratatui::style::Color::Rgb(0x87, 0x63, 0xc8));
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[[{token = "index", bold = false}, "workspace"]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[[{token = "index", focused = {bold = false}}, "workspace"]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "1", 2));
+
+    let mut state = index_rows_state(labeled_workspaces(&["A", "B"]));
+    state.sidebar_collapsed = true;
+    assert!(sidebar_symbol_bold(&mut state, "1", 0));
+    assert!(!sidebar_symbol_bold(&mut state, "2", 1));
+}
+
+#[test]
+fn focused_token_style_applies_only_on_the_focused_space() {
+    let rows = space_rows_config(
+        r##"[[{token = "index", fg = "#0000ff", focused = {fg = "#00ff00", dim = true}}, "workspace"]]"##,
+    );
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert_eq!(
+        sidebar_symbol_fg(&mut state, "1", 2),
+        ratatui::style::Color::Rgb(0, 0xff, 0)
+    );
+    assert_eq!(
+        sidebar_symbol_fg(&mut state, "2", 3),
+        ratatui::style::Color::Rgb(0, 0, 0xff)
+    );
+    assert!(sidebar_symbol_bold(&mut state, "1", 2));
+
+    let rows = space_rows_config(r#"[["index", {token = "workspace", focused = {bold = false}}]]"#);
+    let mut state = index_rows_state_with(labeled_workspaces(&["A", "B"]), rows);
+    assert!(!sidebar_symbol_bold(&mut state, "A", 2));
+}
+
 #[test]
 fn formatted_index_token_wraps_numbers_and_elides_skipped_spaces() {
     let mut projected = labeled_workspaces(&["A", "B", "C"]);
