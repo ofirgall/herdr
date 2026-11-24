@@ -917,6 +917,8 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
     pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
+    /// Entry the last previous/next sidebar entry keybind moved to.
+    pub(super) sidebar_entry_cursor: Option<super::space_agents::SidebarEntryCursor>,
     /// Pull requests whose checks are listed in the sidebar, by URL.
     pub(super) expanded_pull_requests: HashSet<String>,
     pub(super) workspace_scroll: usize,
@@ -1114,6 +1116,7 @@ impl ClientShellState {
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             space_agent_overrides,
+            sidebar_entry_cursor: None,
             expanded_pull_requests: HashSet::new(),
             workspace_scroll: 0,
             agent_scroll: 0,

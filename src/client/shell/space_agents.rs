@@ -330,7 +330,134 @@ pub(super) fn render_children(
     }
 }
 
+/// One focusable row of the spaces sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum SidebarEntry {
+    Space(String),
+    Agent {
+        workspace_id: String,
+        pane_id: String,
+    },
+}
+
+/// Where the previous/next sidebar entry keybind last moved, and the focus it
+/// moved from. Focusing a space also focuses one of its panes, which may be an
+/// agent shown under it, so the focus alone cannot tell the two rows apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SidebarEntryCursor {
+    entry: SidebarEntry,
+    from_workspace: Option<String>,
+    from_pane: Option<String>,
+}
+
 impl ClientShellState {
+    /// The spaces sidebar's focusable rows in display order: each listed space,
+    /// followed by the agents shown under it when they are expanded.
+    pub(super) fn sidebar_entries(&self, snapshot: &ClientShellSnapshot) -> Vec<SidebarEntry> {
+        // The mobile layout lists spaces without their agents.
+        let agent_index = (self.config.spaces.agents != crate::config::SpaceAgentsMode::Off
+            && !self.mobile_layout_active())
+        .then(|| SpaceAgentIndex::new(snapshot));
+        let mut entries = Vec::new();
+        for entry in self.navigation_workspace_entries(snapshot) {
+            let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+                continue;
+            };
+            let workspace_id = &workspace.workspace_id;
+            entries.push(SidebarEntry::Space(workspace_id.clone()));
+            let Some(index) = &agent_index else {
+                continue;
+            };
+            if self.space_agents_expanded(&self.active_endpoint_id, workspace_id) {
+                entries.extend(index.agents(workspace_id).iter().map(|agent| {
+                    SidebarEntry::Agent {
+                        workspace_id: workspace_id.clone(),
+                        pane_id: agent.pane_id.clone(),
+                    }
+                }));
+            }
+        }
+        entries
+    }
+
+    /// Position of the current row in `entries`: the cursor's entry while
+    /// focus is on it or has not moved from where the cursor left, otherwise
+    /// the focused agent's row, then the focused space's row.
+    fn current_sidebar_entry(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        entries: &[SidebarEntry],
+    ) -> Option<usize> {
+        let focused_workspace = snapshot.focused_workspace_id.as_deref();
+        let focused_pane = snapshot.focused_pane_id.as_deref();
+        if let Some(cursor) = &self.sidebar_entry_cursor {
+            let landed = match &cursor.entry {
+                SidebarEntry::Space(workspace_id) => {
+                    focused_workspace == Some(workspace_id.as_str())
+                }
+                SidebarEntry::Agent { pane_id, .. } => focused_pane == Some(pane_id.as_str()),
+            };
+            // The focus request may still be in flight.
+            let pending = cursor.from_workspace.as_deref() == focused_workspace
+                && cursor.from_pane.as_deref() == focused_pane;
+            if landed || pending {
+                if let Some(position) = entries.iter().position(|entry| *entry == cursor.entry) {
+                    return Some(position);
+                }
+            }
+        }
+        entries
+            .iter()
+            .position(|entry| {
+                matches!(entry, SidebarEntry::Agent { pane_id, .. }
+                    if focused_pane == Some(pane_id.as_str()))
+            })
+            .or_else(|| {
+                entries.iter().position(|entry| {
+                    matches!(entry, SidebarEntry::Space(workspace_id)
+                        if focused_workspace == Some(workspace_id.as_str()))
+                })
+            })
+    }
+
+    /// The focus request for the sidebar entry `delta` rows from the current
+    /// one, wrapping around, and remembers it as the cursor.
+    pub(super) fn step_sidebar_entry(
+        &mut self,
+        delta: isize,
+    ) -> Option<crate::api::schema::Method> {
+        use crate::api::schema::{Method, PaneTarget, WorkspaceTarget};
+        let snapshot = self.snapshot.as_deref()?;
+        let entries = self.sidebar_entries(snapshot);
+        if entries.is_empty() {
+            return None;
+        }
+        let next = match self.current_sidebar_entry(snapshot, &entries) {
+            Some(current) => (current as isize + delta).rem_euclid(entries.len() as isize) as usize,
+            None if delta < 0 => entries.len() - 1,
+            None => 0,
+        };
+        let entry = entries[next].clone();
+        self.sidebar_entry_cursor = Some(SidebarEntryCursor {
+            entry: entry.clone(),
+            from_workspace: snapshot.focused_workspace_id.clone(),
+            from_pane: snapshot.focused_pane_id.clone(),
+        });
+        Some(match entry {
+            SidebarEntry::Space(workspace_id) => {
+                self.reveal_workspace(&workspace_id);
+                Method::WorkspaceFocus(WorkspaceTarget { workspace_id })
+            }
+            SidebarEntry::Agent {
+                workspace_id,
+                pane_id,
+            } => {
+                self.reveal_workspace(&workspace_id);
+                Method::PaneFocus(PaneTarget { pane_id })
+            }
+        })
+    }
+
     /// Whether `workspace_id`'s agent children are shown on `endpoint_id`.
     pub(super) fn space_agents_expanded(
         &self,

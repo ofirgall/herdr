@@ -933,3 +933,132 @@ fn tree_glyphs_are_fitted_to_their_columns() {
     assert_eq!(glyphs.last, "╰─");
     assert_eq!(glyphs.rail, " ");
 }
+
+/// Presses a previous/next sidebar entry binding and names the focus request
+/// it sends: `space:<workspace>` or `agent:<pane>`.
+fn step_sidebar(state: &mut ClientShellState, next: bool) -> String {
+    let action = if next {
+        crate::input::KeybindAction::NextSidebarEntry
+    } else {
+        crate::input::KeybindAction::PreviousSidebarEntry
+    };
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        [ClientShellAction::Endpoint { request, .. }] => match &request.method {
+            crate::api::schema::Method::WorkspaceFocus(target) => {
+                format!("space:{}", target.workspace_id)
+            }
+            crate::api::schema::Method::PaneFocus(target) => format!("agent:{}", target.pane_id),
+            method => panic!("unexpected method {method:?}"),
+        },
+        actions => panic!("expected one focus request, got {actions:?}"),
+    }
+}
+
+/// Applies the focus a step requested, as the server would. Focusing ws_1
+/// lands on pane_a, one of the agents shown under it.
+fn land(state: &mut ClientShellState, target: &str) {
+    let mut snapshot = state.snapshot.as_deref().expect("snapshot").clone();
+    let (workspace, pane) = match target {
+        "space:ws_1" | "agent:pane_a" => ("ws_1", "pane_a"),
+        "agent:pane_b" => ("ws_1", "pane_b"),
+        "agent:pane_c" => ("ws_1", "pane_c"),
+        "space:ws_2" | "agent:pane_d" => ("ws_2", "pane_d"),
+        "space:ws_3" => ("ws_3", "pane_e"),
+        other => panic!("unknown target {other}"),
+    };
+    snapshot.focused_workspace_id = Some(workspace.into());
+    snapshot.focused_pane_id = Some(pane.into());
+    state.set_snapshot(Box::new(snapshot));
+}
+
+fn walk_sidebar(state: &mut ClientShellState, next: bool, steps: usize) -> Vec<String> {
+    (0..steps)
+        .map(|_| {
+            let target = step_sidebar(state, next);
+            land(state, &target);
+            target
+        })
+        .collect()
+}
+
+#[test]
+fn next_sidebar_entry_walks_spaces_and_their_shown_agents_in_order() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    // From the focused agent's row; agents follow their space in tab order.
+    assert_eq!(
+        walk_sidebar(&mut state, true, 8),
+        [
+            "agent:pane_c",
+            "agent:pane_b",
+            "space:ws_2",
+            "agent:pane_d",
+            "space:ws_3",
+            "space:ws_1",
+            // Focusing ws_1 landed on pane_a, but the walk continues from the
+            // space's row, so pane_a is not skipped.
+            "agent:pane_a",
+            "agent:pane_c",
+        ]
+    );
+}
+
+#[test]
+fn previous_sidebar_entry_moves_past_a_space_whose_focus_lands_on_its_agent() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    assert_eq!(
+        walk_sidebar(&mut state, false, 4),
+        ["space:ws_1", "space:ws_3", "agent:pane_d", "space:ws_2"]
+    );
+}
+
+#[test]
+fn sidebar_entry_steps_advance_before_the_focus_arrives() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    assert_eq!(step_sidebar(&mut state, true), "agent:pane_c");
+    assert_eq!(step_sidebar(&mut state, true), "agent:pane_b");
+    assert_eq!(step_sidebar(&mut state, true), "space:ws_2");
+}
+
+#[test]
+fn sidebar_entries_skip_hidden_agents_and_restart_from_focus_after_a_click() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    // Collapsed: only spaces, so the walk starts from the focused space.
+    let mut state = state_with(
+        config_with_agents(SpaceAgentsMode::Collapsed),
+        snapshot.clone(),
+    );
+    assert_eq!(
+        walk_sidebar(&mut state, true, 3),
+        ["space:ws_2", "space:ws_3", "space:ws_1"]
+    );
+    // Expanding one space shows only its agents.
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_2");
+    assert_eq!(
+        walk_sidebar(&mut state, true, 3),
+        ["space:ws_2", "agent:pane_d", "space:ws_3"]
+    );
+
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    assert_eq!(walk_sidebar(&mut state, true, 1), ["agent:pane_c"]);
+    // A click elsewhere drops the cursor; the walk restarts from the focus.
+    state.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        &mut ClientShellInput::default(),
+    );
+    land(&mut state, "agent:pane_d");
+    assert_eq!(step_sidebar(&mut state, true), "space:ws_3");
+}
