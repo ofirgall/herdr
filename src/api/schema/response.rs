@@ -62,6 +62,9 @@ pub enum ResponseResult {
     WorkspaceList {
         workspaces: Vec<WorkspaceInfo>,
     },
+    PullRequestList {
+        repos: Vec<super::pull_requests::PullRequestRepoInfo>,
+    },
     WorktreeList {
         source: WorktreeSourceInfo,
         worktrees: Vec<WorktreeInfo>,

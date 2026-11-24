@@ -177,6 +177,8 @@ pub(crate) struct PullRequestPoll {
 /// One watched repository's latest poll.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PullRequestRepoState {
+    /// The GitHub repository, `owner/name`, once its checkout resolved.
+    pub(crate) repo: Option<String>,
     /// Heading: the configured label, else the repository name, else the path.
     pub(crate) label: String,
     /// The repository's pull request list on GitHub, once resolved.
@@ -197,6 +199,7 @@ impl PullRequestRepoState {
                 .unwrap_or_else(|| repo.path.clone())
         });
         Self {
+            repo: None,
             label,
             url: None,
             loading: true,
@@ -375,7 +378,30 @@ impl App {
                 changed = true;
             }
         }
+        if changed {
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::PullRequestsUpdated,
+                data: crate::api::schema::EventData::PullRequestsUpdated {
+                    repos: self.pull_request_repo_infos(),
+                },
+            });
+        }
         changed
+    }
+}
+
+#[cfg(test)]
+impl App {
+    pub(crate) fn test_pending_pull_request_repo(repo: &WatchedRepoConfig) -> PullRequestRepoState {
+        PullRequestRepoState::pending(repo)
+    }
+
+    pub(crate) fn test_pull_request_generation(&self) -> u64 {
+        self.pull_request_poller.generation
+    }
+
+    pub(crate) fn pull_request_poller_mark_in_flight_for_test(&mut self) {
+        self.pull_request_poller.in_flight = true;
     }
 }
 
@@ -388,6 +414,7 @@ fn merge_poll(
         return fetched;
     }
     PullRequestRepoState {
+        repo: fetched.repo.or_else(|| current.repo.clone()),
         label: fetched.label,
         url: fetched.url.or_else(|| current.url.clone()),
         loading: false,

@@ -187,6 +187,7 @@ pub(super) fn fetch_pull_requests(
                     state.label = found.name.clone();
                 }
                 state.url = Some(format!("https://github.com/{}/pulls", found.slug()));
+                state.repo = Some(found.slug());
                 resolved.push((index, found));
             }
             Err(error) => states[index].fail(error),

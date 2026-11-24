@@ -11,6 +11,7 @@ pub(super) fn run_api_command(args: &[String]) -> std::io::Result<i32> {
     match subcommand {
         "schema" => api_schema(&args[1..]),
         "snapshot" => api_snapshot(&args[1..]),
+        "pull-requests" => api_pull_requests(&args[1..]),
         "help" | "--help" | "-h" => {
             print_api_help();
             Ok(0)
@@ -65,6 +66,18 @@ fn api_snapshot(args: &[String]) -> std::io::Result<i32> {
     })?)
 }
 
+fn api_pull_requests(args: &[String]) -> std::io::Result<i32> {
+    if !args.is_empty() {
+        eprintln!("usage: herdr api pull-requests");
+        return Ok(2);
+    }
+
+    super::print_response(&super::send_request(&Request {
+        id: "cli:api:pull_requests".into(),
+        method: Method::PullRequestList(EmptyParams::default()),
+    })?)
+}
+
 fn write_schema_file(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, API_SCHEMA_JSON)
 }
@@ -99,6 +112,7 @@ fn schema_summary_text() -> std::io::Result<String> {
 fn print_api_help() {
     eprintln!("herdr api commands:");
     eprintln!("  herdr api snapshot");
+    eprintln!("  herdr api pull-requests");
     eprintln!("  herdr api schema [--json | --output PATH]");
 }
 

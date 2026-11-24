@@ -101,6 +101,7 @@ Raw socket method names use dot notation:
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.set_skip_index`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
+| Pull requests | `pull_request.list` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
@@ -127,6 +128,18 @@ records. Full repo worktree discovery remains `worktree.list`.
 
 From the CLI, `herdr api snapshot` prints the live `session.snapshot` response
 as JSON for clients and agents that want a simple bootstrap command.
+
+`pull_request.list` returns the server's `[pull_requests]` poll: one record per
+watched repository, in config order, with its GitHub `repo` (`owner/name`),
+`label`, `url`, `loading` and `error`, and its `pull_requests`. Each pull
+request carries `number`, `title`, `url`, its head `branch`, `draft`, `merged`,
+`conflict` and `queued` flags, `review` (`none`, `approved`,
+`changes_requested`, `review_required`), `checks` (`none`, `pass`, `fail`,
+`pending`), `human_threads`, `bot_threads`, `check_counts`, and the failing then
+running `check_runs`. The `pull_requests.updated` event carries the same `repos`
+whenever a poll changes them, and plugins can hook it. Reading these costs no
+GitHub requests, so plugins and scripts should use them instead of polling
+GitHub. `herdr api pull-requests` prints the list from the CLI.
 
 Pane control methods use public pane ids such as `w1:p1`. Methods whose
 schema makes `pane_id` optional use the server's active focused pane when it is
@@ -841,6 +854,8 @@ updated `PaneLayoutSnapshot` for one tab. Clients maintaining a cache with
 an authoritative read; a delayed payload may predate their latest snapshot.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the opened `workspace` and created `worktree`. `worktree.opened` includes the target `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
+
+Pull request event subscriptions include `pull_requests.updated`. It fires when a `[pull_requests]` poll changes what `pull_request.list` returns and carries the new `repos`. Plugins can hook it with `[[events]] on = "pull_requests.updated"`; the hook runs without a workspace or pane context.
 
 Use `events.subscribe` for lifecycle events. Dedicated wait helpers are documented separately when a one-shot wait is supported.
 
