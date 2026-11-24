@@ -210,8 +210,8 @@ pub(super) fn render_agent_toggle(
 
 /// Draws the children of one space inside `area` (the rows directly below the
 /// space) and records one hit per child. `space_indent` is the column where the
-/// space's first-row content starts. A focused child's highlight starts one
-/// column before its status, leaving the tree connectors on the plain sidebar.
+/// space's first-row content starts. A focused child's highlight starts at its
+/// own `├─`/`└─` connector, leaving the outer worktree rail on the plain sidebar.
 /// `tree_rail` continues the group's `│` connector through the children of a
 /// space that has worktree children below it, so the tree stays unbroken.
 /// Each child hangs off a `├─`/`└─` connector under the space's status icon;
@@ -239,9 +239,7 @@ pub(super) fn render_children(
         let rect = Rect::new(area.x, y, area.width, height);
         hits.space_agents.push((rect, child.pane_id.clone()));
         if child.focused {
-            let start = (space_indent + CHILD_INDENT)
-                .saturating_sub(1)
-                .min(area.width);
+            let start = space_indent.min(area.width);
             buffer.set_style(
                 Rect::new(area.x + start, y, area.width - start, height),
                 Style::default().bg(palette.active_row_bg),

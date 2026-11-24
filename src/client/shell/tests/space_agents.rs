@@ -570,7 +570,7 @@ fn children_of_the_last_linked_worktree_draw_no_tree_rail() {
 }
 
 #[test]
-fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
+fn focused_child_highlight_starts_at_its_tree_connector_in_a_tree() {
     let mut snapshot = agents_snapshot();
     for (index, linked) in [(0, false), (1, true), (2, true)] {
         snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
@@ -592,20 +592,20 @@ fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Tree rail at column 1, connector at 4, status icon at column 7: the
-    // highlight starts at 6.
+    // Tree rail at column 1, connector at 4: the highlight starts at the
+    // connector.
     assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "│");
     assert_eq!(buffer[(child.x + 4, child.y)].symbol(), "└");
-    for x in child.x..child.x + 6 {
+    for x in child.x..child.x + 4 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 6..child.right() {
+    for x in child.x + 4..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
 
 #[test]
-fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
+fn focused_child_highlight_starts_at_its_tree_connector_at_top_level() {
     let mut snapshot = agents_snapshot();
     snapshot.agents[0].focused = true;
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
@@ -619,13 +619,13 @@ fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // pane_b ("api") is the last child: connector at column 1, status icon at
-    // column 4, so the highlight starts at 3.
+    // pane_b ("api") is the last child: the highlight starts at its connector
+    // in column 1.
     assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "└");
-    for x in child.x..child.x + 3 {
+    for x in child.x..child.x + 1 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 3..child.right() {
+    for x in child.x + 1..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
