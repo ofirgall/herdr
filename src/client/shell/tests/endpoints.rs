@@ -2943,6 +2943,87 @@ fn focus_agent_index_uses_online_aggregate_rows() {
 }
 
 #[test]
+fn multi_machine_agent_keys_keep_the_aggregate_order_in_tree_numbering_mode() {
+    use crate::api::schema::AgentStatus;
+
+    let (mut state, endpoint_id) = state_with_remote();
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = crate::config::SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.enabled = false;
+    state.config = ClientShellConfig::from_config(&config);
+    assert!(state.config.tree_agent_numbering());
+    assert!(!state.tree_agent_keys_active());
+    state
+        .endpoints
+        .iter_mut()
+        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+        .expect("remote endpoint")
+        .snapshot
+        .as_mut()
+        .expect("remote snapshot")
+        .agents = vec![agent("remote agent", AgentStatus::Working, 2)];
+    let focus_agent =
+        |index| crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(index));
+    // The aggregate list has the remote agent; the (agent-less) local tree has
+    // none, so a tree-order lookup would find no target.
+    assert!(state.indexed_navigation_target_exists(&focus_agent(0)));
+}
+
+#[test]
+fn aggregate_agent_rows_mark_focus_only_on_the_active_endpoint() {
+    use crate::api::schema::AgentStatus;
+
+    let (mut state, endpoint_id) = state_with_remote();
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = toml::from_str::<crate::config::AgentsSidebarConfig>(
+        "rows = [[\"agent_index_focused\", \"agent\"]]",
+    )
+    .unwrap()
+    .rows;
+    state.config = ClientShellConfig::from_config(&config);
+    // Both agents are focused inside their own snapshots; only the local one
+    // is on the active endpoint.
+    state.snapshot = state.snapshot.take().map(|snapshot| {
+        let mut snapshot = (*snapshot).clone();
+        snapshot.agents = vec![agent("local agent", AgentStatus::Working, 3)];
+        Box::new(snapshot)
+    });
+    for endpoint in &mut state.endpoints {
+        if endpoint.endpoint_id.is_local() {
+            endpoint.snapshot = state.snapshot.clone();
+        }
+    }
+    state
+        .endpoints
+        .iter_mut()
+        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+        .expect("remote endpoint")
+        .snapshot
+        .as_mut()
+        .expect("remote snapshot")
+        .agents = vec![agent("remote agent", AgentStatus::Working, 2)];
+
+    let frame = state.compose(100, 28).expect("aggregate sidebar");
+    let rows = frame_rows(&frame)
+        .into_iter()
+        .map(|row| row.chars().take(30).collect::<String>())
+        .collect::<Vec<_>>();
+    let local = rows
+        .iter()
+        .find(|row| row.contains("local agent"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    let remote = rows
+        .iter()
+        .find(|row| row.contains("remote agent"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    assert!(
+        local.trim_start().starts_with(|c: char| c.is_ascii_digit()),
+        "{local:?}"
+    );
+    assert!(!remote.contains(|c: char| c.is_ascii_digit()), "{remote:?}");
+}
+
+#[test]
 fn workspace_drag_rejects_foreign_endpoint_slots() {
     let (mut state, endpoint_id) = state_with_remote();
     state.compose(100, 28).expect("aggregate sidebar");

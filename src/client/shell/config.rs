@@ -111,6 +111,14 @@ impl ClientShellState {
 }
 
 impl ClientShellConfig {
+    /// Tree numbering mode: agent children are the only agent list on screen
+    /// (the agents section is off), so they are numbered down the whole space
+    /// tree. Applies to the single-machine sidebar only; the multi-machine
+    /// render and action paths never consult it.
+    pub(crate) fn tree_agent_numbering(&self) -> bool {
+        self.spaces.agents != crate::config::SpaceAgentsMode::Off && !self.agents.enabled
+    }
+
     pub(crate) fn from_config(config: &Config) -> Self {
         let theme_runtime = crate::app::client_theme_runtime_from_config(config);
         let (spaces, agents) = Self::sidebar_sections_from(&config.ui.sidebar);

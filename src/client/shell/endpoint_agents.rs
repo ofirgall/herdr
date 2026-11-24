@@ -144,14 +144,14 @@ fn agent_rows(
     .into_iter()
     .enumerate()
     .filter_map(|(agent_index, row)| {
-        let mut agent = super::agent_sidebar::agent_row(
+        let agent = super::agent_sidebar::agent_row(
             row.endpoint.snapshot,
             &row.agent.pane_id,
             config,
             Some(row.endpoint.label),
             agent_index,
+            row.endpoint.endpoint_id == active_endpoint_id,
         )?;
-        agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
         Some(EndpointAgentRow {
             endpoint_id: row.endpoint.endpoint_id.clone(),
             machine_label: row.endpoint.label.to_owned(),

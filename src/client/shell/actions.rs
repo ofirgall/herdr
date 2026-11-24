@@ -176,6 +176,20 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                // In tree numbering mode the server's own agent order is not
+                // the one on screen, so an agent key with no target does
+                // nothing rather than being forwarded to it.
+                if self.snapshot.is_some()
+                    && self.tree_agent_keys_active()
+                    && matches!(
+                        action,
+                        crate::input::KeybindAction::FocusAgent(_)
+                            | crate::input::KeybindAction::NextAgent
+                            | crate::input::KeybindAction::PreviousAgent
+                    )
+                {
+                    return;
+                }
                 outcome.actions.push(ClientShellAction::Keybind(action));
             }
             crate::input::KeybindMatch::Command(command) => {
@@ -891,6 +905,11 @@ impl ClientShellState {
 
         match action {
             KeybindAction::FocusAgent(index) => {
+                if self.tree_agent_keys_active() {
+                    let pane_id = self.tree_agent_targets(snapshot).get(index)?.clone();
+                    self.reveal_agent_space(&pane_id);
+                    return Some(Method::PaneFocus(PaneTarget { pane_id }));
+                }
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
@@ -900,10 +919,15 @@ impl ClientShellState {
                 }))
             }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
-                    snapshot,
-                    self.config.agent_panel_sort,
-                );
+                let tree_keys = self.tree_agent_keys_active();
+                let agents = if tree_keys {
+                    self.tree_agent_targets(snapshot)
+                } else {
+                    super::agent_sidebar::ordered_agent_pane_ids(
+                        snapshot,
+                        self.config.agent_panel_sort,
+                    )
+                };
                 if agents.is_empty() {
                     return None;
                 }
@@ -920,6 +944,12 @@ impl ClientShellState {
                     _ => unreachable!("relative agent action"),
                 };
                 let pane_id = agents[next].clone();
+                if tree_keys {
+                    // The agents section is hidden: reveal the child row in the
+                    // space list instead of scrolling it.
+                    self.reveal_agent_space(&pane_id);
+                    return Some(Method::PaneFocus(PaneTarget { pane_id }));
+                }
                 if !self
                     .hits
                     .agents

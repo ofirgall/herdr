@@ -994,6 +994,13 @@ impl ClientShellState {
                         .nth(*index)
                 })
                 .is_some(),
+            KeybindMatch::Action(KeybindAction::FocusAgent(index))
+                if self.tree_agent_keys_active() =>
+            {
+                self.snapshot
+                    .as_deref()
+                    .is_some_and(|snapshot| self.tree_agent_targets(snapshot).len() > *index)
+            }
             KeybindMatch::Action(KeybindAction::FocusAgent(index)) => {
                 super::aggregate_navigation::online_agent_targets(
                     &self.endpoints,

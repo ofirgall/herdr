@@ -747,6 +747,48 @@ fn focused_agent_tab_names_use_tab_focused_and_bold() {
 }
 
 #[test]
+fn focused_style_on_agent_index_applies_only_to_the_focused_agents_row() {
+    use ratatui::style::Color;
+    let base = Color::Rgb(0x71, 0x4f, 0xb0);
+    let bright = Color::Rgb(0xc6, 0xa6, 0xff);
+    let token =
+        r##"{token = "agent_index", fg = "#714fb0", focused = {fg = "#c6a6ff", bold = true}}"##;
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.rows = toml::from_str::<crate::config::AgentsSidebarConfig>(&format!(
+        "rows = [[{token}, \"tab\"]]"
+    ))
+    .unwrap()
+    .rows;
+    config.ui.sidebar.spaces.agent_rows = toml::from_str::<crate::config::SpacesSidebarConfig>(
+        &format!("agent_rows = [[{token}, \"tab\"]]"),
+    )
+    .unwrap()
+    .agent_rows;
+    let mut snapshot = snapshot();
+    snapshot.tabs = vec![
+        tab("tab_1", "ws_1", 1, "alpha"),
+        tab("tab_2", "ws_1", 2, "bravo"),
+    ];
+    snapshot.agents = vec![
+        agent("pane_1", "ws_1", "tab_1", AgentStatus::Idle),
+        agent("pane_2", "ws_1", "tab_2", AgentStatus::Idle),
+    ];
+    snapshot.agents[0].focused = true;
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let frame = state.compose(106, 30).expect("composed frame");
+    // Each agent shows as a space child and as an agents panel row.
+    assert_eq!(
+        sidebar_word_styles(&frame, "1 alpha"),
+        vec![(bright, true); 2]
+    );
+    assert_eq!(
+        sidebar_word_styles(&frame, "2 bravo"),
+        vec![(base, false); 2]
+    );
+}
+
+#[test]
 fn tab_stripped_hides_the_tab_position_in_panel_and_space_children() {
     let tabs = ["1| web", "2| zsh"];
     let (spaces, panel) = sidebar_text_with_tab_tokens("tab_stripped", tabs);
@@ -1186,4 +1228,566 @@ fn move_sidebar_entry_moves_an_agent_tab_past_the_next_agent_tab() {
     assert_eq!(move_sidebar(&mut focused_on("pane_b"), true), None);
     // ws_2 has one agent tab, so its agent has nothing to pass.
     assert_eq!(move_sidebar(&mut focused_on("pane_d"), true), None);
+}
+
+fn tree_config(spaces: SpaceAgentsMode, agents_enabled: bool) -> ClientShellConfig {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = spaces;
+    config.ui.sidebar.agents.enabled = agents_enabled;
+    ClientShellConfig::from_config(&config)
+}
+
+fn tree_config_with_rows(rows: &str, agents_enabled: bool) -> ClientShellConfig {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.enabled = agents_enabled;
+    config.ui.sidebar.spaces.agent_rows =
+        toml::from_str::<crate::config::SpacesSidebarConfig>(&format!("agent_rows = {rows}"))
+            .unwrap()
+            .agent_rows;
+    ClientShellConfig::from_config(&config)
+}
+
+/// The tree order the agent keys will use.
+fn tree_order(state: &ClientShellState) -> Vec<String> {
+    state.tree_agent_targets(state.snapshot.as_deref().expect("snapshot"))
+}
+
+#[test]
+fn tree_numbering_mode_needs_children_on_and_the_agents_section_off() {
+    for (spaces, agents_enabled, expected) in [
+        (SpaceAgentsMode::Expanded, false, true),
+        (SpaceAgentsMode::Collapsed, false, true),
+        (SpaceAgentsMode::Expanded, true, false),
+        (SpaceAgentsMode::Off, false, false),
+        (SpaceAgentsMode::Off, true, false),
+    ] {
+        assert_eq!(
+            tree_config(spaces, agents_enabled).tree_agent_numbering(),
+            expected,
+            "spaces {spaces:?}, agents enabled {agents_enabled}"
+        );
+    }
+}
+
+#[test]
+fn tree_order_continues_across_spaces_and_ignores_agent_view_and_sort() {
+    let mut snapshot = agents_snapshot();
+    snapshot.agent_view_label = Some("view".into());
+    snapshot.agent_order = vec!["pane_d".into(), "pane_b".into()];
+    let state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    assert_eq!(tree_order(&state), ["pane_a", "pane_c", "pane_b", "pane_d"]);
+}
+
+#[test]
+fn tree_order_skips_spaces_with_collapsed_children() {
+    let mut state = state_with(
+        tree_config(SpaceAgentsMode::Expanded, false),
+        agents_snapshot(),
+    );
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_1");
+    assert_eq!(tree_order(&state), ["pane_d"]);
+
+    // In collapsed mode only spaces the user expanded contribute.
+    let mut state = state_with(
+        tree_config(SpaceAgentsMode::Collapsed, false),
+        agents_snapshot(),
+    );
+    assert!(tree_order(&state).is_empty());
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_2");
+    assert_eq!(tree_order(&state), ["pane_d"]);
+}
+
+#[test]
+fn tree_order_skips_agents_of_a_collapsed_worktree_group() {
+    let mut snapshot = agents_snapshot();
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    snapshot.workspaces[1].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    let mut state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    assert_eq!(tree_order(&state), ["pane_a", "pane_c", "pane_b", "pane_d"]);
+    state.collapsed_groups.insert("repo".into());
+    assert_eq!(tree_order(&state), ["pane_a", "pane_c", "pane_b"]);
+
+    // On mobile the layout lists every group expanded, but the order still
+    // follows the desktop tree.
+    state.compose(44, 30).expect("mobile frame");
+    assert!(state.mobile_layout_active());
+    assert_eq!(tree_order(&state), ["pane_a", "pane_c", "pane_b"]);
+}
+
+#[test]
+fn tree_order_counts_agents_of_a_space_that_skips_its_jump_number() {
+    let mut snapshot = agents_snapshot();
+    snapshot.workspaces[0].skip_index = true;
+    let state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    assert_eq!(tree_order(&state), ["pane_a", "pane_c", "pane_b", "pane_d"]);
+}
+
+/// Two spaces: ws_1 with two agents (pane_a, pane_c) and ws_2 with one.
+fn two_space_numbering_snapshot() -> ClientShellSnapshot {
+    let mut snapshot = agents_snapshot();
+    snapshot.agents.remove(0);
+    snapshot
+}
+
+fn child_rows_with(rows: &[String], needle: &str) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.contains(needle))
+        .map(|row| {
+            row.trim()
+                .trim_start_matches(['├', '└', '─', ' '])
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn tree_numbering_continues_child_indexes_across_spaces() {
+    let mut state = state_with(
+        tree_config_with_rows("[[\"agent_index\", \"tab\"]]", false),
+        two_space_numbering_snapshot(),
+    );
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    let docs = row_index(&rows, "docs");
+    assert!(rows[space + 1].contains("1 web"), "{rows:#?}");
+    assert!(rows[space + 2].contains("2 web"), "{rows:#?}");
+    assert!(rows[docs + 1].contains("3 notes"), "{rows:#?}");
+
+    // Collapsing the first space renumbers the next one from 1.
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_1");
+    let rows = compose_rows(&mut state);
+    assert!(
+        child_rows_with(&rows, "notes")
+            .iter()
+            .any(|row| row.starts_with("1 notes")),
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn child_indexes_stay_per_space_outside_tree_numbering_mode() {
+    // The agents section is enabled, so children keep per-space numbers.
+    let mut state = state_with(
+        tree_config_with_rows("[[\"agent_index\", \"tab\"]]", true),
+        two_space_numbering_snapshot(),
+    );
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    let docs = row_index(&rows, "docs");
+    assert!(rows[space + 1].contains("1 web"), "{rows:#?}");
+    assert!(rows[space + 2].contains("2 web"), "{rows:#?}");
+    assert!(rows[docs + 1].contains("1 notes"), "{rows:#?}");
+}
+
+#[test]
+fn agent_index_focused_marks_only_the_focused_child() {
+    let mut snapshot = two_space_numbering_snapshot();
+    snapshot.agents[2].focused = true; // pane_d, the third child
+    let mut state = state_with(
+        tree_config_with_rows("[[\"agent_index_focused\", \"tab\"]]", false),
+        snapshot,
+    );
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    let docs = row_index(&rows, "docs");
+    assert!(rows[docs + 1].contains("3 notes"), "{rows:#?}");
+    for row in &rows[space + 1..space + 3] {
+        assert!(!row.contains(|c: char| c.is_ascii_digit()), "{rows:#?}");
+        assert!(row.contains("web"), "{rows:#?}");
+    }
+}
+
+/// Presses an agent key and names the pane it asks to focus, or `None` when
+/// the key sends nothing.
+fn press_agent_key(
+    state: &mut ClientShellState,
+    action: crate::input::KeybindAction,
+) -> Option<String> {
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        [] => None,
+        [ClientShellAction::Endpoint { request, .. }] => match &request.method {
+            crate::api::schema::Method::PaneFocus(target) => Some(target.pane_id.clone()),
+            method => panic!("unexpected method {method:?}"),
+        },
+        actions => panic!("expected at most one focus request, got {actions:?}"),
+    }
+}
+
+fn focus_pane(state: &mut ClientShellState, workspace: &str, pane: &str) {
+    let mut snapshot = state.snapshot.as_deref().expect("snapshot").clone();
+    snapshot.focused_workspace_id = Some(workspace.into());
+    snapshot.focused_pane_id = Some(pane.into());
+    for candidate in &mut snapshot.workspaces {
+        candidate.focused = candidate.workspace_id == workspace;
+    }
+    for candidate in &mut snapshot.agents {
+        candidate.focused = candidate.pane_id == pane;
+    }
+    state.set_snapshot(Box::new(snapshot));
+}
+
+fn tree_state() -> ClientShellState {
+    state_with(
+        tree_config(SpaceAgentsMode::Expanded, false),
+        agents_snapshot(),
+    )
+}
+
+#[test]
+fn focus_agent_by_number_follows_tree_order_across_spaces_and_tabs() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut state = tree_state();
+    // Tree order is pane_a, pane_c, pane_b (another tab), pane_d (another space).
+    let picked = (0..4)
+        .map(|index| press_agent_key(&mut state, FocusAgent(index)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        picked,
+        [
+            Some("pane_a".to_owned()),
+            Some("pane_c".to_owned()),
+            Some("pane_b".to_owned()),
+            Some("pane_d".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn focus_agent_out_of_range_does_nothing() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut state = tree_state();
+    assert_eq!(press_agent_key(&mut state, FocusAgent(4)), None);
+    assert_eq!(press_agent_key(&mut state, FocusAgent(9)), None);
+}
+
+#[test]
+fn collapsed_children_are_not_agent_key_targets() {
+    use crate::input::KeybindAction::{FocusAgent, NextAgent, PreviousAgent};
+    let mut state = tree_state();
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_1");
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(0)),
+        Some("pane_d".into())
+    );
+    assert_eq!(press_agent_key(&mut state, FocusAgent(1)), None);
+    // From a shell pane next/previous reach only the shown agent.
+    assert_eq!(
+        press_agent_key(&mut state, NextAgent),
+        Some("pane_d".into())
+    );
+    assert_eq!(
+        press_agent_key(&mut state, PreviousAgent),
+        Some("pane_d".into())
+    );
+}
+
+#[test]
+fn next_and_previous_agent_wrap_and_skip_spaces_without_agents() {
+    use crate::input::KeybindAction::{NextAgent, PreviousAgent};
+    // ws_3 has no agents; add ws_4 with one so ws_3 sits between two agents.
+    let mut snapshot = agents_snapshot();
+    snapshot.workspaces.push(workspace("ws_4", 4, "last"));
+    snapshot.tabs.push(tab("tab_e", "ws_4", 1, "tail"));
+    snapshot
+        .agents
+        .push(agent("pane_e", "ws_4", "tab_e", AgentStatus::Idle));
+    let mut state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    assert_eq!(
+        tree_order(&state),
+        ["pane_a", "pane_c", "pane_b", "pane_d", "pane_e"]
+    );
+
+    // Forward, skipping empty ws_3 and wrapping past the end.
+    focus_pane(&mut state, "ws_2", "pane_d");
+    assert_eq!(
+        press_agent_key(&mut state, NextAgent),
+        Some("pane_e".into())
+    );
+    focus_pane(&mut state, "ws_4", "pane_e");
+    assert_eq!(
+        press_agent_key(&mut state, NextAgent),
+        Some("pane_a".into())
+    );
+    // Backward, wrapping past the start and skipping empty ws_3.
+    focus_pane(&mut state, "ws_1", "pane_a");
+    assert_eq!(
+        press_agent_key(&mut state, PreviousAgent),
+        Some("pane_e".into())
+    );
+    focus_pane(&mut state, "ws_4", "pane_e");
+    assert_eq!(
+        press_agent_key(&mut state, PreviousAgent),
+        Some("pane_d".into())
+    );
+}
+
+#[test]
+fn agent_keys_from_a_shell_pane_go_to_the_first_or_last_target() {
+    use crate::input::KeybindAction::{NextAgent, PreviousAgent};
+    let mut state = tree_state();
+    // The snapshot focuses pane_1, which is not an agent.
+    assert_eq!(
+        press_agent_key(&mut state, NextAgent),
+        Some("pane_a".into())
+    );
+    assert_eq!(
+        press_agent_key(&mut state, PreviousAgent),
+        Some("pane_d".into())
+    );
+}
+
+#[test]
+fn agent_keys_do_nothing_without_agents() {
+    use crate::input::KeybindAction::{FocusAgent, NextAgent, PreviousAgent};
+    let mut snapshot = agents_snapshot();
+    snapshot.agents.clear();
+    let mut state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    for action in [FocusAgent(0), NextAgent, PreviousAgent] {
+        assert_eq!(press_agent_key(&mut state, action), None);
+    }
+}
+
+#[test]
+fn agent_keys_ignore_the_agent_view_and_priority_sort() {
+    use crate::input::KeybindAction::{FocusAgent, NextAgent};
+    let mut snapshot = agents_snapshot();
+    // The view hides every agent but pane_d and the section order is reversed.
+    snapshot.agent_view_label = Some("view".into());
+    snapshot.agent_order = vec!["pane_d".into()];
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.enabled = false;
+    let mut config = ClientShellConfig::from_config(&config);
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    let mut state = state_with(config, snapshot);
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(0)),
+        Some("pane_a".into())
+    );
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(2)),
+        Some("pane_b".into())
+    );
+    assert_eq!(
+        press_agent_key(&mut state, NextAgent),
+        Some("pane_a".into())
+    );
+}
+
+#[test]
+fn agent_keys_on_the_mobile_layout_follow_the_desktop_tree_order() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut snapshot = agents_snapshot();
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    snapshot.workspaces[1].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    let mut state = state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot);
+    state.collapsed_groups.insert("repo".into());
+    state.compose(44, 30).expect("mobile frame");
+    assert!(state.mobile_layout_active());
+    // The mobile layout lists every group expanded, but the collapsed worktree
+    // group still hides pane_d from the keys, as on desktop.
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(2)),
+        Some("pane_b".into())
+    );
+    assert_eq!(press_agent_key(&mut state, FocusAgent(3)), None);
+}
+
+#[test]
+fn agent_keys_are_unchanged_when_the_agents_section_is_enabled() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut snapshot = agents_snapshot();
+    snapshot.agent_order = vec!["pane_d".into(), "pane_b".into()];
+    let mut state = state_with(tree_config(SpaceAgentsMode::Expanded, true), snapshot);
+    assert!(!state.tree_agent_keys_active());
+    // The agents section order (snapshot order, here) decides, not the tree.
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(0)),
+        Some("pane_b".into())
+    );
+}
+
+/// Eight spaces, each with two agents, in a short frame so the list overflows.
+fn overflowing_tree_state() -> ClientShellState {
+    let mut snapshot = agents_snapshot();
+    snapshot.agents.clear();
+    snapshot.workspaces.truncate(1);
+    snapshot.tabs.truncate(1);
+    snapshot
+        .agents
+        .push(agent("pane_a", "ws_1", "tab_a", AgentStatus::Idle));
+    for number in 2..=8 {
+        let id = format!("ws_{number}");
+        let tab_id = format!("tab_{id}");
+        snapshot
+            .workspaces
+            .push(workspace(&id, number, &format!("space-{number}")));
+        snapshot.tabs.push(tab(&tab_id, &id, 1, "t"));
+        for n in 0..2 {
+            snapshot.agents.push(agent(
+                &format!("pane_{number}_{n}"),
+                &id,
+                &tab_id,
+                AgentStatus::Idle,
+            ));
+        }
+    }
+    state_with(tree_config(SpaceAgentsMode::Expanded, false), snapshot)
+}
+
+#[test]
+fn agent_key_reveals_an_off_screen_target_child_row() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut state = overflowing_tree_state();
+    let height = 18;
+    state.compose(106, height).expect("frame");
+    assert!(state.hits.workspace_max_scroll > 0, "list should overflow");
+    assert!(
+        !state
+            .hits
+            .space_agents
+            .iter()
+            .any(|(_, pane)| pane == "pane_8_1"),
+        "target starts off-screen"
+    );
+
+    // pane_8_1 is the last agent of the tree: number 15.
+    let pane = press_agent_key(&mut state, FocusAgent(14)).expect("target");
+    assert_eq!(pane, "pane_8_1");
+    // The server lands focus on the target.
+    focus_pane(&mut state, "ws_8", "pane_8_1");
+    state.compose(106, height).expect("frame");
+    assert!(
+        state
+            .hits
+            .space_agents
+            .iter()
+            .any(|(_, pane)| pane == "pane_8_1"),
+        "{:#?}",
+        state.hits.space_agents
+    );
+}
+
+#[test]
+fn agent_key_reveals_a_same_space_target_after_the_list_was_scrolled_away() {
+    use crate::input::KeybindAction::FocusAgent;
+    let mut state = overflowing_tree_state();
+    let height = 18;
+    // Focus sits in ws_8; the user then scrolls the list back to the top.
+    focus_pane(&mut state, "ws_8", "pane_8_0");
+    state.compose(106, height).expect("frame");
+    state.workspace_scroll = 0;
+    state.compose(106, height).expect("frame");
+    assert!(
+        !state
+            .hits
+            .space_agents
+            .iter()
+            .any(|(_, pane)| pane == "pane_8_1"),
+        "target starts off-screen"
+    );
+
+    // The focused workspace does not change, so only the key's own reveal can
+    // bring the row back.
+    assert_eq!(
+        press_agent_key(&mut state, FocusAgent(14)),
+        Some("pane_8_1".into())
+    );
+    state.compose(106, height).expect("frame");
+    assert!(
+        state
+            .hits
+            .space_agents
+            .iter()
+            .any(|(_, pane)| pane == "pane_8_1"),
+        "{:#?}",
+        state.hits.space_agents
+    );
+}
+
+#[test]
+fn rendered_child_numbers_equal_one_plus_the_target_position() {
+    let mut snapshot = agents_snapshot();
+    snapshot.workspaces.push(workspace("ws_4", 4, "tail"));
+    snapshot.tabs.push(tab("tab_e", "ws_4", 1, "tail-tab"));
+    snapshot
+        .agents
+        .push(agent("pane_e", "ws_4", "tab_e", AgentStatus::Idle));
+    // ws_1 and ws_2 form a worktree group; ws_2 is its linked member.
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    snapshot.workspaces[1].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    let mut state = state_with(
+        tree_config_with_rows("[[\"agent_index\", \"tab\"]]", false),
+        snapshot,
+    );
+
+    let drawn = |state: &mut ClientShellState| -> Vec<(String, usize)> {
+        // Child rows read `<n> <tab>`; pair each with its pane by position in
+        // the hit map, which lists children in drawn order.
+        let rows = compose_rows(state);
+        let hits = state.hits.space_agents.clone();
+        let frame_rows = rows;
+        hits.iter()
+            .map(|(rect, pane)| {
+                let row = &frame_rows[usize::from(rect.y)];
+                let number = row
+                    .trim()
+                    .trim_start_matches(['├', '└', '─', ' '])
+                    .split_whitespace()
+                    .next()
+                    .and_then(|word| word.parse::<usize>().ok())
+                    .unwrap_or_else(|| panic!("no number on {row:?} in {frame_rows:#?}"));
+                (pane.clone(), number)
+            })
+            .collect()
+    };
+
+    let check = |state: &mut ClientShellState| {
+        let targets = tree_order(state);
+        let drawn = drawn(state);
+        assert!(!targets.is_empty());
+        assert_eq!(drawn.len(), targets.len(), "{drawn:?} vs {targets:?}");
+        for (pane, number) in drawn {
+            let position = targets
+                .iter()
+                .position(|target| *target == pane)
+                .unwrap_or_else(|| panic!("{pane} drawn but not a target in {targets:?}"));
+            assert_eq!(number, position + 1, "{pane}");
+        }
+    };
+
+    check(&mut state);
+    // A collapsed space renumbers everything after it.
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_1");
+    check(&mut state);
+    // So does a collapsed worktree group (ws_2 hidden).
+    state.collapsed_groups.insert("repo".into());
+    check(&mut state);
 }

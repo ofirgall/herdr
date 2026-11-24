@@ -255,7 +255,7 @@ pub(super) fn agent_rows(
         .into_iter()
         .enumerate()
         .filter_map(|(agent_index, pane_id)| {
-            agent_row(snapshot, &pane_id, config, machine, agent_index)
+            agent_row(snapshot, &pane_id, config, machine, agent_index, true)
         })
         .collect()
 }
@@ -266,6 +266,10 @@ pub(super) fn agent_row(
     config: &ClientShellConfig,
     machine: Option<&str>,
     agent_index: usize,
+    // False masks the agent's own focus flag, for an agent focused only within
+    // an endpoint that is not the active one. Token resolution and row
+    // highlighting both use the masked value.
+    endpoint_active: bool,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -295,6 +299,7 @@ pub(super) fn agent_row(
     let tab_label = tab
         .filter(|tab| tab_count > 1 || tab.custom_label)
         .map(|tab| tab.label.as_str());
+    let focused = agent.focused && endpoint_active;
     let rows = resolve_agent_rows(
         config.agents.rows_for_agent(
             agent
@@ -309,11 +314,12 @@ pub(super) fn agent_row(
         pane.and_then(|pane| pane.label.as_deref()),
         machine,
         agent_index,
+        focused,
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,
-        focused: agent.focused,
+        focused,
         rows,
     })
 }
@@ -419,6 +425,7 @@ pub(super) fn resolve_agent_rows(
     pane_label: Option<&str>,
     machine: Option<&str>,
     agent_index: usize,
+    focused: bool,
 ) -> Vec<Vec<crate::ui::ResolvedToken>> {
     let agent_label = agent
         .display_agent
@@ -447,6 +454,7 @@ pub(super) fn resolve_agent_rows(
             pane: agent.title.as_deref().or(pane_label),
             agent_label,
             agent_index,
+            focused,
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             tokens: &tokens,

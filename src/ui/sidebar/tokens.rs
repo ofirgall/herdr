@@ -88,6 +88,9 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) agent_label: Option<&'a str>,
     /// Zero-based position of the agent in the agents panel list.
     pub(crate) agent_index: usize,
+    /// Whether this agent is the focused pane; `agent_index_focused` resolves
+    /// only then.
+    pub(crate) focused: bool,
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
@@ -142,6 +145,9 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::AgentIndex => {
                             Some(ResolvedTokenKind::AgentIndex(context.agent_index))
                         }
+                        AgentSidebarToken::AgentIndexFocused => context
+                            .focused
+                            .then_some(ResolvedTokenKind::AgentIndex(context.agent_index)),
                         AgentSidebarToken::TerminalTitle => context
                             .terminal_title
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
@@ -162,6 +168,10 @@ pub(crate) fn agent_rows(
                     let style = kind
                         .text_value()
                         .map_or(Some(style), |value| configured.style_for_value(value))?;
+                    let style = match configured.focused_style() {
+                        Some(focused) if context.focused => style.overlaid(focused),
+                        _ => style,
+                    };
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();
@@ -415,6 +425,7 @@ mod tests {
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             agent_index: 0,
+            focused: false,
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             tokens: &entry.tokens,
@@ -707,6 +718,45 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("custom title".into())),
             ]]
         );
+    }
+
+    #[test]
+    fn agent_index_focused_token_renders_the_index_only_when_focused() {
+        let entry = entry();
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::AgentIndexFocused,
+                AgentSidebarToken::Agent,
+            ]],
+            ..Default::default()
+        };
+        let mut focused = context(&entry);
+        focused.agent_index = 2;
+        focused.focused = true;
+        assert_eq!(
+            agent_rows(entry.rows(&config), focused, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::AgentIndex(2)),
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("pi".into())),
+            ]]
+        );
+
+        // Unfocused, the token resolves to nothing; the rest of the row stays.
+        let mut unfocused = context(&entry);
+        unfocused.agent_index = 2;
+        assert_eq!(
+            agent_rows(entry.rows(&config), unfocused, "working"),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
+                "pi".into()
+            ))]]
+        );
+
+        // A row holding only the token disappears when it is unfocused.
+        let only = AgentsSidebarConfig {
+            rows: vec![vec![AgentSidebarToken::AgentIndexFocused]],
+            ..Default::default()
+        };
+        assert!(agent_rows(entry.rows(&only), context(&entry), "working").is_empty());
     }
 
     #[test]

@@ -1292,7 +1292,7 @@
           "key": "ui.sidebar.agents.enabled",
           "type": "boolean",
           "default": "true",
-          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
+          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both. With this set to false and ui.sidebar.spaces.agents not \"off\", agent children under Spaces are numbered 1..N down the whole tree and the agent keys follow that order."
         },
         {
           "key": "ui.sidebar.pull_requests.enabled",
@@ -1400,7 +1400,7 @@
           "key": "ui.sidebar.spaces.agents",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered.",
+          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered. When ui.sidebar.agents.enabled is false, agent_index numbers children continuously across Spaces and focus_agent, next_agent and previous_agent follow that order; the agent_index_focused token shows the number only on the focused agent.",
           "values": [
             "off",
             "collapsed",
@@ -1435,7 +1435,7 @@
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. Any space-row token accepts focused, a { fg, bold, dim } table applied only on the focused space over the token's style and rules. A spacer token pushes the tokens after it to the right edge of the row. At most 16 rows and 16 tokens per row; spacer does not count."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. Space rows also accept an index token showing the jump number (1-9, then 0), hidden for spaces without one; a styled index token accepts format, a template with exactly one {} for the number (at most 16 characters), such as [{}]. Any space-row or agent-row token accepts focused, a { fg, bold, dim } table applied only on the focused space, or on the focused agent's row, over the token's style and rules. A spacer token pushes the tokens after it to the right edge of the row. At most 16 rows and 16 tokens per row; spacer does not count."
         },
         {
           "key": "ui.sidebar.spaces.show_status",
