@@ -139,11 +139,14 @@ impl<'a> SpaceAgentIndex<'a> {
     }
 
     /// Resolves the child entries of one space from `agent_rows`. The state
-    /// icon and text reflect each agent's own status.
+    /// icon and text reflect each agent's own status. `first_index` is the
+    /// zero-based `agent_index` of the first child: 0 numbers per space, the
+    /// count of children before this space numbers down the whole tree.
     pub(super) fn children(
         &self,
         workspace: &ClientShellWorkspace,
         config: &ClientShellConfig,
+        first_index: usize,
     ) -> Vec<SpaceAgentChild> {
         self.agents(&workspace.workspace_id)
             .iter()
@@ -160,7 +163,8 @@ impl<'a> SpaceAgentIndex<'a> {
                         .get(agent.pane_id.as_str())
                         .and_then(|pane| pane.label.as_deref()),
                     None,
-                    index,
+                    first_index + index,
+                    agent.focused,
                 );
                 let rows = if rows.is_empty() {
                     vec![vec![crate::ui::ResolvedToken {
@@ -180,6 +184,30 @@ impl<'a> SpaceAgentIndex<'a> {
             })
             .collect()
     }
+}
+
+/// Pane ids of the agents shown as children down the space list, in display
+/// order: `entries` in order, and for each space whose children are
+/// `expanded`, its agents from `index`. This is the one source of the tree
+/// numbering: rendering numbers children by position in it and the agent keys
+/// target by position in it. Agent-view filters and the agents-section sort
+/// do not apply.
+///
+/// `entries` must be the collapse-aware desktop entries (collapsed worktree
+/// groups already dropped), also on mobile, whose own entries show no children.
+pub(super) fn tree_agent_order<'a>(
+    snapshot: &ClientShellSnapshot,
+    entries: &[WorkspaceEntry],
+    expanded: impl Fn(&str) -> bool,
+    index: &SpaceAgentIndex<'a>,
+) -> Vec<&'a str> {
+    entries
+        .iter()
+        .filter_map(|entry| snapshot.workspaces.get(entry.index))
+        .filter(|workspace| expanded(&workspace.workspace_id))
+        .flat_map(|workspace| index.agents(&workspace.workspace_id))
+        .map(|agent| agent.pane_id.as_str())
+        .collect()
 }
 
 /// Draws the `▾`/`▸` toggle on the first row of a space. It sits one column
@@ -583,6 +611,51 @@ impl ClientShellState {
                 Method::PaneFocus(PaneTarget { pane_id })
             }
         })
+    }
+
+    /// Scrolls the space list to the space holding `pane_id`'s child row, the
+    /// way `step_sidebar_entry` does. A space and its children are one list
+    /// item, so revealing the space reveals the child.
+    pub(super) fn reveal_agent_space(&mut self, pane_id: &str) {
+        let workspace_id = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+                .map(|agent| agent.workspace_id.clone())
+        });
+        if let Some(workspace_id) = workspace_id {
+            self.reveal_workspace(&workspace_id);
+        }
+    }
+
+    /// Whether the agent keys follow the space tree: tree numbering mode on
+    /// the single-machine sidebar. The multi-machine sidebar (more than one
+    /// endpoint) keeps its aggregate agent list.
+    pub(super) fn tree_agent_keys_active(&self) -> bool {
+        self.config.tree_agent_numbering() && self.endpoints.len() <= 1
+    }
+
+    /// Pane ids the agent keys target in tree numbering mode, in tree order.
+    /// Always built from the desktop collapse-aware entries, also on mobile, so
+    /// the keys agree with the numbers the desktop tree shows.
+    pub(super) fn tree_agent_targets(&self, snapshot: &ClientShellSnapshot) -> Vec<String> {
+        let empty = HashSet::new();
+        let entries = super::render::workspace_entries(
+            snapshot,
+            self.collapsed_groups_for_endpoint(&self.active_endpoint_id)
+                .unwrap_or(&empty),
+        );
+        let index = SpaceAgentIndex::new(snapshot);
+        tree_agent_order(
+            snapshot,
+            &entries,
+            |workspace_id| self.space_agents_expanded(&self.active_endpoint_id, workspace_id),
+            &index,
+        )
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
     }
 
     /// Whether `workspace_id`'s agent children are shown on `endpoint_id`.

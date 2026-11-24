@@ -379,13 +379,33 @@ fn render_spaces_section(
                 .copied(),
         )
     };
+    // Tree numbering mode numbers children down the whole list: each space's
+    // first child continues from the shown children before it.
+    let tree_positions = agent_index
+        .as_ref()
+        .filter(|_| config.tree_agent_numbering())
+        .map(|index| {
+            super::space_agents::tree_agent_order(snapshot, &entries, space_expanded, index)
+                .into_iter()
+                .enumerate()
+                .map(|(position, pane_id)| (pane_id, position))
+                .collect::<HashMap<_, _>>()
+        });
     let children = entries
         .iter()
         .map(|entry| {
             let workspace = snapshot.workspaces.get(entry.index)?;
             let index = agent_index.as_ref()?;
+            let first_index = tree_positions.as_ref().map_or(0, |positions| {
+                index
+                    .agents(&workspace.workspace_id)
+                    .first()
+                    .and_then(|agent| positions.get(agent.pane_id.as_str()))
+                    .copied()
+                    .unwrap_or(0)
+            });
             space_expanded(&workspace.workspace_id)
-                .then(|| index.children(workspace, config))
+                .then(|| index.children(workspace, config, first_index))
                 .filter(|children| !children.is_empty())
         })
         .collect::<Vec<_>>();

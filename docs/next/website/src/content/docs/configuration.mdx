@@ -496,6 +496,21 @@ With `"off"` the sidebar looks exactly as before. With `"collapsed"` or `"expand
 
 Each child shows one agent and hangs off a tree connector under its space's status icon, like worktree children. Children are ordered by tab, then by the agents' order within the tab, and are not affected by an agent view filter. `agent_rows` accepts the same tokens, inline styles, `rules`, and limits as `[ui.sidebar.agents] rows`, and defaults to `[["state_icon", "tab"]]`. `state_icon` and `state_text` show that agent's own status, not the space's rolled-up status. The `tab` token always shows the tab's name, even when the space has a single unnamed tab. Clicking a child focuses that agent's space, tab, and pane.
 
+**Tree numbering mode.** When `[ui.sidebar.spaces] agents` is `"collapsed"` or `"expanded"` and `[ui.sidebar.agents] enabled = false`, the Agents section is gone and the space tree is the only agent list. Herdr then numbers the agent children 1, 2, 3 and so on down the whole tree instead of restarting at 1 under each space, so `agent_index` in `agent_rows` shows that number. Children that are hidden, either because their space is collapsed or because they sit in a collapsed worktree group, get no number and the numbers renumber as you expand and collapse. This applies to the expanded sidebar of a single machine only.
+
+In this mode `focus_agent`, `next_agent` and `previous_agent` follow the same tree order, so `focus_agent` with a number jumps to the child showing that number. They skip spaces, ignore the agent view filter and sort, wrap around at the ends, and use the same order on a narrow screen. The `agent_index_focused` token works like `agent_index` but shows the number only on the focused agent's row, which marks where you are:
+
+```toml
+[ui.sidebar.agents]
+enabled = false
+
+[ui.sidebar.spaces]
+agents = "expanded"
+agent_rows = [
+  ["agent_index_focused", "state_icon", "tab"],
+]
+```
+
 A space and its children form one list item: they scroll together, and `row_gap` applies between spaces, not between a space and its children. Children of spaces hidden by a collapsed worktree group are hidden too. Children appear only in the expanded sidebar of a single machine; the collapsed sidebar and the multi-machine sidebar are unchanged.
 
 When each agent shows its own status under its space, the space's rolled-up status can be redundant. Set `show_status = false` to hide the `state_icon` and `state_text` tokens on space rows; agent children keep their own status:
@@ -537,6 +552,7 @@ Agent rows accept these built-in tokens:
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `agent_index` — the agent's 1-based position in the agents panel list.
+- `agent_index_focused` — `agent_index` shown only on the focused agent's row, and hidden on every other row.
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
 - `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
 - `$name` — custom pane metadata named `name`.

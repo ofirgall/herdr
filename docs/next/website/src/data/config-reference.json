@@ -1292,7 +1292,7 @@
           "key": "ui.sidebar.agents.enabled",
           "type": "boolean",
           "default": "true",
-          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both."
+          "description": "Show the Agents section of the expanded and collapsed sidebar. When only one section is enabled it fills the sidebar. Disabling both sections reports a warning and shows both. With this set to false and ui.sidebar.spaces.agents not \"off\", agent children under Spaces are numbered 1..N down the whole tree and the agent keys follow that order."
         },
         {
           "key": "ui.sidebar.pull_requests.enabled",
@@ -1400,7 +1400,7 @@
           "key": "ui.sidebar.spaces.agents",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered.",
+          "description": "Show each Space's agents as indented children in the expanded sidebar: \"off\", \"collapsed\", or \"expanded\". The value is the default; each Space's toggle or context menu overrides it, and overrides are remembered. When ui.sidebar.agents.enabled is false, agent_index numbers children continuously across Spaces and focus_agent, next_agent and previous_agent follow that order; the agent_index_focused token shows the number only on the focused agent.",
           "values": [
             "off",
             "collapsed",

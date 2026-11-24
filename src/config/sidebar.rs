@@ -207,6 +207,8 @@ pub enum AgentSidebarToken {
     Pane,
     Agent,
     AgentIndex,
+    /// `agent_index` on the focused agent's row only.
+    AgentIndexFocused,
     TerminalTitle,
     TerminalTitleStripped,
     /// The tab name without its leading jump-number prefix.
@@ -472,6 +474,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
         AgentSidebarToken::AgentIndex => "agent_index".into(),
+        AgentSidebarToken::AgentIndexFocused => "agent_index_focused".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
         AgentSidebarToken::TabStripped => "tab_stripped".into(),
@@ -550,6 +553,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
                 ("agent_index", Self::AgentIndex),
+                ("agent_index_focused", Self::AgentIndexFocused),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
                 ("tab_stripped", Self::TabStripped),
@@ -1069,6 +1073,23 @@ mod tests {
     }
 
     #[test]
+    fn documented_tree_numbering_example_parses() {
+        let config: crate::config::Config = toml::from_str(
+            "[ui.sidebar.agents]\nenabled = false\n\n[ui.sidebar.spaces]\nagents = \"expanded\"\nagent_rows = [\n  [\"agent_index_focused\", \"state_icon\", \"tab\"],\n]\n",
+        )
+        .unwrap();
+        assert!(!config.ui.sidebar.agents.enabled);
+        assert_eq!(
+            config.ui.sidebar.spaces.agent_rows,
+            vec![vec![
+                AgentSidebarToken::AgentIndexFocused,
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::Tab
+            ]]
+        );
+    }
+
+    #[test]
     fn sections_are_enabled_by_default_and_parse_enabled_false() {
         let config = SidebarConfig::default();
         assert!(config.spaces.enabled && config.agents.enabled);
@@ -1378,6 +1399,40 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
             let input = format!("[ui.sidebar.agents]\\nrows = [[\"{token}\"]]\\n");
             assert!(toml::from_str::<crate::config::Config>(&input).is_err());
         }
+    }
+
+    #[test]
+    fn agent_index_focused_token_parses_serializes_and_rejects_misspellings() {
+        let config: crate::config::Config =
+            toml::from_str("[ui.sidebar.agents]\nrows = [[\"agent_index_focused\", \"agent\"]]\n")
+                .expect("agent_index_focused parses");
+        assert_eq!(
+            config.ui.sidebar.agents.rows[0],
+            vec![
+                AgentSidebarToken::AgentIndexFocused,
+                AgentSidebarToken::Agent
+            ]
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentSidebarToken::AgentIndexFocused).unwrap(),
+            "\"agent_index_focused\""
+        );
+        let reparsed: crate::config::Config = toml::from_str(&format!(
+            "[ui.sidebar.agents]\nrows = [[{}]]\n",
+            serde_json::to_string(&AgentSidebarToken::AgentIndexFocused).unwrap()
+        ))
+        .expect("serialized token parses back");
+        assert_eq!(
+            reparsed.ui.sidebar.agents.rows[0],
+            vec![AgentSidebarToken::AgentIndexFocused]
+        );
+
+        let error = toml::from_str::<crate::config::Config>(
+            "[ui.sidebar.agents]\nrows = [[\"agent_index_focussed\"]]\n",
+        )
+        .expect_err("misspelled token is a config error")
+        .to_string();
+        assert!(error.contains("unknown sidebar token"), "{error}");
     }
 
     #[test]
