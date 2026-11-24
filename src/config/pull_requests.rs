@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_PULL_REQUEST_POLL_SECONDS: u64 = 60;
+pub const DEFAULT_PULL_REQUEST_POLL_SECONDS: u64 = 120;
 pub const MIN_PULL_REQUEST_POLL_SECONDS: u64 = 15;
 pub const MAX_PULL_REQUEST_POLL_SECONDS: u64 = 3600;
 pub const MAX_WATCHED_REPOS: usize = 32;

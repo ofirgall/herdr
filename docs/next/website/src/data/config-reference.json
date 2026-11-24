@@ -1744,8 +1744,8 @@
         {
           "key": "pull_requests.poll_seconds",
           "type": "integer",
-          "default": "60",
-          "description": "Seconds between polls of the watched repositories' open pull requests. Accepted range: 15 to 3600."
+          "default": "120",
+          "description": "Seconds between polls of the watched repositories' open pull requests. Accepted range: 15 to 3600. Polls pause while no client is attached, and back off when GitHub reports its rate limit."
         },
         {
           "key": "pull_requests.gh_command",

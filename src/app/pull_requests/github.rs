@@ -1,11 +1,21 @@
-//! Fetching watched repositories' open pull requests through `gh api graphql`.
+//! Fetching watched repositories' pull requests through `gh api graphql`.
 //!
-//! Everything except [`fetch_pull_requests`] and [`run_command`] is pure, so
-//! remote parsing, the query document and the status rules are tested offline.
-//! The status rules follow the herdr-pr-tracker plugin: review state falls back
-//! to the latest opinionated reviews, cancelled and skipped checks carry no
-//! signal, and threads whose last comment is the viewer's do not count.
+//! GitHub charges GraphQL rate-limit points by the connections a query asks
+//! for, so a poll runs in two tiers. One cheap document lists every
+//! repository's pull requests with their summary signals and a fingerprint of
+//! their activity, head commit and check totals. A second document fetches
+//! reviews, review threads and check names only for open pull requests whose
+//! fingerprint changed since they were last fetched, or for all of them on a
+//! full refresh. Every response reports the remaining budget.
+//!
+//! Everything except [`fetch_pull_requests`], [`run_graphql`],
+//! [`rate_limit_window`] and [`run_command`] is pure, so remote parsing, the
+//! query documents and the status rules are tested offline. The status rules
+//! follow the herdr-pr-tracker plugin: review state falls back to the latest
+//! opinionated reviews, cancelled and skipped checks carry no signal, and
+//! threads whose last comment is the viewer's do not count.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,17 +24,22 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::{
-    PullRequestCheckCounts, PullRequestCheckState, PullRequestChecks, PullRequestRepoState,
-    PullRequestReview, PullRequestState,
+    PullRequestCheckCounts, PullRequestCheckState, PullRequestChecks, PullRequestDetail,
+    PullRequestDetails, PullRequestPoll, PullRequestRate, PullRequestRepoState, PullRequestReview,
+    PullRequestState, RateWindow,
 };
 use crate::config::WatchedRepoConfig;
 
-/// Open pull requests fetched per repository.
-const MAX_PULL_REQUESTS_PER_REPO: usize = 50;
-/// Recently merged pull requests fetched per repository.
+/// Open pull requests listed per repository.
+const MAX_PULL_REQUESTS_PER_REPO: usize = 25;
+/// Recently merged pull requests listed per repository.
 const MAX_MERGED_PULL_REQUESTS_PER_REPO: usize = 10;
 /// Review threads read per pull request; counts are floors beyond this.
-const MAX_REVIEW_THREADS: usize = 100;
+/// Each thread's last comment is its own connection, so this dominates the
+/// details' cost.
+const MAX_REVIEW_THREADS: usize = 30;
+/// Pull requests whose details one document fetches.
+const MAX_DETAILS_PER_DOCUMENT: usize = 40;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest error text kept for display.
@@ -44,18 +59,125 @@ impl ResolvedRepo {
     }
 }
 
+/// Which fragment a listing search selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Listing {
+    /// Open pull requests with their summary signals.
+    Open,
+    /// Merged pull requests, which show only that they merged.
+    Merged,
+}
+
+/// One open pull request whose details a poll fetches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DetailRequest {
+    pub(super) owner: String,
+    pub(super) name: String,
+    pub(super) number: u64,
+    pub(super) fingerprint: String,
+}
+
+impl DetailRequest {
+    fn key(&self) -> (String, u64) {
+        (format!("{}/{}", self.owner, self.name), self.number)
+    }
+}
+
+/// One listed pull request before its details are joined in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Summary {
+    /// Creation time, or merge time once merged: rows sort oldest first.
+    sort_key: String,
+    /// Empty for a merged pull request, which has no details.
+    fingerprint: String,
+    /// GitHub's `reviewDecision`, which wins over the derived review.
+    decision: Option<PullRequestReview>,
+    pr: PullRequestState,
+}
+
+impl Summary {
+    fn with_detail(self, detail: Option<&PullRequestDetail>) -> PullRequestState {
+        let mut pr = self.pr;
+        if pr.merged {
+            return pr;
+        }
+        if let Some(detail) = detail {
+            pr.human_threads = detail.human_threads;
+            pr.bot_threads = detail.bot_threads;
+            pr.check_runs = detail.check_runs.clone();
+        }
+        pr.review = self
+            .decision
+            .or_else(|| detail.map(|detail| detail.review))
+            .unwrap_or_default();
+        pr
+    }
+}
+
+/// The rate-limit window as reported across a poll's requests.
+#[derive(Debug, Default)]
+struct RateTracker {
+    /// The latest `(remaining, resetAt)`.
+    window: Option<(u64, String)>,
+    limited: bool,
+}
+
+impl RateTracker {
+    fn observe(&mut self, value: &Value) {
+        let remaining = value
+            .pointer("/data/rateLimit/remaining")
+            .and_then(Value::as_u64);
+        let reset_at = value
+            .pointer("/data/rateLimit/resetAt")
+            .and_then(Value::as_str);
+        if let (Some(remaining), Some(reset_at)) = (remaining, reset_at) {
+            self.window = Some((remaining, reset_at.to_owned()));
+        }
+    }
+
+    fn observe_error(&mut self, error: &str) {
+        self.limited |= is_rate_limit_error(error);
+    }
+
+    fn finish(self, gh_command: &str) -> PullRequestRate {
+        let now = time::OffsetDateTime::now_utc();
+        if self.limited {
+            return PullRequestRate::Limited(rate_limit_window(gh_command, now));
+        }
+        self.window
+            .and_then(|(remaining, reset_at)| {
+                let reset = time::OffsetDateTime::parse(
+                    &reset_at,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .ok()?;
+                Some(PullRequestRate::Budget(rate_window(
+                    remaining,
+                    reset.unix_timestamp(),
+                    now,
+                )))
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// Fetches every watched repository's open pull requests, then those merged
-/// since `merged_since` when given. Repositories whose checkout cannot be
-/// resolved report an error without blocking the others.
+/// since `merged_since` when given. Details come from `cached` where an open
+/// pull request's fingerprint is unchanged, unless `full`. Repositories whose
+/// checkout cannot be resolved report an error without blocking the others.
 pub(super) fn fetch_pull_requests(
     repos: &[WatchedRepoConfig],
     gh_command: &str,
     merged_since: Option<&str>,
-) -> Vec<PullRequestRepoState> {
-    let mut states = repos
-        .iter()
-        .map(PullRequestRepoState::pending)
-        .collect::<Vec<_>>();
+    cached: &PullRequestDetails,
+    full: bool,
+) -> PullRequestPoll {
+    let mut poll = PullRequestPoll {
+        repos: repos.iter().map(PullRequestRepoState::pending).collect(),
+        details: cached.clone(),
+        rate: PullRequestRate::Unknown,
+    };
+    let states = &mut poll.repos;
     let mut resolved = Vec::new();
     for (index, repo) in repos.iter().enumerate() {
         match resolve_repo(repo) {
@@ -71,61 +193,202 @@ pub(super) fn fetch_pull_requests(
         }
     }
     if resolved.is_empty() {
-        return states;
+        return poll;
     }
+    let mut rate = RateTracker::default();
+
     // `r0..rN` the open searches, then `rN..r2N` the merged ones.
-    let mut queries = resolved
+    let mut searches = resolved
         .iter()
-        .map(|(_, repo)| (search_query(repo), MAX_PULL_REQUESTS_PER_REPO))
+        .map(|(_, repo)| {
+            (
+                search_query(repo),
+                MAX_PULL_REQUESTS_PER_REPO,
+                Listing::Open,
+            )
+        })
         .collect::<Vec<_>>();
     if let Some(since) = merged_since {
-        queries.extend(
-            resolved
-                .iter()
-                .map(|(_, repo)| (merged_query(repo, since), MAX_MERGED_PULL_REQUESTS_PER_REPO)),
-        );
+        searches.extend(resolved.iter().map(|(_, repo)| {
+            (
+                merged_query(repo, since),
+                MAX_MERGED_PULL_REQUESTS_PER_REPO,
+                Listing::Merged,
+            )
+        }));
     }
-    let document = graphql_document(&queries);
-    let response = run_command(
+    let listing = match run_graphql(gh_command, &list_document(&searches)) {
+        Ok(value) => value,
+        Err(error) => {
+            rate.observe_error(&error);
+            for (index, _) in &resolved {
+                states[*index].fail(error.clone());
+            }
+            poll.rate = rate.finish(gh_command);
+            return poll;
+        }
+    };
+    rate.observe(&listing);
+    let viewer = listing
+        .pointer("/data/viewer/login")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let mut results = parse_summaries(&listing, searches.len());
+    let mut merged = results.split_off(resolved.len()).into_iter();
+    let mut listed = Vec::new();
+    for ((index, repo), result) in resolved.into_iter().zip(results) {
+        let result = match (result, merged.next()) {
+            (Ok(mut open), Some(Ok(merged))) => {
+                open.extend(merged);
+                Ok(open)
+            }
+            (Ok(_), Some(Err(error))) | (Err(error), _) => Err(error),
+            (Ok(open), None) => Ok(open),
+        };
+        match result {
+            Ok(summaries) => listed.push((index, repo, summaries)),
+            Err(error) => states[index].fail(error),
+        }
+    }
+
+    let wanted = listed
+        .iter()
+        .flat_map(|(_, repo, summaries)| {
+            summaries
+                .iter()
+                .filter(|summary| !summary.pr.merged)
+                .map(|summary| DetailRequest {
+                    owner: repo.owner.clone(),
+                    name: repo.name.clone(),
+                    number: summary.pr.number,
+                    fingerprint: summary.fingerprint.clone(),
+                })
+        })
+        .filter(|request| full || !details_current(cached, request))
+        .collect::<Vec<_>>();
+    // Repositories whose details could not all be fetched, with why.
+    let mut detail_errors = HashMap::<String, String>::new();
+    let mut chunks = wanted.chunks(MAX_DETAILS_PER_DOCUMENT);
+    for chunk in chunks.by_ref() {
+        match run_graphql(gh_command, &detail_document(chunk)) {
+            Ok(value) => {
+                rate.observe(&value);
+                for (request, detail) in chunk.iter().zip(parse_details(&value, chunk, &viewer)) {
+                    match detail {
+                        Ok(detail) => {
+                            poll.details.insert(request.key(), detail);
+                        }
+                        Err(error) => {
+                            detail_errors.entry(request.key().0).or_insert(error);
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                rate.observe_error(&error);
+                for request in chunk {
+                    detail_errors
+                        .entry(request.key().0)
+                        .or_insert_with(|| error.clone());
+                }
+                if rate.limited {
+                    break;
+                }
+            }
+        }
+    }
+    // Left unfetched after a rate limit.
+    for request in chunks.flatten() {
+        detail_errors
+            .entry(request.key().0)
+            .or_insert_with(|| "GitHub rate limit".to_owned());
+    }
+
+    for (index, repo, summaries) in listed {
+        let slug = repo.slug();
+        if let Some(error) = detail_errors.remove(&slug) {
+            states[index].fail(error);
+            continue;
+        }
+        let open = summaries
+            .iter()
+            .filter(|summary| !summary.pr.merged)
+            .map(|summary| summary.pr.number)
+            .collect::<HashSet<_>>();
+        poll.details
+            .retain(|(repo, number), _| *repo != slug || open.contains(number));
+        let state = &mut states[index];
+        state.pull_requests = summaries
+            .into_iter()
+            .map(|summary| {
+                let detail = poll.details.get(&(slug.clone(), summary.pr.number));
+                summary.with_detail(detail)
+            })
+            .collect();
+        state.loading = false;
+    }
+    poll.rate = rate.finish(gh_command);
+    poll
+}
+
+/// Whether `cached` holds details fetched at `request`'s fingerprint.
+fn details_current(cached: &PullRequestDetails, request: &DetailRequest) -> bool {
+    cached
+        .get(&request.key())
+        .is_some_and(|detail| detail.fingerprint == request.fingerprint)
+}
+
+/// Runs one GraphQL document through `gh`.
+fn run_graphql(gh_command: &str, document: &str) -> Result<Value, String> {
+    let stdout = run_command(
         Command::new(gh_command)
             .args(["api", "graphql", "-f"])
             .arg(format!("query={document}")),
         GH_TIMEOUT,
+    )?;
+    serde_json::from_str::<Value>(&stdout).map_err(|err| format!("unreadable gh output: {err}"))
+}
+
+/// Whether `gh` failed because GitHub refused the request for its primary or
+/// secondary rate limit.
+pub(super) fn is_rate_limit_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("rate limit") || error.contains("abuse detection")
+}
+
+/// The GraphQL window from `gh api rate_limit`, which costs no points.
+fn rate_limit_window(gh_command: &str, now: time::OffsetDateTime) -> Option<RateWindow> {
+    let stdout = run_command(
+        Command::new(gh_command).args(["api", "rate_limit"]),
+        GH_TIMEOUT,
     )
-    .and_then(|stdout| {
-        serde_json::from_str::<Value>(&stdout).map_err(|err| format!("unreadable gh output: {err}"))
-    });
-    match response {
-        Ok(value) => {
-            let mut results = parse_response(&value, queries.len());
-            let merged = results.split_off(resolved.len());
-            let mut merged = merged.into_iter();
-            for ((index, _), result) in resolved.iter().zip(results) {
-                let result = match (result, merged.next()) {
-                    (Ok(mut open), Some(Ok(merged))) => {
-                        open.extend(merged);
-                        Ok(open)
-                    }
-                    (Ok(_), Some(Err(error))) | (Err(error), _) => Err(error),
-                    (Ok(open), None) => Ok(open),
-                };
-                match result {
-                    Ok(pull_requests) => {
-                        let state = &mut states[*index];
-                        state.pull_requests = pull_requests;
-                        state.loading = false;
-                    }
-                    Err(error) => states[*index].fail(error),
-                }
-            }
-        }
-        Err(error) => {
-            for (index, _) in &resolved {
-                states[*index].fail(error.clone());
-            }
-        }
+    .ok()?;
+    rate_window_from_rest(&serde_json::from_str(&stdout).ok()?, now)
+}
+
+/// The GraphQL window in a REST `rate_limit` response.
+pub(super) fn rate_window_from_rest(
+    value: &Value,
+    now: time::OffsetDateTime,
+) -> Option<RateWindow> {
+    let graphql = value.pointer("/resources/graphql")?;
+    let remaining = graphql.get("remaining")?.as_u64()?;
+    let reset = graphql.get("reset")?.as_i64()?;
+    Some(rate_window(remaining, reset, now))
+}
+
+/// A window of `remaining` points that refills at unix time `reset`.
+pub(super) fn rate_window(remaining: u64, reset: i64, now: time::OffsetDateTime) -> RateWindow {
+    let refill_in = u64::try_from(reset.saturating_sub(now.unix_timestamp())).unwrap_or(0);
+    let refill_at = time::OffsetDateTime::from_unix_timestamp(reset)
+        .map(|at| format!("{:02}:{:02}", at.hour(), at.minute()))
+        .unwrap_or_else(|_| "?".to_owned());
+    RateWindow {
+        remaining,
+        refill_in: Duration::from_secs(refill_in),
+        refill_at,
     }
-    states
 }
 
 fn resolve_repo(repo: &WatchedRepoConfig) -> Result<ResolvedRepo, String> {
@@ -226,31 +489,102 @@ pub(super) fn merged_since(hours: u64, now: time::OffsetDateTime) -> Option<Stri
     ))
 }
 
-/// One GraphQL document running every `(search, page size)`, aliased `r0`,
-/// `r1`, ...
-pub(super) fn graphql_document(queries: &[(String, usize)]) -> String {
-    let mut document = String::from("query {\n  viewer { login }\n");
-    for (index, (query, first)) in queries.iter().enumerate() {
+/// The listing document: every `(search, page size, listing)` aliased `r0`,
+/// `r1`, ..., with the viewer and the rate-limit window. Only the fragments in
+/// use are defined; GitHub rejects unused ones.
+pub(super) fn list_document(searches: &[(String, usize, Listing)]) -> String {
+    let mut document =
+        String::from("query {\n  viewer { login }\n  rateLimit { cost remaining resetAt }\n");
+    for (index, (query, first, listing)) in searches.iter().enumerate() {
         // A JSON string literal is a valid GraphQL string literal.
         let literal = serde_json::to_string(query).unwrap_or_else(|_| "\"\"".into());
+        let fragment = match listing {
+            Listing::Open => "Summary",
+            Listing::Merged => "Merged",
+        };
         document.push_str(&format!(
-            "  r{index}: search(query: {literal}, type: ISSUE, first: {first}) {{ nodes {{ ...PR }} }}\n"
+            "  r{index}: search(query: {literal}, type: ISSUE, first: {first}) {{ nodes {{ ...{fragment} }} }}\n"
         ));
     }
     document.push_str("}\n");
+    // The rollup's per-state totals cover every check, so one context
+    // (whose nodes are not read) is enough to reach them.
+    document.push_str(
+        "fragment Summary on PullRequest {
+  number title url isDraft createdAt updatedAt mergeable headRefName headRefOid reviewDecision
+  mergeQueueEntry { state }
+  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) {
+    checkRunCountsByState { state count }
+    statusContextCountsByState { state count }
+  } } } } }
+}
+",
+    );
+    if searches
+        .iter()
+        .any(|(_, _, listing)| *listing == Listing::Merged)
+    {
+        document.push_str(
+            "fragment Merged on PullRequest { number title url merged mergedAt headRefName }\n",
+        );
+    }
+    document
+}
+
+/// Each request's repository alias index: requests of one repository share a
+/// `repository` field, in first-seen order.
+fn detail_aliases(requests: &[DetailRequest]) -> Vec<usize> {
+    let mut repos = Vec::<(&str, &str)>::new();
+    requests
+        .iter()
+        .map(|request| {
+            let repo = (request.owner.as_str(), request.name.as_str());
+            match repos.iter().position(|seen| *seen == repo) {
+                Some(index) => index,
+                None => {
+                    repos.push(repo);
+                    repos.len() - 1
+                }
+            }
+        })
+        .collect()
+}
+
+/// The details document for `requests`: each repository aliased `d0`, `d1`,
+/// ..., each pull request within it `p<number>`.
+pub(super) fn detail_document(requests: &[DetailRequest]) -> String {
+    let aliases = detail_aliases(requests);
+    let mut document = String::from("query {\n  rateLimit { cost remaining resetAt }\n");
+    let mut alias = 0;
+    while let Some(first) = aliases.iter().position(|index| *index == alias) {
+        let repo = &requests[first];
+        let owner = serde_json::to_string(&repo.owner).unwrap_or_else(|_| "\"\"".into());
+        let name = serde_json::to_string(&repo.name).unwrap_or_else(|_| "\"\"".into());
+        document.push_str(&format!(
+            "  d{alias}: repository(owner: {owner}, name: {name}) {{"
+        ));
+        for (request, _) in requests
+            .iter()
+            .zip(&aliases)
+            .filter(|(_, index)| **index == alias)
+        {
+            let number = request.number;
+            document.push_str(&format!(
+                " p{number}: pullRequest(number: {number}) {{ ...Detail }}"
+            ));
+        }
+        document.push_str(" }\n");
+        alias += 1;
+    }
+    document.push_str("}\n");
     document.push_str(&format!(
-        "fragment PR on PullRequest {{
-  number title url isDraft createdAt merged mergedAt mergeable headRefName reviewDecision
+        "fragment Detail on PullRequest {{
   reviewRequests(first: 1) {{ totalCount }}
   latestOpinionatedReviews(first: 20) {{ nodes {{ state }} }}
-  mergeQueueEntry {{ state }}
   reviewThreads(first: {MAX_REVIEW_THREADS}) {{
     nodes {{ isResolved comments(last: 1) {{ nodes {{ author {{ __typename login }} }} }} }}
   }}
-  commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{
-    checkRunCountsByState {{ state count }}
-    statusContextCountsByState {{ state count }}
-    nodes {{
+  commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{ nodes {{
     __typename
     ... on CheckRun {{ name conclusion status detailsUrl }}
     ... on StatusContext {{ context state targetUrl }}
@@ -261,23 +595,23 @@ pub(super) fn graphql_document(queries: &[(String, usize)]) -> String {
     document
 }
 
-/// Splits a response into one result per aliased search. A search missing
-/// from `data` reports the response's first error.
-pub(super) fn parse_response(
-    value: &Value,
-    count: usize,
-) -> Vec<Result<Vec<PullRequestState>, String>> {
-    let first_error = value
+/// The response's first error, for searches or pull requests missing from
+/// `data`.
+fn first_error(value: &Value) -> Option<String> {
+    value
         .get("errors")
         .and_then(Value::as_array)
         .and_then(|errors| errors.first())
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
-        .map(clean_error);
-    let viewer = value
-        .pointer("/data/viewer/login")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+        .map(clean_error)
+}
+
+/// Splits a listing response into one result per aliased search, oldest
+/// first within each. A search missing from `data` reports the response's
+/// first error.
+pub(super) fn parse_summaries(value: &Value, count: usize) -> Vec<Result<Vec<Summary>, String>> {
+    let first_error = first_error(value);
     (0..count)
         .map(|index| {
             let Some(nodes) = value
@@ -288,21 +622,43 @@ pub(super) fn parse_response(
                     .clone()
                     .unwrap_or_else(|| "no search result".to_owned()));
             };
-            let mut pull_requests = nodes
-                .iter()
-                .filter_map(|node| pull_request_from(node, viewer))
-                .collect::<Vec<_>>();
+            let mut summaries = nodes.iter().filter_map(summary_from).collect::<Vec<_>>();
             // Oldest first, so rows do not move when a status changes.
-            pull_requests.sort_by(|left, right| left.0.cmp(&right.0));
-            Ok(pull_requests.into_iter().map(|(_, pr)| pr).collect())
+            summaries.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
+            Ok(summaries)
         })
         .collect()
 }
 
-/// One search node, keyed by its creation time, or its merge time once merged
-/// (a merged one carries only that it merged). Nodes that are not pull
-/// requests (issues match the inline fragment as empty objects) are dropped.
-fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestState)> {
+/// The details of each request, in order. A pull request missing from `data`
+/// reports the response's first error.
+pub(super) fn parse_details(
+    value: &Value,
+    requests: &[DetailRequest],
+    viewer: &str,
+) -> Vec<Result<PullRequestDetail, String>> {
+    let first_error = first_error(value);
+    requests
+        .iter()
+        .zip(detail_aliases(requests))
+        .map(|(request, alias)| {
+            value
+                .pointer(&format!("/data/d{alias}/p{}", request.number))
+                .filter(|node| node.is_object())
+                .map(|node| detail_from(node, viewer, &request.fingerprint))
+                .ok_or_else(|| {
+                    first_error
+                        .clone()
+                        .unwrap_or_else(|| "no pull request result".to_owned())
+                })
+        })
+        .collect()
+}
+
+/// One listing node. A merged one carries only that it merged. Nodes that
+/// are not pull requests (issues match the inline fragment as empty objects)
+/// are dropped.
+fn summary_from(node: &Value) -> Option<Summary> {
     let number = node.get("number")?.as_u64()?;
     let text = |key: &str| {
         node.get(key)
@@ -310,6 +666,74 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
             .unwrap_or_default()
             .to_owned()
     };
+    if node.get("merged").and_then(Value::as_bool) == Some(true) {
+        return Some(Summary {
+            sort_key: text("mergedAt"),
+            fingerprint: String::new(),
+            decision: None,
+            pr: PullRequestState {
+                number,
+                title: text("title").trim().to_owned(),
+                url: text("url"),
+                branch: text("headRefName"),
+                draft: false,
+                merged: true,
+                conflict: false,
+                queued: false,
+                review: PullRequestReview::None,
+                checks: PullRequestChecks::None,
+                human_threads: 0,
+                bot_threads: 0,
+                check_runs: Vec::new(),
+                check_counts: PullRequestCheckCounts::default(),
+            },
+        });
+    }
+    let rollup = node.pointer("/commits/nodes/0/commit/statusCheckRollup");
+    let connection = rollup.and_then(|rollup| rollup.get("contexts"));
+    let check_counts = check_counts(connection, &[]);
+    let decision = review_decision(node);
+    // What can change the details: new activity (reviews, comments, review
+    // requests), a new head commit (its checks), or check progress.
+    let fingerprint = format!(
+        "{}|{}|{}|{}|{:?}",
+        text("updatedAt"),
+        text("headRefOid"),
+        rollup
+            .and_then(|rollup| rollup.get("state"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        text("reviewDecision"),
+        check_counts,
+    );
+    Some(Summary {
+        sort_key: text("createdAt"),
+        fingerprint,
+        decision,
+        pr: PullRequestState {
+            number,
+            title: text("title").trim().to_owned(),
+            url: text("url"),
+            branch: text("headRefName"),
+            draft: node.get("isDraft").and_then(Value::as_bool) == Some(true),
+            merged: false,
+            // UNKNOWN is computed lazily by GitHub; only CONFLICTING is news.
+            conflict: node.get("mergeable").and_then(Value::as_str) == Some("CONFLICTING"),
+            queued: node
+                .get("mergeQueueEntry")
+                .is_some_and(|entry| !entry.is_null()),
+            review: decision.unwrap_or_default(),
+            checks: check_counts.rollup(),
+            human_threads: 0,
+            bot_threads: 0,
+            check_runs: Vec::new(),
+            check_counts,
+        },
+    })
+}
+
+/// One pull request's details node, fetched at `fingerprint`.
+fn detail_from(node: &Value, viewer: &str, fingerprint: &str) -> PullRequestDetail {
     let mut human_threads = 0;
     let mut bot_threads = 0;
     for thread in node
@@ -338,69 +762,34 @@ fn pull_request_from(node: &Value, viewer: &str) -> Option<(String, PullRequestS
             human_threads += 1;
         }
     }
-    let connection = node.pointer("/commits/nodes/0/commit/statusCheckRollup/contexts");
-    let contexts = connection
-        .and_then(|connection| connection.get("nodes"))
+    let contexts = node
+        .pointer("/commits/nodes/0/commit/statusCheckRollup/contexts/nodes")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let check_counts = check_counts(connection, contexts);
-    let merged = node.get("merged").and_then(Value::as_bool) == Some(true);
-    if merged {
-        return Some((
-            text("mergedAt"),
-            PullRequestState {
-                number,
-                title: text("title").trim().to_owned(),
-                url: text("url"),
-                branch: text("headRefName"),
-                draft: false,
-                merged: true,
-                conflict: false,
-                queued: false,
-                review: PullRequestReview::None,
-                checks: PullRequestChecks::None,
-                human_threads: 0,
-                bot_threads: 0,
-                check_runs: Vec::new(),
-                check_counts: PullRequestCheckCounts::default(),
-            },
-        ));
+    PullRequestDetail {
+        fingerprint: fingerprint.to_owned(),
+        review: derived_review(node),
+        human_threads,
+        bot_threads,
+        check_runs: check_runs_of(contexts),
     }
-    Some((
-        text("createdAt"),
-        PullRequestState {
-            number,
-            title: text("title").trim().to_owned(),
-            url: text("url"),
-            branch: text("headRefName"),
-            draft: node.get("isDraft").and_then(Value::as_bool) == Some(true),
-            merged: false,
-            // UNKNOWN is computed lazily by GitHub; only CONFLICTING is news.
-            conflict: node.get("mergeable").and_then(Value::as_str) == Some("CONFLICTING"),
-            queued: node
-                .get("mergeQueueEntry")
-                .is_some_and(|entry| !entry.is_null()),
-            review: review_of(node),
-            checks: check_counts.rollup(),
-            human_threads,
-            bot_threads,
-            check_runs: check_runs_of(contexts),
-            check_counts,
-        },
-    ))
 }
 
-/// `reviewDecision` where GitHub gives one, otherwise derived from the latest
-/// opinionated reviews: GitHub only fills the decision when branch protection
+/// GitHub's `reviewDecision`, which it fills only when branch protection
 /// requires a review.
-fn review_of(node: &Value) -> PullRequestReview {
+fn review_decision(node: &Value) -> Option<PullRequestReview> {
     match node.get("reviewDecision").and_then(Value::as_str) {
-        Some("APPROVED") => return PullRequestReview::Approved,
-        Some("CHANGES_REQUESTED") => return PullRequestReview::ChangesRequested,
-        Some("REVIEW_REQUIRED") => return PullRequestReview::ReviewRequired,
-        _ => {}
+        Some("APPROVED") => Some(PullRequestReview::Approved),
+        Some("CHANGES_REQUESTED") => Some(PullRequestReview::ChangesRequested),
+        Some("REVIEW_REQUIRED") => Some(PullRequestReview::ReviewRequired),
+        _ => None,
     }
+}
+
+/// The review state derived from the latest opinionated reviews and pending
+/// review requests, for when GitHub gives no decision.
+fn derived_review(node: &Value) -> PullRequestReview {
     let states = node
         .pointer("/latestOpinionatedReviews/nodes")
         .and_then(Value::as_array)
@@ -626,41 +1015,92 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_document_aliases_one_search_per_repository() {
-        let repo = |name: &str, user: &str| ResolvedRepo {
+    fn resolved(name: &str, user: &str) -> ResolvedRepo {
+        ResolvedRepo {
             owner: "octo".into(),
             name: name.into(),
             user: user.into(),
-        };
-        let queries = vec![
-            (search_query(&repo("web", "@me")), 50),
-            (search_query(&repo("api", "hubot")), 50),
+        }
+    }
+
+    #[test]
+    fn the_listing_aliases_one_search_per_repository() {
+        let searches = vec![
+            (search_query(&resolved("web", "@me")), 25, Listing::Open),
+            (search_query(&resolved("api", "hubot")), 25, Listing::Open),
             (
-                merged_query(&repo("web", "@me"), "2026-11-17T05:00:00Z"),
+                merged_query(&resolved("web", "@me"), "2026-11-17T05:00:00Z"),
                 10,
+                Listing::Merged,
             ),
         ];
         assert_eq!(
-            queries[1].0,
+            searches[1].0,
             "repo:octo/api is:pr is:open author:hubot archived:false"
         );
         assert_eq!(
-            queries[2].0,
+            searches[2].0,
             "repo:octo/web is:pr is:merged author:@me merged:>=2026-11-17T05:00:00Z archived:false"
         );
-        let document = graphql_document(&queries);
+        let document = list_document(&searches);
         assert!(document.contains(
-            "r2: search(query: \"repo:octo/web is:pr is:merged author:@me merged:>=2026-11-17T05:00:00Z archived:false\", type: ISSUE, first: 10)"
+            "r2: search(query: \"repo:octo/web is:pr is:merged author:@me merged:>=2026-11-17T05:00:00Z archived:false\", type: ISSUE, first: 10) { nodes { ...Merged } }"
         ));
         assert!(document.contains(
-            "r0: search(query: \"repo:octo/web is:pr is:open author:@me archived:false\""
+            "r0: search(query: \"repo:octo/web is:pr is:open author:@me archived:false\", type: ISSUE, first: 25) { nodes { ...Summary } }"
         ));
         assert!(document.contains("r1: search(query: \"repo:octo/api"));
         assert!(document.contains("viewer { login }"));
-        assert!(document.contains("fragment PR on PullRequest"));
+        assert!(document.contains("rateLimit { cost remaining resetAt }"));
+        assert!(document.contains("fragment Summary on PullRequest"));
+        assert!(document.contains("fragment Merged on PullRequest"));
+        // The listing reads no per-thread or per-check connections.
+        assert!(!document.contains("reviewThreads"));
+        assert!(!document.contains("nodes { __typename"));
+        // GitHub rejects a fragment no search uses.
+        assert!(!list_document(&searches[..2]).contains("fragment Merged"));
     }
 
+    fn request(name: &str, number: u64) -> DetailRequest {
+        DetailRequest {
+            owner: "octo".into(),
+            name: name.into(),
+            number,
+            fingerprint: format!("f{number}"),
+        }
+    }
+
+    #[test]
+    fn the_details_document_groups_pull_requests_by_repository() {
+        let requests = [request("web", 7), request("api", 3), request("web", 9)];
+        let document = detail_document(&requests);
+        assert!(document.contains(
+            "d0: repository(owner: \"octo\", name: \"web\") { p7: pullRequest(number: 7) { ...Detail } p9: pullRequest(number: 9) { ...Detail } }"
+        ));
+        assert!(document.contains(
+            "d1: repository(owner: \"octo\", name: \"api\") { p3: pullRequest(number: 3) { ...Detail } }"
+        ));
+        assert!(document.contains(&format!("reviewThreads(first: {MAX_REVIEW_THREADS})")));
+        assert!(document.contains("rateLimit { cost remaining resetAt }"));
+
+        let value = json!({
+            "data": {
+                "d0": { "p7": detail_node(), "p9": null },
+                "d1": { "p3": detail_node() },
+            },
+            "errors": [{ "message": "Could not resolve to a PullRequest with the number of 9." }],
+        });
+        let details = parse_details(&value, &requests, "me");
+        let first = details[0].as_ref().unwrap();
+        assert_eq!(first.fingerprint, "f7");
+        assert_eq!((first.human_threads, first.bot_threads), (1, 1));
+        assert_eq!(first.review, PullRequestReview::ChangesRequested);
+        assert_eq!(details[1].as_ref().unwrap().fingerprint, "f3");
+        assert_eq!(
+            details[2],
+            Err("Could not resolve to a PullRequest with the number of 9.".to_owned())
+        );
+    }
     #[test]
     fn check_rollup_reports_the_worst_news() {
         let run = |conclusion: Option<&str>, status: &str| json!({ "__typename": "CheckRun", "conclusion": conclusion, "status": status });
@@ -773,71 +1213,160 @@ mod tests {
             "url": format!("https://github.com/octo/web/pull/{number}"),
             "isDraft": false,
             "createdAt": created,
+            "updatedAt": created,
             "mergeable": "MERGEABLE",
             "headRefName": format!("branch-{number}"),
+            "headRefOid": "abc",
             "reviewDecision": null,
-            "reviewRequests": { "totalCount": 0 },
-            "latestOpinionatedReviews": { "nodes": [] },
             "mergeQueueEntry": null,
-            "reviewThreads": { "nodes": [] },
             "commits": { "nodes": [] },
         })
     }
 
+    fn detail_node() -> Value {
+        json!({
+            "reviewRequests": { "totalCount": 1 },
+            "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }, { "state": "CHANGES_REQUESTED" }] },
+            "reviewThreads": { "nodes": [
+                { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "reviewer" } }] } },
+                { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "Bot", "login": "coderabbit" } }] } },
+                { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "me" } }] } },
+                { "isResolved": true, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "reviewer" } }] } },
+            ] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "contexts": { "nodes": [
+                { "__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE", "status": "COMPLETED" },
+            ] } } } }] },
+        })
+    }
+
     #[test]
-    fn responses_parse_into_ordered_pull_requests_per_search() {
+    fn listings_parse_into_ordered_summaries_per_search() {
         let mut conflicted = node(7, "2026-01-02T00:00:00Z");
         conflicted["mergeable"] = json!("CONFLICTING");
         conflicted["isDraft"] = json!(true);
         conflicted["mergeQueueEntry"] = json!({ "state": "QUEUED" });
-        conflicted["latestOpinionatedReviews"] =
-            json!({ "nodes": [{ "state": "APPROVED" }, { "state": "CHANGES_REQUESTED" }] });
-        conflicted["reviewThreads"] = json!({ "nodes": [
-            { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "reviewer" } }] } },
-            { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "Bot", "login": "coderabbit" } }] } },
-            { "isResolved": false, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "me" } }] } },
-            { "isResolved": true, "comments": { "nodes": [{ "author": { "__typename": "User", "login": "reviewer" } }] } },
-        ] });
-        let mut requested = node(3, "2026-01-01T00:00:00Z");
-        requested["reviewRequests"] = json!({ "totalCount": 1 });
+        conflicted["commits"] = json!({ "nodes": [{ "commit": { "statusCheckRollup": {
+            "state": "FAILURE",
+            "contexts": { "checkRunCountsByState": [
+                { "state": "SUCCESS", "count": 3 },
+                { "state": "FAILURE", "count": 1 },
+            ] },
+        } } }] });
+        let mut approved = node(3, "2026-01-01T00:00:00Z");
+        approved["reviewDecision"] = json!("APPROVED");
         let value = json!({
             "data": {
                 "viewer": { "login": "me" },
-                "r0": { "nodes": [conflicted, requested, {}] },
+                "r0": { "nodes": [conflicted, approved, {}] },
                 "r1": { "nodes": [] },
             }
         });
-        let results = parse_response(&value, 2);
+        let results = parse_summaries(&value, 2);
         let first = results[0].as_ref().unwrap();
         assert_eq!(
-            first.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+            first
+                .iter()
+                .map(|summary| summary.pr.number)
+                .collect::<Vec<_>>(),
             vec![3, 7]
         );
-        assert_eq!(first[0].review, PullRequestReview::ReviewRequired);
-        assert_eq!(first[0].title, "PR 3");
-        assert_eq!(first[0].branch, "branch-3");
-        let pr = &first[1];
+        assert_eq!(first[0].decision, Some(PullRequestReview::Approved));
+        assert_eq!(first[0].pr.title, "PR 3");
+        assert_eq!(first[0].pr.branch, "branch-3");
+        let pr = &first[1].pr;
         assert!(pr.conflict && pr.draft && pr.queued);
-        assert_eq!(pr.review, PullRequestReview::ChangesRequested);
-        assert_eq!((pr.human_threads, pr.bot_threads), (1, 1));
+        assert_eq!(pr.checks, PullRequestChecks::Fail);
+        assert_eq!((pr.check_counts.passed, pr.check_counts.failed), (3, 1));
         assert_eq!(results[1], Ok(Vec::new()));
+    }
+
+    #[test]
+    fn the_fingerprint_follows_activity_head_and_check_progress() {
+        let fingerprint = |node: &Value| summary_from(node).unwrap().fingerprint;
+        let base = node(1, "2026-01-01T00:00:00Z");
+        let same = fingerprint(&base);
+        assert_eq!(fingerprint(&base.clone()), same);
+        let mut title = base.clone();
+        title["title"] = json!("renamed");
+        assert_eq!(fingerprint(&title), same);
+        let mut updated = base.clone();
+        updated["updatedAt"] = json!("2026-01-02T00:00:00Z");
+        assert_ne!(fingerprint(&updated), same);
+        let mut pushed = base.clone();
+        pushed["headRefOid"] = json!("def");
+        assert_ne!(fingerprint(&pushed), same);
+        let mut progressed = base;
+        progressed["commits"] = json!({ "nodes": [{ "commit": { "statusCheckRollup": {
+            "state": "PENDING",
+            "contexts": { "checkRunCountsByState": [{ "state": "IN_PROGRESS", "count": 1 }] },
+        } } }] });
+        assert_ne!(fingerprint(&progressed), same);
+    }
+
+    #[test]
+    fn details_join_their_summary_and_the_decision_wins() {
+        let detail = detail_from(&detail_node(), "me", "f");
+        let mut decided = node(1, "");
+        decided["reviewDecision"] = json!("APPROVED");
+        let pr = summary_from(&decided).unwrap().with_detail(Some(&detail));
+        assert_eq!(pr.review, PullRequestReview::Approved);
+        assert_eq!((pr.human_threads, pr.bot_threads), (1, 1));
+        assert_eq!(
+            pr.check_runs
+                .iter()
+                .map(|run| run.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lint"]
+        );
+        let undecided = summary_from(&node(1, "")).unwrap();
+        assert_eq!(
+            undecided.clone().with_detail(Some(&detail)).review,
+            PullRequestReview::ChangesRequested
+        );
+        assert_eq!(undecided.with_detail(None).review, PullRequestReview::None);
+        let mut requested = detail_node();
+        requested["latestOpinionatedReviews"] = json!({ "nodes": [] });
+        assert_eq!(
+            derived_review(&requested),
+            PullRequestReview::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn only_changed_pull_requests_need_details() {
+        let mut cached = PullRequestDetails::new();
+        cached.insert(
+            ("octo/web".to_owned(), 7),
+            detail_from(&detail_node(), "me", "f7"),
+        );
+        assert!(details_current(&cached, &request("web", 7)));
+        let mut changed = request("web", 7);
+        changed.fingerprint = "f8".into();
+        assert!(!details_current(&cached, &changed));
+        assert!(!details_current(&cached, &request("api", 7)));
     }
 
     #[test]
     fn merged_pull_requests_order_by_merge_time_and_drop_their_signals() {
         let merged = |number: u64, at: &str| {
-            let mut pr = node(number, "2025-01-01T00:00:00Z");
-            pr["merged"] = json!(true);
-            pr["mergedAt"] = json!(at);
-            pr["mergeable"] = json!("CONFLICTING");
-            pr["reviewDecision"] = json!("APPROVED");
-            pr
+            json!({
+                "number": number,
+                "title": "t",
+                "url": "u",
+                "merged": true,
+                "mergedAt": at,
+                "headRefName": "b",
+            })
         };
         let value = json!({ "data": { "r0": { "nodes": [
             merged(4, "2026-11-17T02:00:00Z"),
             merged(9, "2026-11-17T01:00:00Z"),
         ] } } });
-        let prs = parse_response(&value, 1).remove(0).unwrap();
+        let summaries = parse_summaries(&value, 1).remove(0).unwrap();
+        let prs = summaries
+            .into_iter()
+            .map(|summary| summary.with_detail(None))
+            .collect::<Vec<_>>();
         assert_eq!(
             prs.iter().map(|pr| pr.number).collect::<Vec<_>>(),
             vec![9, 4]
@@ -847,35 +1376,57 @@ mod tests {
     }
 
     #[test]
-    fn the_review_decision_wins_over_derived_reviews() {
-        let mut approved = node(1, "");
-        approved["reviewDecision"] = json!("APPROVED");
-        approved["latestOpinionatedReviews"] =
-            json!({ "nodes": [{ "state": "CHANGES_REQUESTED" }] });
-        assert_eq!(review_of(&approved), PullRequestReview::Approved);
-        let mut derived = node(1, "");
-        derived["latestOpinionatedReviews"] = json!({ "nodes": [{ "state": "APPROVED" }] });
-        derived["reviewRequests"] = json!({ "totalCount": 2 });
-        assert_eq!(review_of(&derived), PullRequestReview::Approved);
-        assert_eq!(review_of(&node(1, "")), PullRequestReview::None);
-    }
-
-    #[test]
     fn missing_searches_report_the_first_error() {
         let value = json!({
             "data": { "r0": { "nodes": [] } },
             "errors": [{ "message": "Could not resolve to a Repository\nmore" }],
         });
-        let results = parse_response(&value, 2);
+        let results = parse_summaries(&value, 2);
         assert_eq!(results[0], Ok(Vec::new()));
         assert_eq!(
             results[1],
             Err("Could not resolve to a Repository".to_owned())
         );
         assert_eq!(
-            parse_response(&json!({}), 1)[0],
+            parse_summaries(&json!({}), 1)[0],
             Err("no search result".to_owned())
         );
+    }
+
+    #[test]
+    fn rate_limit_errors_and_windows_are_recognized() {
+        assert!(is_rate_limit_error(
+            "gh: API rate limit already exceeded for user ID 256115739."
+        ));
+        assert!(is_rate_limit_error(
+            "gh: You have exceeded a secondary rate limit. Please wait a few minutes"
+        ));
+        assert!(!is_rate_limit_error(
+            "gh: Could not resolve to a Repository"
+        ));
+
+        // 2026-11-24T08:55:54Z
+        let now = time::OffsetDateTime::from_unix_timestamp(1_795_510_554).expect("timestamp");
+        let rest = json!({ "resources": { "graphql": { "limit": 5000, "remaining": 0, "reset": 1_795_512_394 } } });
+        assert_eq!(
+            rate_window_from_rest(&rest, now),
+            Some(RateWindow {
+                remaining: 0,
+                refill_in: Duration::from_secs(1840),
+                refill_at: "09:26".into(),
+            })
+        );
+        // A refill already past waits for nothing.
+        assert_eq!(rate_window(10, 0, now).refill_in, Duration::ZERO);
+
+        let mut tracker = RateTracker::default();
+        tracker.observe(&json!({ "data": { "rateLimit": { "remaining": 4000, "resetAt": "2026-11-24T09:26:34Z" } } }));
+        tracker.observe(&json!({ "data": {} }));
+        assert_eq!(tracker.window, Some((4000, "2026-11-24T09:26:34Z".into())));
+        tracker.observe_error("gh: not logged in");
+        assert!(!tracker.limited);
+        tracker.observe_error("gh: API rate limit already exceeded");
+        assert!(tracker.limited);
     }
 
     #[test]

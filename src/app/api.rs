@@ -38,8 +38,8 @@ impl App {
                 segment_index,
                 result,
             } => self.handle_tab_bar_command_finished(generation, segment_index, result),
-            AppEvent::PullRequestsRefreshed { generation, repos } => {
-                self.handle_pull_requests_refreshed(generation, repos, Instant::now())
+            AppEvent::PullRequestsRefreshed { generation, poll } => {
+                self.handle_pull_requests_refreshed(generation, poll, Instant::now())
             }
             AppEvent::WorktreeReadFinished(result) => {
                 let changes_workspace = matches!(

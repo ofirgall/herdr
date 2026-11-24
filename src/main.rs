@@ -238,7 +238,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Open pull requests of watched repositories, shown in the sidebar when
 # [ui.sidebar.pull_requests] enabled = true. Needs a logged-in `gh`.
 # [pull_requests]
-# poll_seconds = 60
+# poll_seconds = 120
 # gh_command = "gh"
 # merged_hours = 5
 # [[pull_requests.repos]]

@@ -199,7 +199,7 @@ pub enum AppEvent {
     /// A background poll of the watched repositories' pull requests finished.
     PullRequestsRefreshed {
         generation: u64,
-        repos: Vec<crate::app::pull_requests::PullRequestRepoState>,
+        poll: crate::app::pull_requests::PullRequestPoll,
     },
     /// A configured tab bar status command finished.
     TabBarCommandFinished {
