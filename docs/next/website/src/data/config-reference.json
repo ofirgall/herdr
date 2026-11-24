@@ -1211,6 +1211,42 @@
           "description": "Draw a sidebar token reported with --link underlined. Set false to keep linked tokens in their configured style; the link still opens on the click token_link_click selects."
         },
         {
+          "key": "ui.sidebar.tree.worktrees.branch",
+          "type": "string",
+          "default": "\"├─\"",
+          "description": "Two-column connector of a child with more siblings below it, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.worktrees.last",
+          "type": "string",
+          "default": "\"└─\"",
+          "description": "Two-column connector of the last child, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.worktrees.rail",
+          "type": "string",
+          "default": "\"│\"",
+          "description": "One-column line continuing past rows that are not connectors, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.branch",
+          "type": "string",
+          "default": "\"├─\"",
+          "description": "Two-column connector of a child with more siblings below it, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.last",
+          "type": "string",
+          "default": "\"└─\"",
+          "description": "Two-column connector of the last child, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.rail",
+          "type": "string",
+          "default": "\"│\"",
+          "description": "One-column line continuing past rows that are not connectors, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
           "key": "ui.sidebar.agents.enabled",
           "type": "boolean",
           "default": "true",

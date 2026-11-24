@@ -11,12 +11,63 @@ use ratatui::{
 use super::*;
 use crate::protocol::{ClientShellAgent, ClientShellPane, ClientShellTab};
 
-/// Columns a child is indented relative to its space's first row.
-const CHILD_INDENT: u16 = 2;
-/// Worktree connector drawn on child rows; matches the space rows' `│` column.
-pub(super) const TREE_RAIL: &str = " │";
+/// Columns a child is indented relative to its space's first row: the
+/// `├─`/`└─` connector under the space's status icon, then a space.
+const CHILD_INDENT: u16 = 3;
+/// Column of the worktree group rail.
+const TREE_RAIL_COLUMN: u16 = 1;
 /// Columns occupied by the worktree tree marker on child rows.
 pub(super) const TREE_MARKER_WIDTH: u16 = 2;
+
+/// One tree's connector glyphs fitted to their columns: `branch` and `last`
+/// fill two columns and `rail` one, so any configured glyph keeps the layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TreeGlyphs {
+    pub(super) branch: String,
+    pub(super) last: String,
+    pub(super) rail: String,
+}
+
+impl Default for TreeGlyphs {
+    fn default() -> Self {
+        Self::from_config(&crate::config::TreeGlyphsConfig::default())
+    }
+}
+
+impl TreeGlyphs {
+    pub(super) fn from_config(config: &crate::config::TreeGlyphsConfig) -> Self {
+        Self {
+            branch: fit_columns(&config.branch, 2),
+            last: fit_columns(&config.last, 2),
+            rail: fit_columns(&config.rail, 1),
+        }
+    }
+
+    /// The connector of a child's first row.
+    pub(super) fn connector(&self, last: bool) -> &str {
+        if last {
+            &self.last
+        } else {
+            &self.branch
+        }
+    }
+}
+
+/// `text` cut or padded with spaces to exactly `width` display columns.
+fn fit_columns(text: &str, width: usize) -> String {
+    let mut fitted = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width {
+            break;
+        }
+        fitted.push(ch);
+        used += ch_width;
+    }
+    fitted.extend(std::iter::repeat_n(' ', width - used));
+    fitted
+}
 
 /// One agent drawn as a child entry of its space.
 pub(super) struct SpaceAgentChild {
@@ -163,6 +214,9 @@ pub(super) fn render_agent_toggle(
 /// column before its status, leaving the tree connectors on the plain sidebar.
 /// `tree_rail` continues the group's `│` connector through the children of a
 /// space that has worktree children below it, so the tree stays unbroken.
+/// Each child hangs off a `├─`/`└─` connector under the space's status icon;
+/// a top-level space shares that column with its worktree rail, so its last
+/// agent stays `├─` while worktrees follow.
 pub(super) fn render_children(
     buffer: &mut Buffer,
     area: Rect,
@@ -173,8 +227,11 @@ pub(super) fn render_children(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
+    let tree_style = Style::default().fg(palette.overlay0);
+    // The trunk runs past the last agent when the worktree rail shares its column.
+    let trunk_continues = tree_rail && space_indent == TREE_RAIL_COLUMN;
     let mut y = area.y;
-    for child in children {
+    for (child_index, child) in children.iter().enumerate() {
         if y >= area.bottom() {
             break;
         }
@@ -197,8 +254,32 @@ pub(super) fn render_children(
                     area.x,
                     y + row,
                     area.width.min(TREE_MARKER_WIDTH),
-                    TREE_RAIL,
-                    Style::default().fg(palette.overlay0),
+                    &format!(" {}", config.tree_worktrees.rail),
+                    tree_style,
+                );
+            }
+        }
+        let last = child_index + 1 == children.len() && !trunk_continues;
+        if space_indent < area.width {
+            for row in 0..height {
+                // On the shared trunk, continuation rows keep the worktree rail.
+                let rail = if trunk_continues {
+                    &config.tree_worktrees.rail
+                } else {
+                    &config.tree_agents.rail
+                };
+                let connector = match (row, last) {
+                    (0, _) => config.tree_agents.connector(last),
+                    (_, false) => rail.as_str(),
+                    (_, true) => continue,
+                };
+                super::render::put_text(
+                    buffer,
+                    area.x + space_indent,
+                    y + row,
+                    (area.width - space_indent).min(2),
+                    connector,
+                    tree_style,
                 );
             }
         }

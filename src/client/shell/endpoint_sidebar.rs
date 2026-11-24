@@ -485,6 +485,7 @@ pub(super) fn render_expanded(
                     state.selected_workspace_id.is_some(),
                     false,
                     palette,
+                    &config.tree_worktrees,
                     None,
                     config.token_link_underline,
                 );

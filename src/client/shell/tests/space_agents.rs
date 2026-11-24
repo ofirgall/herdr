@@ -181,10 +181,14 @@ fn expanded_mode_renders_indented_children_with_their_own_status() {
         AgentStatus::Blocked,
         &state.config.status_indicators
     )));
-    // Children are indented two columns beyond the space's first-row content.
+    // Children hang off tree connectors under the space's status icon, with
+    // their content three columns beyond the space's first-row content.
     let content = rows[space].find(&working).unwrap();
     let child_icon = rows[space + 1].find(&working).unwrap();
-    assert_eq!(child_icon, content + 2, "{rows:#?}");
+    assert_eq!(child_icon, content + "├─ ".len(), "{rows:#?}");
+    assert!(rows[space + 1].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 2].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 3].starts_with(" └─ "), "{rows:#?}");
     // The next space starts below ws_1's children and shows its own child.
     let docs = row_index(&rows, "docs");
     assert_eq!(docs, space + 4);
@@ -535,16 +539,18 @@ fn children_of_a_non_last_linked_worktree_keep_the_tree_rail() {
     let rows = compose_rows(&mut state);
 
     // ws_2 ("docs") has a sibling below it, so its child row continues the rail
-    // in the same column as the `├` connectors.
+    // in the same column as the `├` connectors, with its own connector under
+    // the worktree's status icon.
     let child = &rows[row_index(&rows, "notes")];
-    assert!(child.starts_with(" │"), "{rows:#?}");
+    assert!(child.starts_with(" │  └─ "), "{rows:#?}");
     let docs = &rows[row_index(&rows, "docs")];
     assert!(docs.starts_with(" ├─ "), "{rows:#?}");
     let empty = &rows[row_index(&rows, "empty")];
     assert!(empty.starts_with(" └─ "), "{rows:#?}");
-    // The parent's own children carry the rail down to its first worktree.
+    // The parent's agents share the trunk with its worktrees, so even its last
+    // agent keeps a `├─` connector down to the first worktree.
     let parent_child = &rows[row_index(&rows, "api")];
-    assert!(parent_child.starts_with(" │"), "{rows:#?}");
+    assert!(parent_child.starts_with(" ├─ "), "{rows:#?}");
 }
 
 #[test]
@@ -586,12 +592,14 @@ fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Tree rail at column 1, status icon at column 6: the highlight starts at 5.
+    // Tree rail at column 1, connector at 4, status icon at column 7: the
+    // highlight starts at 6.
     assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "│");
-    for x in child.x..child.x + 5 {
+    assert_eq!(buffer[(child.x + 4, child.y)].symbol(), "└");
+    for x in child.x..child.x + 6 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 5..child.right() {
+    for x in child.x + 6..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
@@ -611,11 +619,13 @@ fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Status icon at column 3: the highlight starts at 2.
-    for x in child.x..child.x + 2 {
-        assert_ne!(buffer[(x, child.y)].bg, highlight, "indent column {x}");
+    // pane_b ("api") is the last child: connector at column 1, status icon at
+    // column 4, so the highlight starts at 3.
+    assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "└");
+    for x in child.x..child.x + 3 {
+        assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 2..child.right() {
+    for x in child.x + 3..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
@@ -771,4 +781,86 @@ fn row_gap_after_agents_only_spaces_only_entries_with_shown_agents() {
     // The parent shows agents, so a gap precedes docs.
     assert_eq!(rows[docs - 1].chars().nth(1), Some('│'), "{rows:#?}");
     assert!(!rows[docs - 1].contains("api"), "{rows:#?}");
+}
+
+#[test]
+fn multi_row_children_continue_the_connector_until_the_last_child() {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.spaces.agent_rows =
+        toml::from_str::<std::collections::HashMap<String, crate::config::SpacesSidebarConfig>>(
+            "[x]\nagent_rows = [[\"state_icon\", \"tab\"], [\"agent\"]]\n",
+        )
+        .unwrap()
+        .remove("x")
+        .unwrap()
+        .agent_rows;
+    let mut state = state_with(ClientShellConfig::from_config(&config), agents_snapshot());
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+
+    // web, web, api: each child is two rows; continuation rows carry `│`
+    // until the last child, whose continuation row has no connector.
+    assert!(rows[space + 1].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 2].starts_with(" │    claude"), "{rows:#?}");
+    assert!(rows[space + 5].starts_with(" └─ "), "{rows:#?}");
+    assert!(rows[space + 6].starts_with("      claude"), "{rows:#?}");
+}
+
+#[test]
+fn configured_tree_glyphs_draw_each_tree_with_its_own_glyphs() {
+    let mut config: Config = toml::from_str(
+        "[ui.sidebar.spaces]\nagents = \"expanded\"\n\
+         [ui.sidebar.tree.worktrees]\nlast = \"╰─\"\n\
+         [ui.sidebar.tree.agents]\nbranch = \"├╌\"\nlast = \"╰╌\"\nrail = \"┆\"\n",
+    )
+    .unwrap();
+    config.ui.sidebar.spaces.agent_rows =
+        toml::from_str::<std::collections::HashMap<String, crate::config::SpacesSidebarConfig>>(
+            "[x]\nagent_rows = [[\"state_icon\", \"tab\"], [\"agent\"]]\n",
+        )
+        .unwrap()
+        .remove("x")
+        .unwrap()
+        .agent_rows;
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true), (2, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let rows = compose_rows(&mut state);
+
+    // The parent's agents branch off the worktree trunk, which keeps its rail.
+    let api = row_index(&rows, "api");
+    assert!(rows[api].starts_with(" ├╌ "), "{rows:#?}");
+    assert!(rows[api + 1].starts_with(" │    claude"), "{rows:#?}");
+    // A worktree's own agents use the agent glyphs throughout.
+    let notes = row_index(&rows, "notes");
+    assert!(rows[notes].starts_with(" │  ╰╌ "), "{rows:#?}");
+    assert!(
+        rows[row_index(&rows, "docs")].starts_with(" ├─ "),
+        "{rows:#?}"
+    );
+    assert!(
+        rows[row_index(&rows, "empty")].starts_with(" ╰─ "),
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn tree_glyphs_are_fitted_to_their_columns() {
+    let glyphs = crate::client::shell::space_agents::TreeGlyphs::from_config(
+        &crate::config::TreeGlyphsConfig {
+            branch: "+".into(),
+            last: "╰──>".into(),
+            rail: "".into(),
+        },
+    );
+    assert_eq!(glyphs.branch, "+ ");
+    assert_eq!(glyphs.last, "╰─");
+    assert_eq!(glyphs.rail, " ");
 }

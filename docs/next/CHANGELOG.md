@@ -4,6 +4,10 @@
 
 ### Added
 - `ui.status_icons` states now accept a list of glyphs that animate, with `ui.status_icons.animation_interval_ms` setting the delay between frames.
+- `[ui.sidebar.tree.worktrees]` and `[ui.sidebar.tree.agents]` set the sidebar's tree connector glyphs, for example rounded or dotted lines.
+
+### Changed
+- Agents listed under their space in the sidebar now hang off `├─`/`└─` tree connectors, matching worktree children.
 
 ## [0.9.5] - 2026-10-14
 
