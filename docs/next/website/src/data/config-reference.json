@@ -197,6 +197,12 @@
           "description": "Color for tab names in the sidebar (the tab and tab_stripped tokens of agent rows and Space agent children). Unset keeps the row's muted secondary color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for tab names on the focused agent's rows (agents panel and Space agent children), which are also bold. Falls back to theme.custom.tab, then to the row's muted secondary color. A token fg or bold still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -327,6 +333,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the tab color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -471,6 +483,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the tab color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",

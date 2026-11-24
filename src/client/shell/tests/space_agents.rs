@@ -665,6 +665,75 @@ fn sidebar_text_with_tab_tokens(token: &str, tabs: [&str; 2]) -> (String, String
     (rows[..split].join("\n"), rows[split..].join("\n"))
 }
 
+/// Foreground and boldness of the first letter of every `needle` in the
+/// sidebar's first 30 columns, top to bottom: the space child first, then the
+/// agents panel row.
+fn sidebar_word_styles(frame: &FrameData, needle: &str) -> Vec<(ratatui::style::Color, bool)> {
+    let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
+    frame_rows(frame)
+        .iter()
+        .enumerate()
+        .filter_map(|(y, row)| {
+            let sidebar = row.chars().take(30).collect::<String>();
+            let x = sidebar.find(needle)?;
+            let cell = &buffer[(sidebar[..x].chars().count() as u16, y as u16)];
+            Some((
+                cell.fg,
+                cell.modifier.contains(ratatui::style::Modifier::BOLD),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn focused_agent_tab_names_use_tab_focused_and_bold() {
+    use ratatui::style::Color;
+    let tab_color = Color::Rgb(0x71, 0x4f, 0xb0);
+    let focused_color = Color::Rgb(0xc6, 0xa6, 0xff);
+    let styles = |token: &str, tab_focused: Option<Color>| {
+        let mut config = Config::default();
+        config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+        config.ui.sidebar.agents.rows =
+            toml::from_str::<crate::config::AgentsSidebarConfig>(&format!("rows = [[{token}]]"))
+                .unwrap()
+                .rows;
+        config.ui.sidebar.spaces.agent_rows = toml::from_str::<crate::config::SpacesSidebarConfig>(
+            &format!("agent_rows = [[{token}]]"),
+        )
+        .unwrap()
+        .agent_rows;
+        let mut config = ClientShellConfig::from_config(&config);
+        config.palette.tab = Some(tab_color);
+        config.palette.tab_focused = tab_focused;
+        let mut snapshot = snapshot();
+        snapshot.tabs = vec![
+            tab("tab_1", "ws_1", 1, "alpha"),
+            tab("tab_2", "ws_1", 2, "bravo"),
+        ];
+        snapshot.agents = vec![
+            agent("pane_1", "ws_1", "tab_1", AgentStatus::Idle),
+            agent("pane_2", "ws_1", "tab_2", AgentStatus::Idle),
+        ];
+        snapshot.agents[0].focused = true;
+        let mut state = state_with(config, snapshot);
+        let frame = state.compose(106, 30).expect("composed frame");
+        (
+            sidebar_word_styles(&frame, "alpha"),
+            sidebar_word_styles(&frame, "bravo"),
+        )
+    };
+    // Each agent shows as a space child and as an agents panel row.
+    let (focused, other) = styles("\"tab\"", Some(focused_color));
+    assert_eq!(focused, vec![(focused_color, true); 2]);
+    assert_eq!(other, vec![(tab_color, false); 2]);
+    let (focused, other) = styles("\"tab\"", None);
+    assert_eq!(focused, vec![(tab_color, true); 2]);
+    assert_eq!(other, vec![(tab_color, false); 2]);
+    // A token's own `bold` wins over the focused weight.
+    let (focused, _) = styles("{token = \"tab\", bold = false}", Some(focused_color));
+    assert_eq!(focused, vec![(focused_color, false); 2]);
+}
+
 #[test]
 fn tab_stripped_hides_the_tab_position_in_panel_and_space_children() {
     let tabs = ["1| web", "2| zsh"];

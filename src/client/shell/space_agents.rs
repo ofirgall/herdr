@@ -281,6 +281,9 @@ pub(super) fn render_children(
                 );
             }
         }
+        // Tab tokens on the focused child use `tab_focused`.
+        let focused_palette = child.focused.then(|| palette.with_focused_tab()).flatten();
+        let token_palette = focused_palette.as_ref().unwrap_or(palette);
         let status_style = Style::default().fg(status_color(child.status, palette));
         let name_style = if child.focused {
             Style::default()
@@ -303,12 +306,13 @@ pub(super) fn render_children(
             let mut spans = Vec::<Span<'static>>::new();
             spans.extend(super::agent_sidebar::token_row_spans(
                 tokens,
+                child.focused,
                 icon,
                 status_style,
                 name_style,
                 secondary,
                 secondary,
-                palette,
+                token_palette,
                 width as usize,
                 (!config.token_link_click.is_off()).then(|| super::agent_sidebar::LinkSink {
                     hits: &mut hits.token_links,

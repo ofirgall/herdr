@@ -3522,6 +3522,33 @@ mod tests {
     }
 
     #[test]
+    fn tab_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        assert_eq!(state::Palette::catppuccin().tab_focused, None);
+        assert_eq!(state::Palette::catppuccin().with_focused_tab(), None);
+        let custom = "[theme]\nauto_switch = true\n[theme.custom]\ntab = \"#5c6fae\"\ntab_focused = \"#a97cfa\"\n";
+        let dark = palette(custom, HostAppearance::Dark);
+        assert_eq!(
+            dark.tab_focused,
+            Some(ratatui::style::Color::Rgb(0xa9, 0x7c, 0xfa))
+        );
+        assert_eq!(
+            dark.with_focused_tab().and_then(|focused| focused.tab),
+            dark.tab_focused
+        );
+        let with_light = format!("{custom}[theme.custom.light]\ntab_focused = \"#444444\"\n");
+        assert_eq!(
+            palette(&with_light, HostAppearance::Light).tab_focused,
+            Some(ratatui::style::Color::Rgb(0x44, 0x44, 0x44))
+        );
+    }
+
+    #[test]
     fn index_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
         use crate::terminal_theme::HostAppearance;
         let palette = |toml: &str, appearance| {

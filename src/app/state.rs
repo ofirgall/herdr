@@ -80,6 +80,9 @@ pub struct Palette {
     /// Optional color for tab names in the sidebar (`tab` and `tab_stripped`
     /// tokens). When unset, tab names use the row's secondary color.
     pub tab: Option<Color>,
+    /// Optional color for tab names on the focused agent's rows. Falls back to
+    /// `tab`, then to the row's secondary color.
+    pub tab_focused: Option<Color>,
 }
 
 impl Palette {
@@ -90,6 +93,16 @@ impl Palette {
         } else {
             self.index
         }
+    }
+
+    /// This palette with `tab` swapped for `tab_focused`, for the focused
+    /// agent's rows; `None` when `tab_focused` is unset (it falls back to `tab`),
+    /// so callers clone only when it is set.
+    pub fn with_focused_tab(&self) -> Option<Self> {
+        self.tab_focused.map(|color| Self {
+            tab: Some(color),
+            ..self.clone()
+        })
     }
 
     /// Catppuccin Mocha — the default.
@@ -117,6 +130,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -145,6 +159,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -173,6 +188,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -201,6 +217,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -229,6 +246,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -257,6 +275,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -285,6 +304,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -313,6 +333,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -341,6 +362,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -369,6 +391,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -397,6 +420,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -425,6 +449,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -453,6 +478,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -481,6 +507,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -509,6 +536,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -537,6 +565,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -565,6 +594,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -593,6 +623,7 @@ impl Palette {
             index: None,
             index_focused: None,
             tab: None,
+            tab_focused: None,
         }
     }
 
@@ -690,6 +721,9 @@ impl Palette {
         if let Some(c) = &custom.tab {
             self.tab = Some(parse_color(c));
         }
+        if let Some(c) = &custom.tab_focused {
+            self.tab_focused = Some(parse_color(c));
+        }
         self
     }
 
@@ -760,6 +794,9 @@ impl Palette {
         }
         if let Some(c) = &custom.tab {
             self.tab = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.tab_focused {
+            self.tab_focused = Some(parse_color(c));
         }
         self
     }

@@ -1114,6 +1114,8 @@ pub(in crate::client::shell) fn render_workspace_rows(
         };
         let spans = super::agent_sidebar::token_row_spans(
             row,
+            // Space rows have no tab token.
+            false,
             (
                 status_icon(status, indicators),
                 Style::default().fg(status_color(status, palette)),
