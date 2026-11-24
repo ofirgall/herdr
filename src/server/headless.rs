@@ -616,6 +616,14 @@ impl HeadlessServer {
                 )
                 .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+            let next_deadline = match self
+                .has_app_client()
+                .then(|| self.app.next_pull_request_deadline())
+                .flatten()
+            {
+                Some(poll) => next_deadline.map(|deadline| deadline.min(poll)),
+                None => next_deadline,
+            };
             let next_deadline = self
                 .pending_alt_screen_reads
                 .iter()
@@ -3449,7 +3457,11 @@ impl HeadlessServer {
         }
 
         changed |= self.app.handle_tab_bar_status_tasks(now);
-        changed |= self.app.handle_pull_request_tasks(now);
+        // Pull request polls spend the user's GitHub budget; nobody sees them
+        // without a client.
+        if self.has_app_client() {
+            changed |= self.app.handle_pull_request_tasks(now);
+        }
 
         if geometry_dirty {
             self.app.pending_agent_resume_deadline = None;

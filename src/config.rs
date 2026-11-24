@@ -33,7 +33,7 @@ pub use self::{
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, PlaceholderTemplate, PullRequestsSidebarConfig,
         SidebarConfig, SidebarTokenStyle, SpaceAgentsMode, SpaceSidebarToken, SpacesSidebarConfig,
-        TokenLinkClick,
+        TokenLinkClick, TreeGlyphsConfig,
     },
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,

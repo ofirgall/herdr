@@ -930,6 +930,10 @@ impl ClientShellState {
                 }
                 Some(Method::PaneFocus(PaneTarget { pane_id }))
             }
+            KeybindAction::PreviousSidebarEntry => self.step_sidebar_entry(-1),
+            KeybindAction::NextSidebarEntry => self.step_sidebar_entry(1),
+            KeybindAction::MoveSidebarEntryPrevious => self.move_sidebar_entry(false),
+            KeybindAction::MoveSidebarEntryNext => self.move_sidebar_entry(true),
             KeybindAction::SwitchWorkspace(index) => {
                 let workspace_id = self.jump_target_workspace_id(snapshot, index + 1)?;
                 self.reveal_workspace(&workspace_id);

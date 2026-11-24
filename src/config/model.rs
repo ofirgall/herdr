@@ -125,25 +125,108 @@ impl StatusIndicatorStyle {
     }
 }
 
-/// Per-state glyphs that replace the `status_indicators` style's glyph.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub const DEFAULT_STATUS_ICON_ANIMATION_INTERVAL_MS: u64 = 120;
+/// Lower bound that keeps animated glyphs from driving repaints faster than
+/// the client can usefully present them.
+pub const MIN_STATUS_ICON_ANIMATION_INTERVAL_MS: u64 = 16;
+
+/// One status glyph, or animation frames shown in order. Empty frames are
+/// dropped, so an empty string or list means "unset".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatusIconFrames(Vec<String>);
+
+impl StatusIconFrames {
+    pub fn is_animated(&self) -> bool {
+        self.0.len() > 1
+    }
+
+    /// The glyph at animation `frame`, or `None` when no frames are set.
+    pub fn frame(&self, frame: u64) -> Option<&str> {
+        let len = u64::try_from(self.0.len()).ok().filter(|len| *len > 0)?;
+        let idx = usize::try_from(frame % len).ok()?;
+        self.0.get(idx).map(String::as_str)
+    }
+}
+
+impl From<&str> for StatusIconFrames {
+    fn from(glyph: &str) -> Self {
+        Self::from_iter([glyph.to_owned()])
+    }
+}
+
+impl From<String> for StatusIconFrames {
+    fn from(glyph: String) -> Self {
+        Self::from_iter([glyph])
+    }
+}
+
+impl FromIterator<String> for StatusIconFrames {
+    fn from_iter<I: IntoIterator<Item = String>>(frames: I) -> Self {
+        Self(
+            frames
+                .into_iter()
+                .filter(|frame| !frame.is_empty())
+                .collect(),
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusIconFrames {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            One(String),
+            Many(Vec<String>),
+        }
+
+        match Raw::deserialize(deserializer)
+            .map_err(|_| de::Error::custom("status icon must be a string or an array of strings"))?
+        {
+            Raw::One(glyph) => Ok(Self::from_iter([glyph])),
+            Raw::Many(frames) => Ok(Self::from_iter(frames)),
+        }
+    }
+}
+
+/// Per-state glyphs that replace the `status_indicators` style's glyph. Each
+/// state takes one glyph or an array of frames that animate every
+/// `animation_interval_ms`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct StatusIconsConfig {
-    /// Glyph for blocked agents. Default: unset (the indicator style's glyph).
-    pub blocked: Option<String>,
-    /// Glyph for working agents. Default: unset (the indicator style's glyph).
-    pub working: Option<String>,
-    /// Glyph for agents that finished unseen work. Default: unset (the indicator style's glyph).
-    pub done: Option<String>,
-    /// Glyph for idle agents. Default: unset (the indicator style's glyph).
-    pub idle: Option<String>,
-    /// Glyph for panes with no detected agent state. Default: unset (the indicator style's glyph).
-    pub unknown: Option<String>,
+    /// Glyph or animation frames for blocked agents. Default: unset (the indicator style's glyph).
+    pub blocked: Option<StatusIconFrames>,
+    /// Glyph or animation frames for working agents. Default: unset (the indicator style's glyph).
+    pub working: Option<StatusIconFrames>,
+    /// Glyph or animation frames for agents that finished unseen work. Default: unset (the indicator style's glyph).
+    pub done: Option<StatusIconFrames>,
+    /// Glyph or animation frames for idle agents. Default: unset (the indicator style's glyph).
+    pub idle: Option<StatusIconFrames>,
+    /// Glyph or animation frames for panes with no detected agent state. Default: unset (the indicator style's glyph).
+    pub unknown: Option<StatusIconFrames>,
+    /// Delay between animation frames in milliseconds; values below 16 are raised to 16. Default: 120.
+    pub animation_interval_ms: u64,
+}
+
+impl Default for StatusIconsConfig {
+    fn default() -> Self {
+        Self {
+            blocked: None,
+            working: None,
+            done: None,
+            idle: None,
+            unknown: None,
+            animation_interval_ms: DEFAULT_STATUS_ICON_ANIMATION_INTERVAL_MS,
+        }
+    }
 }
 
 impl StatusIconsConfig {
-    /// The configured glyph for `status`, ignoring empty values.
-    pub fn get(&self, status: crate::api::schema::AgentStatus) -> Option<&str> {
+    fn frames(&self, status: crate::api::schema::AgentStatus) -> Option<&StatusIconFrames> {
         use crate::api::schema::AgentStatus;
         match status {
             AgentStatus::Blocked => &self.blocked,
@@ -152,8 +235,25 @@ impl StatusIconsConfig {
             AgentStatus::Idle => &self.idle,
             AgentStatus::Unknown => &self.unknown,
         }
-        .as_deref()
-        .filter(|glyph| !glyph.is_empty())
+        .as_ref()
+    }
+
+    /// The configured glyph for `status` at animation `frame`, ignoring empty values.
+    pub fn get(&self, status: crate::api::schema::AgentStatus, frame: u64) -> Option<&str> {
+        self.frames(status).and_then(|frames| frames.frame(frame))
+    }
+
+    /// Whether `status` cycles through more than one configured frame.
+    pub fn is_animated(&self, status: crate::api::schema::AgentStatus) -> bool {
+        self.frames(status)
+            .is_some_and(StatusIconFrames::is_animated)
+    }
+
+    pub fn animation_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.animation_interval_ms
+                .max(MIN_STATUS_ICON_ANIMATION_INTERVAL_MS),
+        )
     }
 }
 
@@ -480,6 +580,18 @@ pub struct KeysConfig {
     pub previous_agent: BindingConfig,
     /// Focus the next agent shown in the agent panel. Unset by default.
     pub next_agent: BindingConfig,
+    /// Focus the previous entry of the spaces sidebar: a space or an agent
+    /// shown under an expanded space. Unset by default.
+    pub previous_sidebar_entry: BindingConfig,
+    /// Focus the next entry of the spaces sidebar: a space or an agent shown
+    /// under an expanded space. Unset by default.
+    pub next_sidebar_entry: BindingConfig,
+    /// Move the current spaces sidebar entry up: a space past the space above
+    /// it, or an agent's tab past the tab of the agent above it. Unset by default.
+    pub move_sidebar_entry_previous: BindingConfig,
+    /// Move the current spaces sidebar entry down: a space past the space below
+    /// it, or an agent's tab past the tab of the agent below it. Unset by default.
+    pub move_sidebar_entry_next: BindingConfig,
     /// Focus an agent by index 1-9. Unset by default.
     pub focus_agent: BindingConfig,
     /// Local-client shortcut that sends a clipboard image to a remote Herdr session. Default: "ctrl+v".
@@ -619,6 +731,14 @@ pub(crate) struct KeysConfigOverlay {
     previous_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_agent: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_sidebar_entry: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_sidebar_entry: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_sidebar_entry_previous: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_sidebar_entry_next: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     focus_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -768,6 +888,10 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(next_workspace);
         apply_field!(previous_agent);
         apply_field!(next_agent);
+        apply_field!(previous_sidebar_entry);
+        apply_field!(next_sidebar_entry);
+        apply_field!(move_sidebar_entry_previous);
+        apply_field!(move_sidebar_entry_next);
         apply_field!(focus_agent);
         apply_field!(remote_image_paste);
         apply_field!(new_tab);
@@ -874,6 +998,13 @@ impl KeysConfig {
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
         copy_effective_action_field!(next_agent, keybinds.next_agent);
+        copy_effective_action_field!(previous_sidebar_entry, keybinds.previous_sidebar_entry);
+        copy_effective_action_field!(next_sidebar_entry, keybinds.next_sidebar_entry);
+        copy_effective_action_field!(
+            move_sidebar_entry_previous,
+            keybinds.move_sidebar_entry_previous
+        );
+        copy_effective_action_field!(move_sidebar_entry_next, keybinds.move_sidebar_entry_next);
         copy_effective_indexed_field!(focus_agent, keybinds.focus_agent);
         copy_user_field!(remote_image_paste);
         copy_effective_action_field!(new_tab, keybinds.new_tab);
@@ -1251,6 +1382,10 @@ impl Default for KeysConfig {
             next_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),
             next_agent: BindingConfig::empty(),
+            previous_sidebar_entry: BindingConfig::empty(),
+            next_sidebar_entry: BindingConfig::empty(),
+            move_sidebar_entry_previous: BindingConfig::empty(),
+            move_sidebar_entry_next: BindingConfig::empty(),
             focus_agent: BindingConfig::empty(),
             remote_image_paste: "ctrl+v".into(),
             new_tab: BindingConfig::one("prefix+c"),
@@ -1615,14 +1750,54 @@ status_indicators = "symbols"
 [ui.status_icons]
 working = "W"
 done = ""
+idle = []
 "#,
         )
         .unwrap();
         let icons = &config.ui.status_icons;
-        assert_eq!(icons.get(AgentStatus::Working), Some("W"));
+        assert_eq!(icons.get(AgentStatus::Working, 0), Some("W"));
+        assert_eq!(icons.get(AgentStatus::Working, 5), Some("W"));
+        assert!(!icons.is_animated(AgentStatus::Working));
         // Empty and missing glyphs fall back to the indicator style.
-        assert_eq!(icons.get(AgentStatus::Done), None);
-        assert_eq!(icons.get(AgentStatus::Blocked), None);
+        assert_eq!(icons.get(AgentStatus::Done, 0), None);
+        assert_eq!(icons.get(AgentStatus::Idle, 0), None);
+        assert_eq!(icons.get(AgentStatus::Blocked, 0), None);
+    }
+
+    #[test]
+    fn status_icon_arrays_animate_at_the_configured_interval() {
+        use crate::api::schema::AgentStatus;
+        assert_eq!(
+            StatusIconsConfig::default().animation_interval(),
+            std::time::Duration::from_millis(DEFAULT_STATUS_ICON_ANIMATION_INTERVAL_MS)
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+[ui.status_icons]
+working = ["a", "", "b", "c"]
+animation_interval_ms = 80
+"#,
+        )
+        .unwrap();
+        let icons = &config.ui.status_icons;
+        assert!(icons.is_animated(AgentStatus::Working));
+        let frames: Vec<_> = (0..4)
+            .map(|frame| icons.get(AgentStatus::Working, frame).unwrap())
+            .collect();
+        assert_eq!(frames, ["a", "b", "c", "a"]);
+        assert_eq!(
+            icons.animation_interval(),
+            std::time::Duration::from_millis(80)
+        );
+
+        let config: Config =
+            toml::from_str("[ui.status_icons]\nanimation_interval_ms = 0\n").unwrap();
+        assert_eq!(
+            config.ui.status_icons.animation_interval(),
+            std::time::Duration::from_millis(MIN_STATUS_ICON_ANIMATION_INTERVAL_MS)
+        );
+        assert!(toml::from_str::<Config>("[ui.status_icons]\nworking = 3\n").is_err());
     }
 
     #[test]

@@ -197,6 +197,12 @@
           "description": "Color for tab names in the sidebar (the tab and tab_stripped tokens of agent rows and Space agent children). Unset keeps the row's muted secondary color. A token fg still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for tab names on the focused agent's rows (agents panel and Space agent children), which are also bold. Falls back to theme.custom.tab, then to the row's muted secondary color. A token fg or bold still wins. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -327,6 +333,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the tab color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -471,6 +483,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the tab color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.tab_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the tab_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",
@@ -678,6 +696,30 @@
           "type": "keybinding",
           "default": "unset",
           "description": "Focus the next agent shown in the agent panel. Unset by default."
+        },
+        {
+          "key": "keys.previous_sidebar_entry",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Focus the previous entry of the spaces sidebar: a space, or an agent shown under an expanded space. Wraps around. Unset by default."
+        },
+        {
+          "key": "keys.next_sidebar_entry",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Focus the next entry of the spaces sidebar: a space, or an agent shown under an expanded space. Wraps around. Unset by default."
+        },
+        {
+          "key": "keys.move_sidebar_entry_previous",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the current spaces sidebar entry up. A space passes the space above it, as dragging would (a worktree group moves as one block); an agent's tab moves before the tab of the agent above it. Does not wrap. Unset by default."
+        },
+        {
+          "key": "keys.move_sidebar_entry_next",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the current spaces sidebar entry down. A space passes the space below it, as dragging would (a worktree group moves as one block); an agent's tab moves after the tab of the agent below it. Does not wrap. Unset by default."
         },
         {
           "key": "keys.focus_agent",
@@ -1122,33 +1164,39 @@
         },
         {
           "key": "ui.status_icons.blocked",
-          "type": "string",
+          "type": "string or list of strings",
           "default": "unset",
-          "description": "Override the agent status glyph for the blocked state. Unset or empty keeps the status_indicators glyph."
+          "description": "Override the agent status glyph for the blocked state. A list of glyphs animates through its frames. Unset or empty keeps the status_indicators glyph."
         },
         {
           "key": "ui.status_icons.working",
-          "type": "string",
+          "type": "string or list of strings",
           "default": "unset",
-          "description": "Override the agent status glyph for the working state. Unset or empty keeps the status_indicators glyph."
+          "description": "Override the agent status glyph for the working state. A list of glyphs animates through its frames. Unset or empty keeps the status_indicators glyph."
         },
         {
           "key": "ui.status_icons.done",
-          "type": "string",
+          "type": "string or list of strings",
           "default": "unset",
-          "description": "Override the agent status glyph for the done state. Unset or empty keeps the status_indicators glyph."
+          "description": "Override the agent status glyph for the done state. A list of glyphs animates through its frames. Unset or empty keeps the status_indicators glyph."
         },
         {
           "key": "ui.status_icons.idle",
-          "type": "string",
+          "type": "string or list of strings",
           "default": "unset",
-          "description": "Override the agent status glyph for the idle state. Unset or empty keeps the status_indicators glyph."
+          "description": "Override the agent status glyph for the idle state. A list of glyphs animates through its frames. Unset or empty keeps the status_indicators glyph."
         },
         {
           "key": "ui.status_icons.unknown",
-          "type": "string",
+          "type": "string or list of strings",
           "default": "unset",
-          "description": "Override the agent status glyph for the unknown state. Unset or empty keeps the status_indicators glyph."
+          "description": "Override the agent status glyph for the unknown state. A list of glyphs animates through its frames. Unset or empty keeps the status_indicators glyph."
+        },
+        {
+          "key": "ui.status_icons.animation_interval_ms",
+          "type": "integer",
+          "default": "120",
+          "description": "Delay in milliseconds between frames of status icons set to a list of glyphs. Values below 16 are raised to 16."
         },
         {
           "key": "ui.tab_status.enabled",
@@ -1203,6 +1251,42 @@
           "type": "boolean",
           "default": "true",
           "description": "Draw a sidebar token reported with --link underlined. Set false to keep linked tokens in their configured style; the link still opens on the click token_link_click selects."
+        },
+        {
+          "key": "ui.sidebar.tree.worktrees.branch",
+          "type": "string",
+          "default": "\"├─\"",
+          "description": "Two-column connector of a child with more siblings below it, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.worktrees.last",
+          "type": "string",
+          "default": "\"└─\"",
+          "description": "Two-column connector of the last child, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.worktrees.rail",
+          "type": "string",
+          "default": "\"│\"",
+          "description": "One-column line continuing past rows that are not connectors, for worktree spaces under their parent space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.branch",
+          "type": "string",
+          "default": "\"├─\"",
+          "description": "Two-column connector of a child with more siblings below it, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.last",
+          "type": "string",
+          "default": "\"└─\"",
+          "description": "Two-column connector of the last child, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
+        },
+        {
+          "key": "ui.sidebar.tree.agents.rail",
+          "type": "string",
+          "default": "\"│\"",
+          "description": "One-column line continuing past rows that are not connectors, for agents listed under their space. Shorter values are padded with spaces and longer ones cut."
         },
         {
           "key": "ui.sidebar.agents.enabled",
@@ -1738,8 +1822,8 @@
         {
           "key": "pull_requests.poll_seconds",
           "type": "integer",
-          "default": "60",
-          "description": "Seconds between polls of the watched repositories' open pull requests. Accepted range: 15 to 3600."
+          "default": "120",
+          "description": "Seconds between polls of the watched repositories' open pull requests. Accepted range: 15 to 3600. Polls pause while no client is attached, and back off when GitHub reports its rate limit."
         },
         {
           "key": "pull_requests.gh_command",

@@ -7,6 +7,7 @@ mod integrations;
 mod layouts;
 mod panes;
 pub(crate) mod plugins;
+mod pull_requests;
 pub(super) mod responses;
 mod session;
 mod tabs;
@@ -38,8 +39,8 @@ impl App {
                 segment_index,
                 result,
             } => self.handle_tab_bar_command_finished(generation, segment_index, result),
-            AppEvent::PullRequestsRefreshed { generation, repos } => {
-                self.handle_pull_requests_refreshed(generation, repos, Instant::now())
+            AppEvent::PullRequestsRefreshed { generation, poll } => {
+                self.handle_pull_requests_refreshed(generation, poll, Instant::now())
             }
             AppEvent::WorktreeReadFinished(result) => {
                 let changes_workspace = matches!(
@@ -1063,6 +1064,7 @@ impl App {
             }
             Method::SessionSnapshot(_) => return self.handle_session_snapshot(request.id),
             Method::WorkspaceList(_) => return self.handle_workspace_list(request.id),
+            Method::PullRequestList(_) => return self.handle_pull_request_list(request.id),
             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),
             Method::WorkspaceCreate(params) => {
                 return self.handle_workspace_create(request.id, params);

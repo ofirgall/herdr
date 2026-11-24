@@ -62,6 +62,8 @@ pub enum Subscription {
     PaneExited {},
     #[serde(rename = "pane.agent_detected")]
     PaneAgentDetected {},
+    #[serde(rename = "pull_requests.updated")]
+    PullRequestsUpdated {},
     #[serde(rename = "pane.output_matched")]
     PaneOutputMatched {
         pane_id: String,
@@ -218,6 +220,7 @@ pub enum EventKind {
     PaneAgentDetected,
     PaneAgentStatusChanged,
     LayoutUpdated,
+    PullRequestsUpdated,
 }
 
 impl EventKind {
@@ -249,6 +252,7 @@ impl EventKind {
             EventKind::PaneAgentDetected => "pane.agent_detected",
             EventKind::PaneAgentStatusChanged => "pane.agent_status_changed",
             EventKind::LayoutUpdated => "layout.updated",
+            EventKind::PullRequestsUpdated => "pull_requests.updated",
         }
     }
 }
@@ -281,6 +285,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentDetected,
     EventKind::PaneAgentStatusChanged,
     EventKind::LayoutUpdated,
+    EventKind::PullRequestsUpdated,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -306,6 +311,8 @@ pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneExited,
     EventKind::PaneAgentDetected,
     EventKind::PaneAgentStatusChanged,
+    // Emitted only when a pull request poll changes something.
+    EventKind::PullRequestsUpdated,
 ];
 
 #[cfg(test)]
@@ -552,5 +559,9 @@ pub enum EventData {
     },
     LayoutUpdated {
         layout: super::panes::PaneLayoutSnapshot,
+    },
+    /// A pull request poll changed the watched repositories' pull requests.
+    PullRequestsUpdated {
+        repos: Vec<super::pull_requests::PullRequestRepoInfo>,
     },
 }

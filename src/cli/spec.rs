@@ -189,6 +189,10 @@ fn api_command() -> Command {
         .about("Inspect socket API metadata and live runtime state")
         .subcommand(Command::new("snapshot").about("Print the live session snapshot"))
         .subcommand(
+            Command::new("pull-requests")
+                .about("Print the watched repositories' pull requests from the server's poll"),
+        )
+        .subcommand(
             Command::new("schema")
                 .about("Print or write the bundled API schema")
                 .arg(json_flag())

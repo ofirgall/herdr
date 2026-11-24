@@ -8,6 +8,7 @@ pub mod integrations;
 pub(crate) mod operations;
 pub mod panes;
 pub mod plugins;
+pub mod pull_requests;
 pub mod response;
 pub mod server;
 pub mod session;
@@ -22,6 +23,7 @@ pub use events::*;
 pub use integrations::*;
 pub use panes::*;
 pub use plugins::*;
+pub use pull_requests::*;
 pub use response::*;
 pub use server::*;
 pub use session::*;
@@ -146,6 +148,7 @@ operations::define_operations! {
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
     WorkspaceSetSkipIndex(WorkspaceSetSkipIndexParams) => "workspace.set_skip_index", true, true;
+    PullRequestList(EmptyParams) => "pull_request.list", false, false;
 }
 
 #[cfg(test)]

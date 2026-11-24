@@ -45,8 +45,9 @@ fn workspace(id: &str, number: usize, label: &str) -> ClientShellWorkspace {
     workspace
 }
 
-/// ws_1 has agents in tab 2 and tab 1 (snapshot order is tab 2 first), ws_2
-/// has one agent, ws_3 has none.
+/// ws_1 has agents in its first tab ("web", pane_a and pane_c) and its second
+/// ("api", pane_b; listed first among the agents), ws_2 has one agent, ws_3 has
+/// none.
 fn agents_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces[0].agent_status = AgentStatus::Working;
@@ -54,8 +55,8 @@ fn agents_snapshot() -> ClientShellSnapshot {
     snapshot.workspaces.push(workspace("ws_2", 2, "docs"));
     snapshot.workspaces.push(workspace("ws_3", 3, "empty"));
     snapshot.tabs = vec![
-        tab("tab_b", "ws_1", 2, "api"),
         tab("tab_a", "ws_1", 1, "web"),
+        tab("tab_b", "ws_1", 2, "api"),
         tab("tab_d", "ws_2", 1, "notes"),
     ];
     snapshot.agents = vec![
@@ -106,7 +107,7 @@ fn left_click(state: &mut ClientShellState, x: u16, y: u16) -> ClientShellInput 
 }
 
 #[test]
-fn agents_group_by_workspace_in_tab_then_snapshot_order_ignoring_agent_view() {
+fn agents_group_by_workspace_in_tab_position_then_snapshot_order_ignoring_agent_view() {
     let mut snapshot = agents_snapshot();
     snapshot.agent_view_label = Some("view".into());
     snapshot.agent_order = vec!["pane_c".into(), "pane_b".into()];
@@ -121,6 +122,17 @@ fn agents_group_by_workspace_in_tab_then_snapshot_order_ignoring_agent_view() {
     assert_eq!(ids("ws_1"), ["pane_a", "pane_c", "pane_b"]);
     assert_eq!(ids("ws_2"), ["pane_d"]);
     assert!(ids("ws_3").is_empty());
+
+    // Tab position, not the creation number, orders the agents: a moved tab
+    // keeps its number.
+    snapshot.tabs.swap(0, 1);
+    let index = crate::client::shell::space_agents::SpaceAgentIndex::new(&snapshot);
+    let ids = index
+        .agents("ws_1")
+        .iter()
+        .map(|agent| agent.pane_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["pane_b", "pane_a", "pane_c"]);
 }
 
 #[test]
@@ -181,10 +193,14 @@ fn expanded_mode_renders_indented_children_with_their_own_status() {
         AgentStatus::Blocked,
         &state.config.status_indicators
     )));
-    // Children are indented two columns beyond the space's first-row content.
+    // Children hang off tree connectors under the space's status icon, with
+    // their content three columns beyond the space's first-row content.
     let content = rows[space].find(&working).unwrap();
     let child_icon = rows[space + 1].find(&working).unwrap();
-    assert_eq!(child_icon, content + 2, "{rows:#?}");
+    assert_eq!(child_icon, content + "├─ ".len(), "{rows:#?}");
+    assert!(rows[space + 1].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 2].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 3].starts_with(" └─ "), "{rows:#?}");
     // The next space starts below ws_1's children and shows its own child.
     let docs = row_index(&rows, "docs");
     assert_eq!(docs, space + 4);
@@ -535,16 +551,18 @@ fn children_of_a_non_last_linked_worktree_keep_the_tree_rail() {
     let rows = compose_rows(&mut state);
 
     // ws_2 ("docs") has a sibling below it, so its child row continues the rail
-    // in the same column as the `├` connectors.
+    // in the same column as the `├` connectors, with its own connector under
+    // the worktree's status icon.
     let child = &rows[row_index(&rows, "notes")];
-    assert!(child.starts_with(" │"), "{rows:#?}");
+    assert!(child.starts_with(" │  └─ "), "{rows:#?}");
     let docs = &rows[row_index(&rows, "docs")];
     assert!(docs.starts_with(" ├─ "), "{rows:#?}");
     let empty = &rows[row_index(&rows, "empty")];
     assert!(empty.starts_with(" └─ "), "{rows:#?}");
-    // The parent's own children carry the rail down to its first worktree.
+    // The parent's agents share the trunk with its worktrees, so even its last
+    // agent keeps a `├─` connector down to the first worktree.
     let parent_child = &rows[row_index(&rows, "api")];
-    assert!(parent_child.starts_with(" │"), "{rows:#?}");
+    assert!(parent_child.starts_with(" ├─ "), "{rows:#?}");
 }
 
 #[test]
@@ -564,7 +582,7 @@ fn children_of_the_last_linked_worktree_draw_no_tree_rail() {
 }
 
 #[test]
-fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
+fn focused_child_highlight_starts_at_its_tree_connector_in_a_tree() {
     let mut snapshot = agents_snapshot();
     for (index, linked) in [(0, false), (1, true), (2, true)] {
         snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
@@ -586,18 +604,20 @@ fn focused_child_highlight_starts_one_column_before_its_status_in_a_tree() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Tree rail at column 1, status icon at column 6: the highlight starts at 5.
+    // Tree rail at column 1, connector at 4: the highlight starts at the
+    // connector.
     assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "│");
-    for x in child.x..child.x + 5 {
+    assert_eq!(buffer[(child.x + 4, child.y)].symbol(), "└");
+    for x in child.x..child.x + 4 {
         assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 5..child.right() {
+    for x in child.x + 4..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
 
 #[test]
-fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
+fn focused_child_highlight_starts_at_its_tree_connector_at_top_level() {
     let mut snapshot = agents_snapshot();
     snapshot.agents[0].focused = true;
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
@@ -611,11 +631,13 @@ fn focused_child_highlight_starts_one_column_before_its_status_at_top_level() {
         .0;
     let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
     let highlight = state.config.palette.active_row_bg;
-    // Status icon at column 3: the highlight starts at 2.
-    for x in child.x..child.x + 2 {
-        assert_ne!(buffer[(x, child.y)].bg, highlight, "indent column {x}");
+    // pane_b ("api") is the last child: the highlight starts at its connector
+    // in column 1.
+    assert_eq!(buffer[(child.x + 1, child.y)].symbol(), "└");
+    for x in child.x..child.x + 1 {
+        assert_ne!(buffer[(x, child.y)].bg, highlight, "tree column {x}");
     }
-    for x in child.x + 2..child.right() {
+    for x in child.x + 1..child.right() {
         assert_eq!(buffer[(x, child.y)].bg, highlight, "content column {x}");
     }
 }
@@ -653,6 +675,75 @@ fn sidebar_text_with_tab_tokens(token: &str, tabs: [&str; 2]) -> (String, String
         .position(|row| row.starts_with('─'))
         .unwrap_or(rows.len());
     (rows[..split].join("\n"), rows[split..].join("\n"))
+}
+
+/// Foreground and boldness of the first letter of every `needle` in the
+/// sidebar's first 30 columns, top to bottom: the space child first, then the
+/// agents panel row.
+fn sidebar_word_styles(frame: &FrameData, needle: &str) -> Vec<(ratatui::style::Color, bool)> {
+    let buffer = frame.to_ratatui_buffer().expect("frame should reconstruct");
+    frame_rows(frame)
+        .iter()
+        .enumerate()
+        .filter_map(|(y, row)| {
+            let sidebar = row.chars().take(30).collect::<String>();
+            let x = sidebar.find(needle)?;
+            let cell = &buffer[(sidebar[..x].chars().count() as u16, y as u16)];
+            Some((
+                cell.fg,
+                cell.modifier.contains(ratatui::style::Modifier::BOLD),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn focused_agent_tab_names_use_tab_focused_and_bold() {
+    use ratatui::style::Color;
+    let tab_color = Color::Rgb(0x71, 0x4f, 0xb0);
+    let focused_color = Color::Rgb(0xc6, 0xa6, 0xff);
+    let styles = |token: &str, tab_focused: Option<Color>| {
+        let mut config = Config::default();
+        config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+        config.ui.sidebar.agents.rows =
+            toml::from_str::<crate::config::AgentsSidebarConfig>(&format!("rows = [[{token}]]"))
+                .unwrap()
+                .rows;
+        config.ui.sidebar.spaces.agent_rows = toml::from_str::<crate::config::SpacesSidebarConfig>(
+            &format!("agent_rows = [[{token}]]"),
+        )
+        .unwrap()
+        .agent_rows;
+        let mut config = ClientShellConfig::from_config(&config);
+        config.palette.tab = Some(tab_color);
+        config.palette.tab_focused = tab_focused;
+        let mut snapshot = snapshot();
+        snapshot.tabs = vec![
+            tab("tab_1", "ws_1", 1, "alpha"),
+            tab("tab_2", "ws_1", 2, "bravo"),
+        ];
+        snapshot.agents = vec![
+            agent("pane_1", "ws_1", "tab_1", AgentStatus::Idle),
+            agent("pane_2", "ws_1", "tab_2", AgentStatus::Idle),
+        ];
+        snapshot.agents[0].focused = true;
+        let mut state = state_with(config, snapshot);
+        let frame = state.compose(106, 30).expect("composed frame");
+        (
+            sidebar_word_styles(&frame, "alpha"),
+            sidebar_word_styles(&frame, "bravo"),
+        )
+    };
+    // Each agent shows as a space child and as an agents panel row.
+    let (focused, other) = styles("\"tab\"", Some(focused_color));
+    assert_eq!(focused, vec![(focused_color, true); 2]);
+    assert_eq!(other, vec![(tab_color, false); 2]);
+    let (focused, other) = styles("\"tab\"", None);
+    assert_eq!(focused, vec![(tab_color, true); 2]);
+    assert_eq!(other, vec![(tab_color, false); 2]);
+    // A token's own `bold` wins over the focused weight.
+    let (focused, _) = styles("{token = \"tab\", bold = false}", Some(focused_color));
+    assert_eq!(focused, vec![(focused_color, false); 2]);
 }
 
 #[test]
@@ -771,4 +862,328 @@ fn row_gap_after_agents_only_spaces_only_entries_with_shown_agents() {
     // The parent shows agents, so a gap precedes docs.
     assert_eq!(rows[docs - 1].chars().nth(1), Some('│'), "{rows:#?}");
     assert!(!rows[docs - 1].contains("api"), "{rows:#?}");
+}
+
+#[test]
+fn multi_row_children_continue_the_connector_until_the_last_child() {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.spaces.agent_rows =
+        toml::from_str::<std::collections::HashMap<String, crate::config::SpacesSidebarConfig>>(
+            "[x]\nagent_rows = [[\"state_icon\", \"tab\"], [\"agent\"]]\n",
+        )
+        .unwrap()
+        .remove("x")
+        .unwrap()
+        .agent_rows;
+    let mut state = state_with(ClientShellConfig::from_config(&config), agents_snapshot());
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+
+    // web, web, api: each child is two rows; continuation rows carry `│`
+    // until the last child, whose continuation row has no connector.
+    assert!(rows[space + 1].starts_with(" ├─ "), "{rows:#?}");
+    assert!(rows[space + 2].starts_with(" │    claude"), "{rows:#?}");
+    assert!(rows[space + 5].starts_with(" └─ "), "{rows:#?}");
+    assert!(rows[space + 6].starts_with("      claude"), "{rows:#?}");
+}
+
+#[test]
+fn configured_tree_glyphs_draw_each_tree_with_its_own_glyphs() {
+    let mut config: Config = toml::from_str(
+        "[ui.sidebar.spaces]\nagents = \"expanded\"\n\
+         [ui.sidebar.tree.worktrees]\nlast = \"╰─\"\n\
+         [ui.sidebar.tree.agents]\nbranch = \"├╌\"\nlast = \"╰╌\"\nrail = \"┆\"\n",
+    )
+    .unwrap();
+    config.ui.sidebar.spaces.agent_rows =
+        toml::from_str::<std::collections::HashMap<String, crate::config::SpacesSidebarConfig>>(
+            "[x]\nagent_rows = [[\"state_icon\", \"tab\"], [\"agent\"]]\n",
+        )
+        .unwrap()
+        .remove("x")
+        .unwrap()
+        .agent_rows;
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true), (2, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let rows = compose_rows(&mut state);
+
+    // The parent's agents branch off the worktree trunk, which keeps its rail.
+    let api = row_index(&rows, "api");
+    assert!(rows[api].starts_with(" ├╌ "), "{rows:#?}");
+    assert!(rows[api + 1].starts_with(" │    claude"), "{rows:#?}");
+    // A worktree's own agents use the agent glyphs throughout.
+    let notes = row_index(&rows, "notes");
+    assert!(rows[notes].starts_with(" │  ╰╌ "), "{rows:#?}");
+    assert!(
+        rows[row_index(&rows, "docs")].starts_with(" ├─ "),
+        "{rows:#?}"
+    );
+    assert!(
+        rows[row_index(&rows, "empty")].starts_with(" ╰─ "),
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn tree_glyphs_are_fitted_to_their_columns() {
+    let glyphs = crate::client::shell::space_agents::TreeGlyphs::from_config(
+        &crate::config::TreeGlyphsConfig {
+            branch: "+".into(),
+            last: "╰──>".into(),
+            rail: "".into(),
+        },
+    );
+    assert_eq!(glyphs.branch, "+ ");
+    assert_eq!(glyphs.last, "╰─");
+    assert_eq!(glyphs.rail, " ");
+}
+
+/// Presses a previous/next sidebar entry binding and names the focus request
+/// it sends: `space:<workspace>` or `agent:<pane>`.
+fn step_sidebar(state: &mut ClientShellState, next: bool) -> String {
+    let action = if next {
+        crate::input::KeybindAction::NextSidebarEntry
+    } else {
+        crate::input::KeybindAction::PreviousSidebarEntry
+    };
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        [ClientShellAction::Endpoint { request, .. }] => match &request.method {
+            crate::api::schema::Method::WorkspaceFocus(target) => {
+                format!("space:{}", target.workspace_id)
+            }
+            crate::api::schema::Method::PaneFocus(target) => format!("agent:{}", target.pane_id),
+            method => panic!("unexpected method {method:?}"),
+        },
+        actions => panic!("expected one focus request, got {actions:?}"),
+    }
+}
+
+/// Applies the focus a step requested, as the server would. Focusing ws_1
+/// lands on pane_a, one of the agents shown under it.
+fn land(state: &mut ClientShellState, target: &str) {
+    let mut snapshot = state.snapshot.as_deref().expect("snapshot").clone();
+    let (workspace, pane) = match target {
+        "space:ws_1" | "agent:pane_a" => ("ws_1", "pane_a"),
+        "agent:pane_b" => ("ws_1", "pane_b"),
+        "agent:pane_c" => ("ws_1", "pane_c"),
+        "space:ws_2" | "agent:pane_d" => ("ws_2", "pane_d"),
+        "space:ws_3" => ("ws_3", "pane_e"),
+        other => panic!("unknown target {other}"),
+    };
+    snapshot.focused_workspace_id = Some(workspace.into());
+    snapshot.focused_pane_id = Some(pane.into());
+    state.set_snapshot(Box::new(snapshot));
+}
+
+fn walk_sidebar(state: &mut ClientShellState, next: bool, steps: usize) -> Vec<String> {
+    (0..steps)
+        .map(|_| {
+            let target = step_sidebar(state, next);
+            land(state, &target);
+            target
+        })
+        .collect()
+}
+
+#[test]
+fn next_sidebar_entry_walks_spaces_and_their_shown_agents_in_order() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    // From the focused agent's row; agents follow their space in tab order.
+    assert_eq!(
+        walk_sidebar(&mut state, true, 7),
+        [
+            "agent:pane_c",
+            "agent:pane_b",
+            // Focusing ws_2 lands on its agent pane_d, the row the sidebar
+            // then highlights, so one more step reaches ws_3.
+            "space:ws_2",
+            "space:ws_3",
+            // Likewise ws_1 lands on pane_a, so the next step is pane_c.
+            "space:ws_1",
+            "agent:pane_c",
+            "agent:pane_b",
+        ]
+    );
+}
+
+#[test]
+fn previous_sidebar_entry_passes_the_space_of_the_focused_agent() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    // From pane_a its own space ws_1 is already focused, so the step passes
+    // it; the same holds for ws_2 from pane_d.
+    assert_eq!(
+        walk_sidebar(&mut state, false, 4),
+        ["space:ws_3", "agent:pane_d", "agent:pane_b", "agent:pane_c"]
+    );
+}
+
+#[test]
+fn sidebar_entry_steps_advance_before_the_focus_arrives() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    assert_eq!(step_sidebar(&mut state, true), "agent:pane_c");
+    assert_eq!(step_sidebar(&mut state, true), "agent:pane_b");
+    assert_eq!(step_sidebar(&mut state, true), "space:ws_2");
+}
+
+#[test]
+fn sidebar_entries_skip_hidden_agents_and_restart_from_focus_after_a_click() {
+    let mut snapshot = agents_snapshot();
+    snapshot.focused_pane_id = Some("pane_a".into());
+    // Collapsed: only spaces, so the walk starts from the focused space.
+    let mut state = state_with(
+        config_with_agents(SpaceAgentsMode::Collapsed),
+        snapshot.clone(),
+    );
+    assert_eq!(
+        walk_sidebar(&mut state, true, 3),
+        ["space:ws_2", "space:ws_3", "space:ws_1"]
+    );
+    // Expanding one space shows only its agents; focusing ws_2 lands on its
+    // agent pane_d.
+    state.toggle_space_agents(&ClientEndpointId::Local, "ws_2");
+    assert_eq!(
+        walk_sidebar(&mut state, true, 3),
+        ["space:ws_2", "space:ws_3", "space:ws_1"]
+    );
+
+    let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    assert_eq!(walk_sidebar(&mut state, true, 1), ["agent:pane_c"]);
+    // A click elsewhere drops the cursor; the walk restarts from the focus.
+    state.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        &mut ClientShellInput::default(),
+    );
+    land(&mut state, "agent:pane_d");
+    assert_eq!(step_sidebar(&mut state, true), "space:ws_3");
+}
+
+/// Presses a move sidebar entry binding and returns the request it sends.
+fn move_sidebar(state: &mut ClientShellState, down: bool) -> Option<crate::api::schema::Method> {
+    let action = if down {
+        crate::input::KeybindAction::MoveSidebarEntryNext
+    } else {
+        crate::input::KeybindAction::MoveSidebarEntryPrevious
+    };
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        // Nothing to move: the binding passes through unhandled, as other
+        // shell actions with no target do.
+        [ClientShellAction::Keybind(passed)] if *passed == action => None,
+        [ClientShellAction::Endpoint { request, .. }] => Some(request.method.clone()),
+        actions => panic!("expected at most one request, got {actions:?}"),
+    }
+}
+
+/// A state focused on `workspace`'s non-agent pane, with agents collapsed so
+/// the current entry is the space's row.
+fn focused_space_state(snapshot: &ClientShellSnapshot, workspace: &str) -> ClientShellState {
+    let mut snapshot = snapshot.clone();
+    snapshot.focused_workspace_id = Some(workspace.into());
+    snapshot.focused_pane_id = Some("pane_shell".into());
+    state_with(config_with_agents(SpaceAgentsMode::Collapsed), snapshot)
+}
+
+#[test]
+fn move_sidebar_entry_moves_a_space_past_its_neighbour_without_wrapping() {
+    use crate::api::schema::{Method, WorkspaceMoveParams};
+    let snapshot = agents_snapshot();
+    let moved = |workspace: &str, insert_index| {
+        Some(Method::WorkspaceMove(WorkspaceMoveParams {
+            workspace_id: workspace.into(),
+            insert_index,
+        }))
+    };
+    let mut state = focused_space_state(&snapshot, "ws_2");
+    assert_eq!(move_sidebar(&mut state, false), moved("ws_2", 0));
+    assert_eq!(move_sidebar(&mut state, true), moved("ws_2", 3));
+    let mut state = focused_space_state(&snapshot, "ws_1");
+    assert_eq!(move_sidebar(&mut state, false), None);
+    let mut state = focused_space_state(&snapshot, "ws_3");
+    assert_eq!(move_sidebar(&mut state, true), None);
+}
+
+#[test]
+fn move_sidebar_entry_moves_a_worktree_group_as_one_block() {
+    use crate::api::schema::{Method, WorkspaceMoveBlockParams};
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    // From the linked worktree, its group (led by ws_1) passes ws_3.
+    let mut state = focused_space_state(&snapshot, "ws_2");
+    assert_eq!(
+        move_sidebar(&mut state, true),
+        Some(Method::WorkspaceMoveBlock(WorkspaceMoveBlockParams {
+            workspace_ids: vec!["ws_1".into(), "ws_2".into()],
+            before_workspace_id: None,
+        }))
+    );
+    assert_eq!(move_sidebar(&mut state, false), None);
+}
+
+#[test]
+fn move_sidebar_entry_moves_an_agent_tab_past_the_next_agent_tab() {
+    use crate::api::schema::{Method, TabMoveParams};
+    let mut snapshot = agents_snapshot();
+    // A tab without agents sits between ws_1's two agent tabs.
+    snapshot.tabs.insert(1, tab("tab_x", "ws_1", 3, "shell"));
+    let moved = |tab: &str, insert_index| {
+        Some(Method::TabMove(TabMoveParams {
+            tab_id: tab.into(),
+            insert_index,
+        }))
+    };
+    let focused_on = |pane: &str| {
+        let mut snapshot = snapshot.clone();
+        snapshot.focused_workspace_id = Some(
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane)
+                .expect("agent")
+                .workspace_id
+                .clone(),
+        );
+        snapshot.focused_pane_id = Some(pane.into());
+        state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot)
+    };
+    // tab_a goes after tab_b, skipping the agentless tab: [tab_x, tab_b, tab_a].
+    assert_eq!(
+        move_sidebar(&mut focused_on("pane_a"), true),
+        moved("tab_a", 3)
+    );
+    assert_eq!(move_sidebar(&mut focused_on("pane_a"), false), None);
+    assert_eq!(
+        move_sidebar(&mut focused_on("pane_b"), false),
+        moved("tab_b", 0)
+    );
+    assert_eq!(move_sidebar(&mut focused_on("pane_b"), true), None);
+    // ws_2 has one agent tab, so its agent has nothing to pass.
+    assert_eq!(move_sidebar(&mut focused_on("pane_d"), true), None);
 }

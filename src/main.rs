@@ -161,6 +161,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # next_workspace = ""     # optional, unset by default
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
+# previous_sidebar_entry = "" # optional, unset by default; spaces and their shown agents
+# next_sidebar_entry = ""     # optional, unset by default
+# move_sidebar_entry_previous = "" # optional, unset by default; moves a space or an agent's tab
+# move_sidebar_entry_next = ""     # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
 # remote_image_paste = "ctrl+v" # only active in herdr --remote; empty disables raw-key image paste
 # new_tab = "prefix+c"
@@ -238,7 +242,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Open pull requests of watched repositories, shown in the sidebar when
 # [ui.sidebar.pull_requests] enabled = true. Needs a logged-in `gh`.
 # [pull_requests]
-# poll_seconds = 60
+# poll_seconds = 120
 # gh_command = "gh"
 # merged_hours = 5
 # [[pull_requests.repos]]
@@ -353,7 +357,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # status_indicators = "dots"
 
 # Per-state glyph overrides; unset states keep the status_indicators glyph.
-# status_icons = { blocked = "!", working = "◐" }
+# A list of glyphs animates, advancing one frame every animation_interval_ms (default 120).
+# status_icons = { blocked = "!", working = ["◐", "◓", "◑", "◒"], animation_interval_ms = 120 }
 
 # Show agent status glyphs in tab labels with the status color as tab background; colors
 # default to the theme, and inactive_dim fades unfocused tabs.

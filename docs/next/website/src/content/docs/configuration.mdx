@@ -116,7 +116,7 @@ Herdr can list the open pull requests of repositories you watch in a sidebar sec
 
 ```toml
 [pull_requests]
-poll_seconds = 60  # 15 to 3600
+poll_seconds = 120  # 15 to 3600
 gh_command = "gh"
 merged_hours = 5  # keep merged pull requests listed this long; 0 = open only
 
@@ -343,7 +343,7 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. `index_focused` colors only the focused space's number, falling back to `index` and then to the highlight color, so you can give the focused number its own color with or without `index`. `tab` colors tab names in the sidebar, drawn by the `tab` and `tab_stripped` tokens in agent rows and Space agent children; unset, they keep the muted secondary color. A token's own `fg`, including one from a rule, still wins. All three are accepted in `[theme.custom]` and in the light and dark subtables.
+`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `index` colors the space jump numbers drawn by the `index` sidebar token and the collapsed sidebar. No built-in theme sets it: numbers keep the focused-space highlight color on the focused space and the muted secondary color elsewhere until you set it, and then use it on every row. `index_focused` colors only the focused space's number, falling back to `index` and then to the highlight color, so you can give the focused number its own color with or without `index`. `tab` colors tab names in the sidebar, drawn by the `tab` and `tab_stripped` tokens in agent rows and Space agent children; unset, they keep the muted secondary color. `tab_focused` colors tab names on the focused agent's rows only, falling back to `tab`; those tab names are also bold, like the focused space's number. A token's own `fg`, including one from a rule, still wins. All four are accepted in `[theme.custom]` and in the light and dark subtables.
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
@@ -425,6 +425,14 @@ working = "◐"
 done = "✓"
 ```
 
+Any state can animate: give it an array of glyphs instead of one, and Herdr shows them in order, advancing one frame every `animation_interval_ms` milliseconds (default `120`, minimum `16`). Herdr only repaints for animation while an animated glyph is on screen.
+
+```toml
+[ui.status_icons]
+working = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+animation_interval_ms = 80
+```
+
 Tabs can show the status of the agents inside them too. With `[ui.tab_status]` enabled, each tab with agent state gets its status glyph before the label and the status color as its background, with text in whichever theme color reads better, or in the `fg` color when set. Tabs without agents keep their plain style. Unfocused tab backgrounds fade toward the plain tab color by `inactive_dim` percent (default 40, `0` disables it) so the focused tab stands out. Colors default to the theme's status colors; override any state with a hex, named, or `rgb(r,g,b)` color:
 
 ```toml
@@ -458,6 +466,20 @@ The pull requests section (see [Pull requests](#pull-requests)) is off by defaul
 
 Hiding every section is not allowed. Herdr reports a config warning naming both options and shows both sections. Changes take effect on config reload.
 
+### Tree connectors
+
+Worktree spaces and agents listed under a space hang off tree connectors. Change their glyphs separately under `[ui.sidebar.tree.worktrees]` and `[ui.sidebar.tree.agents]`: `branch` connects a child with more siblings below it, `last` connects the last child, and `rail` continues the line past other rows. `branch` and `last` take two columns and `rail` one; shorter values are padded with spaces and longer ones cut. The defaults are `"├─"`, `"└─"`, and `"│"`. For example, rounded worktree corners with dotted agent connectors:
+
+```toml
+[ui.sidebar.tree.worktrees]
+last = "╰─"
+
+[ui.sidebar.tree.agents]
+branch = "├╌"
+last = "╰╌"
+rail = "┆"
+```
+
 ### Agents under spaces
 
 Spaces can list their own agents as indented child entries. Set `agents` under `[ui.sidebar.spaces]` to `"off"` (the default), `"collapsed"`, or `"expanded"`, and optionally change the child layout with `agent_rows`:
@@ -472,7 +494,7 @@ agent_rows = [
 
 With `"off"` the sidebar looks exactly as before. With `"collapsed"` or `"expanded"`, each space that has agents shows a `▾` (children shown) or `▸` (children hidden) toggle at the right edge of its first row, one column left of the worktree group toggle when both apply. The mode sets the default for every space. Clicking the toggle, or choosing "Hide agents" / "Show agents" in the space's context menu, flips only that space and does not change the focused space. Each choice is remembered per machine and space across restarts, and forgotten when the space is closed.
 
-Each child shows one agent. Children are ordered by tab, then by the agents' order within the tab, and are not affected by an agent view filter. `agent_rows` accepts the same tokens, inline styles, `rules`, and limits as `[ui.sidebar.agents] rows`, and defaults to `[["state_icon", "tab"]]`. `state_icon` and `state_text` show that agent's own status, not the space's rolled-up status. The `tab` token always shows the tab's name, even when the space has a single unnamed tab. Clicking a child focuses that agent's space, tab, and pane.
+Each child shows one agent and hangs off a tree connector under its space's status icon, like worktree children. Children are ordered by tab, then by the agents' order within the tab, and are not affected by an agent view filter. `agent_rows` accepts the same tokens, inline styles, `rules`, and limits as `[ui.sidebar.agents] rows`, and defaults to `[["state_icon", "tab"]]`. `state_icon` and `state_text` show that agent's own status, not the space's rolled-up status. The `tab` token always shows the tab's name, even when the space has a single unnamed tab. Clicking a child focuses that agent's space, tab, and pane.
 
 A space and its children form one list item: they scroll together, and `row_gap` applies between spaces, not between a space and its children. Children of spaces hidden by a collapsed worktree group are hidden too. Children appear only in the expanded sidebar of a single machine; the collapsed sidebar and the multi-machine sidebar are unchanged.
 

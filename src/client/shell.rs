@@ -177,19 +177,83 @@ fn pane_surface_topology_signature(surface: &PaneSurfaceFrame) -> u64 {
     hash
 }
 
-/// The client's agent status glyph settings: a built-in style plus per-state overrides.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The client's agent status glyph settings: a built-in style plus per-state overrides,
+/// with the current animation frame for overrides that list several glyphs.
+#[derive(Debug, Clone, Default)]
 pub(crate) struct StatusIndicators {
     pub(crate) style: crate::config::StatusIndicatorStyle,
     pub(crate) icons: crate::config::StatusIconsConfig,
+    /// Animation frame index, advanced by `ClientShell::tick_status_icon_animation`.
+    pub(crate) frame: u64,
+    /// Set while composing when an animated glyph is drawn, so animation only
+    /// repaints while one is on screen.
+    drew_animated: std::cell::Cell<bool>,
+    animation_epoch: Option<std::time::Instant>,
 }
+
+impl PartialEq for StatusIndicators {
+    fn eq(&self, other: &Self) -> bool {
+        self.style == other.style && self.icons == other.icons
+    }
+}
+
+impl Eq for StatusIndicators {}
 
 impl StatusIndicators {
     pub(crate) fn from_config(config: &crate::config::Config) -> Self {
         Self {
             style: config.ui.status_indicators,
             icons: config.ui.status_icons.clone(),
+            ..Self::default()
         }
+    }
+
+    /// The configured override for `status` at the current frame, recording
+    /// whether an animated glyph was drawn.
+    pub(crate) fn icon(&self, status: crate::api::schema::AgentStatus) -> Option<&str> {
+        let glyph = self.icons.get(status, self.frame)?;
+        if self.icons.is_animated(status) {
+            self.drew_animated.set(true);
+        }
+        Some(glyph)
+    }
+
+    pub(crate) fn begin_compose(&self) {
+        self.drew_animated.set(false);
+    }
+
+    /// When the next frame is due, if the last composed screen showed an animated glyph.
+    pub(crate) fn next_frame_deadline(
+        &self,
+        now: std::time::Instant,
+    ) -> Option<std::time::Instant> {
+        if !self.drew_animated.get() {
+            return None;
+        }
+        let interval = self.icons.animation_interval();
+        let Some(epoch) = self.animation_epoch else {
+            return Some(now + interval);
+        };
+        let next = u32::try_from(self.frame.saturating_add(1)).unwrap_or(u32::MAX);
+        epoch.checked_add(interval.saturating_mul(next))
+    }
+
+    /// Advance to the frame for `now`. Returns true when the visible glyphs change.
+    pub(crate) fn tick(&mut self, now: std::time::Instant) -> bool {
+        if !self.drew_animated.get() {
+            // Nothing animated is on screen: restart the clock when one appears.
+            self.animation_epoch = None;
+            return false;
+        }
+        let epoch = *self.animation_epoch.get_or_insert(now);
+        let interval_ms = self.icons.animation_interval().as_millis().max(1);
+        let frame = u64::try_from(now.saturating_duration_since(epoch).as_millis() / interval_ms)
+            .unwrap_or(u64::MAX);
+        if frame == self.frame {
+            return false;
+        }
+        self.frame = frame;
+        true
     }
 }
 
@@ -279,8 +343,7 @@ impl TabStatus {
 
 fn status_icon(status: crate::api::schema::AgentStatus, indicators: &StatusIndicators) -> &str {
     indicators
-        .icons
-        .get(status)
+        .icon(status)
         .unwrap_or_else(|| style_status_icon(status, indicators.style))
 }
 

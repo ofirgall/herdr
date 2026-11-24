@@ -862,6 +862,8 @@ pub struct SidebarConfig {
     pub token_link_click: TokenLinkClickConfig,
     /// Whether a metadata token that carries a link is drawn underlined.
     pub token_link_underline: bool,
+    /// Glyphs of the sidebar's tree connectors.
+    pub tree: SidebarTreeConfig,
 }
 
 impl Default for SidebarConfig {
@@ -872,6 +874,40 @@ impl Default for SidebarConfig {
             pull_requests: PullRequestsSidebarConfig::default(),
             token_link_click: TokenLinkClickConfig::default(),
             token_link_underline: true,
+            tree: SidebarTreeConfig::default(),
+        }
+    }
+}
+
+/// Glyphs of the sidebar's tree connectors.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SidebarTreeConfig {
+    /// Connectors of worktree spaces under their parent space.
+    pub worktrees: TreeGlyphsConfig,
+    /// Connectors of agents listed under their space.
+    pub agents: TreeGlyphsConfig,
+}
+
+/// One tree's connector glyphs. `branch` and `last` fill two columns and
+/// `rail` one; shorter values are padded with spaces and longer ones cut.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TreeGlyphsConfig {
+    /// Connector of a child with more siblings below it. Default: "├─".
+    pub branch: String,
+    /// Connector of the last child. Default: "└─".
+    pub last: String,
+    /// Line continuing past rows that are not connectors. Default: "│".
+    pub rail: String,
+}
+
+impl Default for TreeGlyphsConfig {
+    fn default() -> Self {
+        Self {
+            branch: "├─".into(),
+            last: "└─".into(),
+            rail: "│".into(),
         }
     }
 }
@@ -961,6 +997,25 @@ mod tests {
         for value in ["shift", "ctrl+shift", "banana", "", "ctrl+", "none"] {
             assert!(parse(value).is_err(), "{value:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn tree_glyphs_default_to_solid_lines_and_override_per_tree() {
+        let config = SidebarConfig::default();
+        assert_eq!(config.tree.worktrees, TreeGlyphsConfig::default());
+        assert_eq!(config.tree.agents.branch, "├─");
+        assert_eq!(config.tree.agents.last, "└─");
+        assert_eq!(config.tree.agents.rail, "│");
+
+        let config = toml::from_str::<SidebarConfig>(
+            "[tree.worktrees]\nlast = \"╰─\"\n[tree.agents]\nbranch = \"├╌\"\nlast = \"╰╌\"\nrail = \"┆\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.tree.worktrees.branch, "├─");
+        assert_eq!(config.tree.worktrees.last, "╰─");
+        assert_eq!(config.tree.agents.branch, "├╌");
+        assert_eq!(config.tree.agents.last, "╰╌");
+        assert_eq!(config.tree.agents.rail, "┆");
     }
 
     #[test]

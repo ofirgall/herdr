@@ -723,6 +723,26 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "description": "A pull request poll changed the watched repositories' pull requests.",
+              "properties": {
+                "repos": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/PullRequestRepoInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pull_requests_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "repos"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -753,7 +773,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "pull_requests_updated"
           ],
           "type": "string"
         },
@@ -1039,6 +1060,208 @@
             "viewport_rows"
           ],
           "type": "object"
+        },
+        "PullRequestCheckCountsInfo": {
+          "description": "Every check of the head commit by outcome.",
+          "properties": {
+            "failed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "passed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pending": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skipped": {
+              "description": "Skipped, neutral, cancelled and stale.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "passed",
+            "failed",
+            "pending",
+            "skipped"
+          ],
+          "type": "object"
+        },
+        "PullRequestCheckOutcome": {
+          "oneOf": [
+            {
+              "enum": [
+                "pass",
+                "fail",
+                "pending"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "none",
+              "description": "No checks, or only skipped, neutral, cancelled or stale ones.",
+              "type": "string"
+            }
+          ]
+        },
+        "PullRequestCheckRunInfo": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/schemas/event/$defs/PullRequestCheckOutcome"
+            },
+            "url": {
+              "description": "The run's page, the job log for an Actions job.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "PullRequestInfo": {
+          "properties": {
+            "bot_threads": {
+              "description": "Unresolved review threads whose last comment is a bot's.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "branch": {
+              "description": "The head branch.",
+              "type": "string"
+            },
+            "check_counts": {
+              "$ref": "#/schemas/event/$defs/PullRequestCheckCountsInfo"
+            },
+            "check_runs": {
+              "description": "The head commit's failing checks, then its running ones.",
+              "items": {
+                "$ref": "#/schemas/event/$defs/PullRequestCheckRunInfo"
+              },
+              "type": "array"
+            },
+            "checks": {
+              "$ref": "#/schemas/event/$defs/PullRequestCheckOutcome",
+              "description": "The head commit's checks, worst news first."
+            },
+            "conflict": {
+              "description": "Cannot merge without resolving a conflict.",
+              "type": "boolean"
+            },
+            "draft": {
+              "type": "boolean"
+            },
+            "human_threads": {
+              "description": "Unresolved review threads whose last comment is a human's other than\nthe viewer's.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "merged": {
+              "description": "Merged recently; merged pull requests carry no other signals.",
+              "type": "boolean"
+            },
+            "number": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "queued": {
+              "description": "In the merge queue.",
+              "type": "boolean"
+            },
+            "review": {
+              "$ref": "#/schemas/event/$defs/PullRequestReviewState"
+            },
+            "title": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "number",
+            "title",
+            "url",
+            "branch",
+            "review",
+            "checks",
+            "human_threads",
+            "bot_threads",
+            "check_counts"
+          ],
+          "type": "object"
+        },
+        "PullRequestRepoInfo": {
+          "description": "One watched repository's latest poll.",
+          "properties": {
+            "error": {
+              "description": "Why the latest poll failed. The pull requests from the last good poll\nare kept meanwhile.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "The configured label, else the repository name.",
+              "type": "string"
+            },
+            "loading": {
+              "description": "No poll has finished for this repository yet.",
+              "type": "boolean"
+            },
+            "pull_requests": {
+              "description": "Open pull requests oldest first, then recently merged ones.",
+              "items": {
+                "$ref": "#/schemas/event/$defs/PullRequestInfo"
+              },
+              "type": "array"
+            },
+            "repo": {
+              "description": "The GitHub repository, `owner/name`, once its checkout resolved.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "description": "The repository's pull request list on GitHub, once resolved.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "label",
+            "pull_requests"
+          ],
+          "type": "object"
+        },
+        "PullRequestReviewState": {
+          "enum": [
+            "none",
+            "approved",
+            "changes_requested",
+            "review_required"
+          ],
+          "type": "string"
         },
         "SplitDirection": {
           "enum": [
@@ -4221,6 +4444,18 @@
             },
             {
               "properties": {
+                "type": {
+                  "const": "pull_requests.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "lines": {
                   "format": "uint32",
                   "minimum": 0,
@@ -6398,6 +6633,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pull_request.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7534,6 +7785,26 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "description": "A pull request poll changed the watched repositories' pull requests.",
+              "properties": {
+                "repos": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PullRequestRepoInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pull_requests_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "repos"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7579,7 +7850,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "pull_requests_updated"
           ],
           "type": "string"
         },
@@ -9259,6 +9531,208 @@
             }
           ]
         },
+        "PullRequestCheckCountsInfo": {
+          "description": "Every check of the head commit by outcome.",
+          "properties": {
+            "failed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "passed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pending": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skipped": {
+              "description": "Skipped, neutral, cancelled and stale.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "passed",
+            "failed",
+            "pending",
+            "skipped"
+          ],
+          "type": "object"
+        },
+        "PullRequestCheckOutcome": {
+          "oneOf": [
+            {
+              "enum": [
+                "pass",
+                "fail",
+                "pending"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "none",
+              "description": "No checks, or only skipped, neutral, cancelled or stale ones.",
+              "type": "string"
+            }
+          ]
+        },
+        "PullRequestCheckRunInfo": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/schemas/success_response/$defs/PullRequestCheckOutcome"
+            },
+            "url": {
+              "description": "The run's page, the job log for an Actions job.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "PullRequestInfo": {
+          "properties": {
+            "bot_threads": {
+              "description": "Unresolved review threads whose last comment is a bot's.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "branch": {
+              "description": "The head branch.",
+              "type": "string"
+            },
+            "check_counts": {
+              "$ref": "#/schemas/success_response/$defs/PullRequestCheckCountsInfo"
+            },
+            "check_runs": {
+              "description": "The head commit's failing checks, then its running ones.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PullRequestCheckRunInfo"
+              },
+              "type": "array"
+            },
+            "checks": {
+              "$ref": "#/schemas/success_response/$defs/PullRequestCheckOutcome",
+              "description": "The head commit's checks, worst news first."
+            },
+            "conflict": {
+              "description": "Cannot merge without resolving a conflict.",
+              "type": "boolean"
+            },
+            "draft": {
+              "type": "boolean"
+            },
+            "human_threads": {
+              "description": "Unresolved review threads whose last comment is a human's other than\nthe viewer's.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "merged": {
+              "description": "Merged recently; merged pull requests carry no other signals.",
+              "type": "boolean"
+            },
+            "number": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "queued": {
+              "description": "In the merge queue.",
+              "type": "boolean"
+            },
+            "review": {
+              "$ref": "#/schemas/success_response/$defs/PullRequestReviewState"
+            },
+            "title": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "number",
+            "title",
+            "url",
+            "branch",
+            "review",
+            "checks",
+            "human_threads",
+            "bot_threads",
+            "check_counts"
+          ],
+          "type": "object"
+        },
+        "PullRequestRepoInfo": {
+          "description": "One watched repository's latest poll.",
+          "properties": {
+            "error": {
+              "description": "Why the latest poll failed. The pull requests from the last good poll\nare kept meanwhile.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "The configured label, else the repository name.",
+              "type": "string"
+            },
+            "loading": {
+              "description": "No poll has finished for this repository yet.",
+              "type": "boolean"
+            },
+            "pull_requests": {
+              "description": "Open pull requests oldest first, then recently merged ones.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PullRequestInfo"
+              },
+              "type": "array"
+            },
+            "repo": {
+              "description": "The GitHub repository, `owner/name`, once its checkout resolved.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "description": "The repository's pull request list on GitHub, once resolved.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "label",
+            "pull_requests"
+          ],
+          "type": "object"
+        },
+        "PullRequestReviewState": {
+          "enum": [
+            "none",
+            "approved",
+            "changes_requested",
+            "review_required"
+          ],
+          "type": "string"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -9382,6 +9856,25 @@
               "required": [
                 "type",
                 "workspaces"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "repos": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PullRequestRepoInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pull_request_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "repos"
               ],
               "type": "object"
             },

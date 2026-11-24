@@ -276,10 +276,52 @@ fn status_icon_overrides_replace_style_glyphs_per_state() {
     let mut config = Config::default();
     config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
     config.ui.status_icons.blocked = Some("!".into());
-    config.ui.status_icons.idle = Some(String::new());
+    config.ui.status_icons.idle = Some(String::new().into());
     let indicators = StatusIndicators::from_config(&config);
 
     assert_eq!(status_icon(AgentStatus::Blocked, &indicators), "!");
     assert_eq!(status_icon(AgentStatus::Working, &indicators), "◐");
     assert_eq!(status_icon(AgentStatus::Idle, &indicators), "○");
+}
+
+#[test]
+fn animated_status_icons_advance_only_while_drawn() {
+    let config: Config = toml::from_str(
+        "[ui.status_icons]\nworking = [\"a\", \"b\", \"c\"]\nblocked = \"!\"\nanimation_interval_ms = 50\n",
+    )
+    .unwrap();
+    let mut indicators = StatusIndicators::from_config(&config);
+    let start = std::time::Instant::now();
+    let interval = std::time::Duration::from_millis(50);
+
+    // A static override never schedules animation.
+    indicators.begin_compose();
+    assert_eq!(status_icon(AgentStatus::Blocked, &indicators), "!");
+    assert_eq!(indicators.next_frame_deadline(start), None);
+    assert!(!indicators.tick(start + interval));
+
+    // Drawing an animated glyph starts the clock on the next tick.
+    indicators.begin_compose();
+    assert_eq!(status_icon(AgentStatus::Working, &indicators), "a");
+    assert_eq!(
+        indicators.next_frame_deadline(start),
+        Some(start + interval)
+    );
+    assert!(!indicators.tick(start));
+    assert_eq!(
+        indicators.next_frame_deadline(start),
+        Some(start + interval)
+    );
+    assert!(indicators.tick(start + interval));
+    assert_eq!(status_icon(AgentStatus::Working, &indicators), "b");
+    assert!(!indicators.tick(start + interval + interval / 2));
+    assert!(indicators.tick(start + interval * 2));
+    assert_eq!(status_icon(AgentStatus::Working, &indicators), "c");
+    assert!(indicators.tick(start + interval * 3));
+    assert_eq!(status_icon(AgentStatus::Working, &indicators), "a");
+
+    // Once no animated glyph is drawn, ticks stop requesting repaints.
+    indicators.begin_compose();
+    assert_eq!(indicators.next_frame_deadline(start), None);
+    assert!(!indicators.tick(start + interval * 10));
 }

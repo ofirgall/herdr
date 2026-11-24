@@ -524,6 +524,7 @@ fn render_spaces_section(
             state.selected_workspace_id.is_some(),
             dragged,
             palette,
+            &config.tree_worktrees,
             (!config.token_link_click.is_off()).then_some(&mut hits.token_links),
             config.token_link_underline,
         );
@@ -581,7 +582,7 @@ fn render_spaces_section(
                     body.x,
                     gap_y,
                     content_width.min(super::space_agents::TREE_MARKER_WIDTH),
-                    super::space_agents::TREE_RAIL,
+                    &format!(" {}", config.tree_worktrees.rail),
                     Style::default().fg(palette.overlay0),
                 );
             }
@@ -1049,6 +1050,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     navigating: bool,
     dragged: bool,
     palette: &Palette,
+    tree: &super::space_agents::TreeGlyphs,
     mut links: Option<&mut Vec<TokenLinkHit>>,
     underline_links: bool,
 ) {
@@ -1062,22 +1064,18 @@ pub(in crate::client::shell) fn render_workspace_rows(
             // The connector sits under the parent's first column so the tree
             // stays close to the left edge; continuation rows indent 2 more.
             let prefix = if row_index == 0 {
-                if entry.last_child {
-                    " └─ "
-                } else {
-                    " ├─ "
-                }
+                format!(" {} ", tree.connector(entry.last_child))
             } else if entry.last_child {
-                "      "
+                "      ".to_owned()
             } else {
-                " │    "
+                format!(" {}    ", tree.rail)
             };
             x = put_segment(
                 buffer,
                 x,
                 y,
                 area.right(),
-                prefix,
+                &prefix,
                 Style::default().fg(palette.overlay0),
             );
         } else if row_index == 0 {
@@ -1116,6 +1114,8 @@ pub(in crate::client::shell) fn render_workspace_rows(
         };
         let spans = super::agent_sidebar::token_row_spans(
             row,
+            // Space rows have no tab token.
+            false,
             (
                 status_icon(status, indicators),
                 Style::default().fg(status_color(status, palette)),

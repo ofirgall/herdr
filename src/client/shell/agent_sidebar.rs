@@ -332,8 +332,11 @@ pub(super) struct LinkSink<'a> {
 /// no `links` sink (links off, or a sidebar without link support), take the
 /// plain path with no extra work; otherwise linked tokens are underlined when
 /// the sink asks for it and one hit per visible linked token is recorded.
+/// On a `focused` row, tab names are bold unless their token sets `bold`, the
+/// way a space's jump number follows its focused weight.
 pub(super) fn token_row_spans(
     tokens: &[crate::ui::ResolvedToken],
+    focused: bool,
     icon: (&str, Style),
     state_style: Style,
     name_style: Style,
@@ -343,6 +346,26 @@ pub(super) fn token_row_spans(
     max_width: usize,
     links: Option<LinkSink<'_>>,
 ) -> Vec<ratatui::text::Span<'static>> {
+    let is_plain_tab = |token: &crate::ui::ResolvedToken| {
+        matches!(token.kind, crate::ui::ResolvedTokenKind::Tab(_)) && token.style.bold.is_none()
+    };
+    // Cloned only for the focused row, and only when it shows a tab name.
+    let bolded;
+    let tokens = if focused && tokens.iter().any(is_plain_tab) {
+        bolded = tokens
+            .iter()
+            .cloned()
+            .map(|mut token| {
+                if is_plain_tab(&token) {
+                    token.style.bold = Some(true);
+                }
+                token
+            })
+            .collect::<Vec<_>>();
+        bolded.as_slice()
+    } else {
+        tokens
+    };
     match links {
         Some(sink) if tokens.iter().any(|token| token.link.is_some()) => {
             let (spans, columns) = crate::ui::resolved_token_spans_with_links(
@@ -440,7 +463,11 @@ pub(super) fn render_agent_row(
     config: &ClientShellConfig,
     mut links: Option<&mut Vec<TokenLinkHit>>,
 ) {
-    let palette = &config.palette;
+    let focused_palette = row
+        .focused
+        .then(|| config.palette.with_focused_tab())
+        .flatten();
+    let palette = focused_palette.as_ref().unwrap_or(&config.palette);
     let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
@@ -475,6 +502,7 @@ pub(super) fn render_agent_row(
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(token_row_spans(
             tokens,
+            row.focused,
             icon,
             status_style,
             name_style,

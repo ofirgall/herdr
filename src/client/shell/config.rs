@@ -156,6 +156,12 @@ impl ClientShellConfig {
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
             token_link_click: config.ui.sidebar.token_link_click.mode(),
             token_link_underline: config.ui.sidebar.token_link_underline,
+            tree_worktrees: super::space_agents::TreeGlyphs::from_config(
+                &config.ui.sidebar.tree.worktrees,
+            ),
+            tree_agents: super::space_agents::TreeGlyphs::from_config(
+                &config.ui.sidebar.tree.agents,
+            ),
             redraw_on_focus_gained: config.ui.redraw_on_focus_gained,
             switch_ascii_input_source_in_prefix: config
                 .experimental
@@ -391,6 +397,10 @@ impl ClientShellConfig {
                 self.right_click_passthrough_modifiers = ui.right_click_passthrough_modifiers();
                 self.token_link_click = ui.sidebar.token_link_click.mode();
                 self.token_link_underline = ui.sidebar.token_link_underline;
+                self.tree_worktrees =
+                    super::space_agents::TreeGlyphs::from_config(&ui.sidebar.tree.worktrees);
+                self.tree_agents =
+                    super::space_agents::TreeGlyphs::from_config(&ui.sidebar.tree.agents);
                 self.redraw_on_focus_gained = ui.redraw_on_focus_gained;
             }
         }

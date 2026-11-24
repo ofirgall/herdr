@@ -294,7 +294,7 @@ fn render_agent_summary(
             continue;
         }
         let indicators = &config.status_indicators;
-        let symbol = match (indicators.icons.get(status), indicators.style, status) {
+        let symbol = match (indicators.icon(status), indicators.style, status) {
             (Some(glyph), _, _) => Some(glyph),
             (None, crate::config::StatusIndicatorStyle::Dots, AgentStatus::Blocked) => Some("◉"),
             (None, crate::config::StatusIndicatorStyle::Dots, AgentStatus::Done) => Some("●"),
@@ -781,13 +781,9 @@ fn mobile_items(
                 palette.panel_bg
             };
             let connector = if entry.indented {
-                if entry.last_child {
-                    "└─ "
-                } else {
-                    "├─ "
-                }
+                format!("{} ", config.tree_worktrees.connector(entry.last_child))
             } else {
-                ""
+                String::new()
             };
             let name = if entry.indented && !workspace.custom_label {
                 workspace
@@ -801,12 +797,12 @@ fn mobile_items(
             let branch = workspace.branch.as_deref().unwrap_or("shell");
             let detail_prefix = if entry.indented {
                 if entry.last_child {
-                    "       "
+                    "       ".to_owned()
                 } else {
-                    "  │    "
+                    format!("  {}    ", config.tree_worktrees.rail)
                 }
             } else {
-                "  "
+                "  ".to_owned()
             };
             let dim = if endpoint.stale() {
                 Modifier::DIM

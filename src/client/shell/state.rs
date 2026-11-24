@@ -48,6 +48,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
     pub(super) token_link_click: crate::config::TokenLinkClick,
     pub(super) token_link_underline: bool,
+    pub(super) tree_worktrees: super::space_agents::TreeGlyphs,
+    pub(super) tree_agents: super::space_agents::TreeGlyphs,
     pub(super) redraw_on_focus_gained: bool,
     pub(super) switch_ascii_input_source_in_prefix: bool,
     pub(super) local_config_path: std::path::PathBuf,
@@ -915,6 +917,8 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
     pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
+    /// Entry the last previous/next sidebar entry keybind moved to.
+    pub(super) sidebar_entry_cursor: Option<super::space_agents::SidebarEntryCursor>,
     /// Pull requests whose checks are listed in the sidebar, by URL.
     pub(super) expanded_pull_requests: HashSet<String>,
     pub(super) workspace_scroll: usize,
@@ -1112,6 +1116,7 @@ impl ClientShellState {
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             space_agent_overrides,
+            sidebar_entry_cursor: None,
             expanded_pull_requests: HashSet::new(),
             workspace_scroll: 0,
             agent_scroll: 0,
@@ -1956,11 +1961,17 @@ impl ClientShellState {
         false
     }
 
+    /// Advance animated status icons. Returns true when a repaint is needed.
+    pub(crate) fn tick_status_icon_animation(&mut self, now: std::time::Instant) -> bool {
+        self.config.status_indicators.tick(now)
+    }
+
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
         let default = std::time::Duration::from_millis(100);
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.config.status_indicators.next_frame_deadline(now))
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)
