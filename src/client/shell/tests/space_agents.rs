@@ -1002,30 +1002,32 @@ fn next_sidebar_entry_walks_spaces_and_their_shown_agents_in_order() {
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
     // From the focused agent's row; agents follow their space in tab order.
     assert_eq!(
-        walk_sidebar(&mut state, true, 8),
+        walk_sidebar(&mut state, true, 7),
         [
             "agent:pane_c",
             "agent:pane_b",
+            // Focusing ws_2 lands on its agent pane_d, the row the sidebar
+            // then highlights, so one more step reaches ws_3.
             "space:ws_2",
-            "agent:pane_d",
             "space:ws_3",
+            // Likewise ws_1 lands on pane_a, so the next step is pane_c.
             "space:ws_1",
-            // Focusing ws_1 landed on pane_a, but the walk continues from the
-            // space's row, so pane_a is not skipped.
-            "agent:pane_a",
             "agent:pane_c",
+            "agent:pane_b",
         ]
     );
 }
 
 #[test]
-fn previous_sidebar_entry_moves_past_a_space_whose_focus_lands_on_its_agent() {
+fn previous_sidebar_entry_passes_the_space_of_the_focused_agent() {
     let mut snapshot = agents_snapshot();
     snapshot.focused_pane_id = Some("pane_a".into());
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);
+    // From pane_a its own space ws_1 is already focused, so the step passes
+    // it; the same holds for ws_2 from pane_d.
     assert_eq!(
         walk_sidebar(&mut state, false, 4),
-        ["space:ws_1", "space:ws_3", "agent:pane_d", "space:ws_2"]
+        ["space:ws_3", "agent:pane_d", "agent:pane_b", "agent:pane_c"]
     );
 }
 
@@ -1052,11 +1054,12 @@ fn sidebar_entries_skip_hidden_agents_and_restart_from_focus_after_a_click() {
         walk_sidebar(&mut state, true, 3),
         ["space:ws_2", "space:ws_3", "space:ws_1"]
     );
-    // Expanding one space shows only its agents.
+    // Expanding one space shows only its agents; focusing ws_2 lands on its
+    // agent pane_d.
     state.toggle_space_agents(&ClientEndpointId::Local, "ws_2");
     assert_eq!(
         walk_sidebar(&mut state, true, 3),
-        ["space:ws_2", "agent:pane_d", "space:ws_3"]
+        ["space:ws_2", "space:ws_3", "space:ws_1"]
     );
 
     let mut state = state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot);

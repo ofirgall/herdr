@@ -386,8 +386,7 @@ pub(super) enum SidebarEntry {
 }
 
 /// Where the previous/next sidebar entry keybind last moved, and the focus it
-/// moved from. Focusing a space also focuses one of its panes, which may be an
-/// agent shown under it, so the focus alone cannot tell the two rows apart.
+/// moved from, so quick presses advance before the requested focus arrives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SidebarEntryCursor {
     entry: SidebarEntry,
@@ -425,9 +424,10 @@ impl ClientShellState {
         entries
     }
 
-    /// Position of the current row in `entries`: the cursor's entry while
-    /// focus is on it or has not moved from where the cursor left, otherwise
-    /// the focused agent's row, then the focused space's row.
+    /// Position of the current row in `entries`: the cursor's entry while its
+    /// focus request is in flight, otherwise the focused agent's row, then the
+    /// focused space's row. A space whose focus landed on one of its shown
+    /// agents is therefore on that agent's row, the row the sidebar highlights.
     fn current_sidebar_entry(
         &self,
         snapshot: &ClientShellSnapshot,
@@ -436,16 +436,10 @@ impl ClientShellState {
         let focused_workspace = snapshot.focused_workspace_id.as_deref();
         let focused_pane = snapshot.focused_pane_id.as_deref();
         if let Some(cursor) = &self.sidebar_entry_cursor {
-            let landed = match &cursor.entry {
-                SidebarEntry::Space(workspace_id) => {
-                    focused_workspace == Some(workspace_id.as_str())
-                }
-                SidebarEntry::Agent { pane_id, .. } => focused_pane == Some(pane_id.as_str()),
-            };
-            // The focus request may still be in flight.
+            // Focus has not moved since the cursor's request was sent.
             let pending = cursor.from_workspace.as_deref() == focused_workspace
                 && cursor.from_pane.as_deref() == focused_pane;
-            if landed || pending {
+            if pending {
                 if let Some(position) = entries.iter().position(|entry| *entry == cursor.entry) {
                     return Some(position);
                 }
@@ -547,8 +541,26 @@ impl ClientShellState {
         if entries.is_empty() {
             return None;
         }
+        let len = entries.len() as isize;
         let next = match self.current_sidebar_entry(snapshot, &entries) {
-            Some(current) => (current as isize + delta).rem_euclid(entries.len() as isize) as usize,
+            Some(current) => {
+                // From one of a space's agents, that space is already focused,
+                // so stepping onto its row would change nothing: pass it.
+                let own_space = match &entries[current] {
+                    SidebarEntry::Agent { workspace_id, .. } => Some(workspace_id),
+                    SidebarEntry::Space(_) => None,
+                };
+                let mut next = current as isize;
+                for _ in 0..len {
+                    next = (next + delta).rem_euclid(len);
+                    if !matches!((&entries[next as usize], own_space),
+                        (SidebarEntry::Space(space), Some(own)) if space == own)
+                    {
+                        break;
+                    }
+                }
+                next as usize
+            }
             None if delta < 0 => entries.len() - 1,
             None => 0,
         };
