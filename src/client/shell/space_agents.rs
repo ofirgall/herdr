@@ -92,8 +92,9 @@ pub(super) struct SpaceAgentIndex<'a> {
 }
 
 impl<'a> SpaceAgentIndex<'a> {
-    /// Groups agents by workspace, ordered by tab number and then by snapshot
-    /// order. The agent-view order is deliberately ignored.
+    /// Groups agents by workspace, ordered by tab position (the tab bar order,
+    /// which moving a tab changes) and then by snapshot order. The agent-view
+    /// order is deliberately ignored.
     pub(super) fn new(snapshot: &'a ClientShellSnapshot) -> Self {
         let mut positions = HashMap::<&str, usize>::new();
         let tabs = snapshot
@@ -121,7 +122,7 @@ impl<'a> SpaceAgentIndex<'a> {
             // Stable sort keeps snapshot order within a tab.
             agents.sort_by_key(|agent| {
                 tabs.get(agent.tab_id.as_str())
-                    .map_or(usize::MAX, |(tab, _)| tab.number)
+                    .map_or(usize::MAX, |(_, position)| *position)
             });
         }
         Self {
@@ -206,6 +207,50 @@ pub(super) fn render_agent_toggle(
         Style::default().fg(palette.accent),
     );
     toggle
+}
+
+/// Moves the tab of agent `pane_id` past the nearest tab in the `down`
+/// direction whose agents are listed in `entries`, within the agent's space.
+fn move_agent_tab_method(
+    snapshot: &ClientShellSnapshot,
+    entries: &[SidebarEntry],
+    workspace_id: &str,
+    pane_id: &str,
+    down: bool,
+) -> Option<crate::api::schema::Method> {
+    use crate::api::schema::{Method, TabMoveParams};
+    let tab_of = |pane_id: &str| {
+        snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+            .map(|agent| agent.tab_id.as_str())
+    };
+    let source_tab = tab_of(pane_id)?;
+    let tabs = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace_id)
+        .map(|tab| tab.tab_id.as_str())
+        .collect::<Vec<_>>();
+    let source = tabs.iter().position(|tab| *tab == source_tab)?;
+    let shows_agent = |tab: &str| {
+        tab != source_tab
+            && entries.iter().any(|entry| {
+                matches!(entry, SidebarEntry::Agent { workspace_id: space, pane_id }
+                    if space == workspace_id && tab_of(pane_id) == Some(tab))
+            })
+    };
+    // `insert_index` counts positions before the source tab is removed.
+    let insert_index = if down {
+        source + 2 + tabs[source + 1..].iter().position(|tab| shows_agent(tab))?
+    } else {
+        tabs[..source].iter().rposition(|tab| shows_agent(tab))?
+    };
+    Some(Method::TabMove(TabMoveParams {
+        tab_id: source_tab.to_owned(),
+        insert_index,
+    }))
 }
 
 /// Draws the children of one space inside `area` (the rows directly below the
@@ -418,6 +463,76 @@ impl ClientShellState {
                         if focused_workspace == Some(workspace_id.as_str()))
                 })
             })
+    }
+
+    /// The request that moves the current sidebar entry one place `down` or up,
+    /// without wrapping. A space passes its neighbouring space, as a drag
+    /// would: a worktree group moves as one block, led by its root. An agent
+    /// moves its tab past the nearest tab with a shown agent, so the agent
+    /// trades places with that agent; agents sharing a tab move together.
+    pub(super) fn move_sidebar_entry(&mut self, down: bool) -> Option<crate::api::schema::Method> {
+        let snapshot = self.snapshot.as_deref()?;
+        let entries = self.sidebar_entries(snapshot);
+        let current = self.current_sidebar_entry(snapshot, &entries)?;
+        match &entries[current] {
+            SidebarEntry::Space(workspace_id) => {
+                self.move_space_method(snapshot, workspace_id, down)
+            }
+            SidebarEntry::Agent {
+                workspace_id,
+                pane_id,
+            } => move_agent_tab_method(snapshot, &entries, workspace_id, pane_id, down),
+        }
+    }
+
+    fn move_space_method(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        workspace_id: &str,
+        down: bool,
+    ) -> Option<crate::api::schema::Method> {
+        let is_linked = |workspace: &ClientShellWorkspace| {
+            workspace
+                .worktree
+                .as_ref()
+                .is_some_and(|worktree| worktree.is_linked_worktree)
+        };
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)?;
+        // A linked worktree moves its group, which its root leads.
+        let root = if is_linked(workspace) {
+            let key = &workspace.worktree.as_ref()?.key;
+            snapshot.workspaces.iter().find(|candidate| {
+                !is_linked(candidate)
+                    && candidate
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|worktree| worktree.key == *key)
+            })?
+        } else {
+            workspace
+        };
+        let roots = snapshot
+            .workspaces
+            .iter()
+            .filter(|workspace| !is_linked(workspace))
+            .collect::<Vec<_>>();
+        let position = roots
+            .iter()
+            .position(|candidate| candidate.workspace_id == root.workspace_id)?;
+        let before = if down {
+            if position + 1 >= roots.len() {
+                return None;
+            }
+            roots
+                .get(position + 2)
+                .map(|workspace| workspace.workspace_id.as_str())
+        } else {
+            Some(roots.get(position.checked_sub(1)?)?.workspace_id.as_str())
+        };
+        self.workspace_move_method(&root.workspace_id, before)
     }
 
     /// The focus request for the sidebar entry `delta` rows from the current

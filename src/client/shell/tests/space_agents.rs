@@ -45,8 +45,9 @@ fn workspace(id: &str, number: usize, label: &str) -> ClientShellWorkspace {
     workspace
 }
 
-/// ws_1 has agents in tab 2 and tab 1 (snapshot order is tab 2 first), ws_2
-/// has one agent, ws_3 has none.
+/// ws_1 has agents in its first tab ("web", pane_a and pane_c) and its second
+/// ("api", pane_b; listed first among the agents), ws_2 has one agent, ws_3 has
+/// none.
 fn agents_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces[0].agent_status = AgentStatus::Working;
@@ -54,8 +55,8 @@ fn agents_snapshot() -> ClientShellSnapshot {
     snapshot.workspaces.push(workspace("ws_2", 2, "docs"));
     snapshot.workspaces.push(workspace("ws_3", 3, "empty"));
     snapshot.tabs = vec![
-        tab("tab_b", "ws_1", 2, "api"),
         tab("tab_a", "ws_1", 1, "web"),
+        tab("tab_b", "ws_1", 2, "api"),
         tab("tab_d", "ws_2", 1, "notes"),
     ];
     snapshot.agents = vec![
@@ -106,7 +107,7 @@ fn left_click(state: &mut ClientShellState, x: u16, y: u16) -> ClientShellInput 
 }
 
 #[test]
-fn agents_group_by_workspace_in_tab_then_snapshot_order_ignoring_agent_view() {
+fn agents_group_by_workspace_in_tab_position_then_snapshot_order_ignoring_agent_view() {
     let mut snapshot = agents_snapshot();
     snapshot.agent_view_label = Some("view".into());
     snapshot.agent_order = vec!["pane_c".into(), "pane_b".into()];
@@ -121,6 +122,17 @@ fn agents_group_by_workspace_in_tab_then_snapshot_order_ignoring_agent_view() {
     assert_eq!(ids("ws_1"), ["pane_a", "pane_c", "pane_b"]);
     assert_eq!(ids("ws_2"), ["pane_d"]);
     assert!(ids("ws_3").is_empty());
+
+    // Tab position, not the creation number, orders the agents: a moved tab
+    // keeps its number.
+    snapshot.tabs.swap(0, 1);
+    let index = crate::client::shell::space_agents::SpaceAgentIndex::new(&snapshot);
+    let ids = index
+        .agents("ws_1")
+        .iter()
+        .map(|agent| agent.pane_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["pane_b", "pane_a", "pane_c"]);
 }
 
 #[test]
@@ -1061,4 +1073,114 @@ fn sidebar_entries_skip_hidden_agents_and_restart_from_focus_after_a_click() {
     );
     land(&mut state, "agent:pane_d");
     assert_eq!(step_sidebar(&mut state, true), "space:ws_3");
+}
+
+/// Presses a move sidebar entry binding and returns the request it sends.
+fn move_sidebar(state: &mut ClientShellState, down: bool) -> Option<crate::api::schema::Method> {
+    let action = if down {
+        crate::input::KeybindAction::MoveSidebarEntryNext
+    } else {
+        crate::input::KeybindAction::MoveSidebarEntryPrevious
+    };
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        // Nothing to move: the binding passes through unhandled, as other
+        // shell actions with no target do.
+        [ClientShellAction::Keybind(passed)] if *passed == action => None,
+        [ClientShellAction::Endpoint { request, .. }] => Some(request.method.clone()),
+        actions => panic!("expected at most one request, got {actions:?}"),
+    }
+}
+
+/// A state focused on `workspace`'s non-agent pane, with agents collapsed so
+/// the current entry is the space's row.
+fn focused_space_state(snapshot: &ClientShellSnapshot, workspace: &str) -> ClientShellState {
+    let mut snapshot = snapshot.clone();
+    snapshot.focused_workspace_id = Some(workspace.into());
+    snapshot.focused_pane_id = Some("pane_shell".into());
+    state_with(config_with_agents(SpaceAgentsMode::Collapsed), snapshot)
+}
+
+#[test]
+fn move_sidebar_entry_moves_a_space_past_its_neighbour_without_wrapping() {
+    use crate::api::schema::{Method, WorkspaceMoveParams};
+    let snapshot = agents_snapshot();
+    let moved = |workspace: &str, insert_index| {
+        Some(Method::WorkspaceMove(WorkspaceMoveParams {
+            workspace_id: workspace.into(),
+            insert_index,
+        }))
+    };
+    let mut state = focused_space_state(&snapshot, "ws_2");
+    assert_eq!(move_sidebar(&mut state, false), moved("ws_2", 0));
+    assert_eq!(move_sidebar(&mut state, true), moved("ws_2", 3));
+    let mut state = focused_space_state(&snapshot, "ws_1");
+    assert_eq!(move_sidebar(&mut state, false), None);
+    let mut state = focused_space_state(&snapshot, "ws_3");
+    assert_eq!(move_sidebar(&mut state, true), None);
+}
+
+#[test]
+fn move_sidebar_entry_moves_a_worktree_group_as_one_block() {
+    use crate::api::schema::{Method, WorkspaceMoveBlockParams};
+    let mut snapshot = agents_snapshot();
+    for (index, linked) in [(0, false), (1, true)] {
+        snapshot.workspaces[index].worktree = Some(ClientShellWorktree {
+            key: "repo".into(),
+            label: "repo".into(),
+            is_linked_worktree: linked,
+        });
+    }
+    // From the linked worktree, its group (led by ws_1) passes ws_3.
+    let mut state = focused_space_state(&snapshot, "ws_2");
+    assert_eq!(
+        move_sidebar(&mut state, true),
+        Some(Method::WorkspaceMoveBlock(WorkspaceMoveBlockParams {
+            workspace_ids: vec!["ws_1".into(), "ws_2".into()],
+            before_workspace_id: None,
+        }))
+    );
+    assert_eq!(move_sidebar(&mut state, false), None);
+}
+
+#[test]
+fn move_sidebar_entry_moves_an_agent_tab_past_the_next_agent_tab() {
+    use crate::api::schema::{Method, TabMoveParams};
+    let mut snapshot = agents_snapshot();
+    // A tab without agents sits between ws_1's two agent tabs.
+    snapshot.tabs.insert(1, tab("tab_x", "ws_1", 3, "shell"));
+    let moved = |tab: &str, insert_index| {
+        Some(Method::TabMove(TabMoveParams {
+            tab_id: tab.into(),
+            insert_index,
+        }))
+    };
+    let focused_on = |pane: &str| {
+        let mut snapshot = snapshot.clone();
+        snapshot.focused_workspace_id = Some(
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane)
+                .expect("agent")
+                .workspace_id
+                .clone(),
+        );
+        snapshot.focused_pane_id = Some(pane.into());
+        state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot)
+    };
+    // tab_a goes after tab_b, skipping the agentless tab: [tab_x, tab_b, tab_a].
+    assert_eq!(
+        move_sidebar(&mut focused_on("pane_a"), true),
+        moved("tab_a", 3)
+    );
+    assert_eq!(move_sidebar(&mut focused_on("pane_a"), false), None);
+    assert_eq!(
+        move_sidebar(&mut focused_on("pane_b"), false),
+        moved("tab_b", 0)
+    );
+    assert_eq!(move_sidebar(&mut focused_on("pane_b"), true), None);
+    // ws_2 has one agent tab, so its agent has nothing to pass.
+    assert_eq!(move_sidebar(&mut focused_on("pane_d"), true), None);
 }

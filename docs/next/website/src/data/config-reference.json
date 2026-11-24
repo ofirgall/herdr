@@ -710,6 +710,18 @@
           "description": "Focus the next entry of the spaces sidebar: a space, or an agent shown under an expanded space. Wraps around. Unset by default."
         },
         {
+          "key": "keys.move_sidebar_entry_previous",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the current spaces sidebar entry up. A space passes the space above it, as dragging would (a worktree group moves as one block); an agent's tab moves before the tab of the agent above it. Does not wrap. Unset by default."
+        },
+        {
+          "key": "keys.move_sidebar_entry_next",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the current spaces sidebar entry down. A space passes the space below it, as dragging would (a worktree group moves as one block); an agent's tab moves after the tab of the agent below it. Does not wrap. Unset by default."
+        },
+        {
           "key": "keys.focus_agent",
           "type": "keybinding",
           "default": "unset",

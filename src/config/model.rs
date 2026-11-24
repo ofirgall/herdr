@@ -586,6 +586,12 @@ pub struct KeysConfig {
     /// Focus the next entry of the spaces sidebar: a space or an agent shown
     /// under an expanded space. Unset by default.
     pub next_sidebar_entry: BindingConfig,
+    /// Move the current spaces sidebar entry up: a space past the space above
+    /// it, or an agent's tab past the tab of the agent above it. Unset by default.
+    pub move_sidebar_entry_previous: BindingConfig,
+    /// Move the current spaces sidebar entry down: a space past the space below
+    /// it, or an agent's tab past the tab of the agent below it. Unset by default.
+    pub move_sidebar_entry_next: BindingConfig,
     /// Focus an agent by index 1-9. Unset by default.
     pub focus_agent: BindingConfig,
     /// Local-client shortcut that sends a clipboard image to a remote Herdr session. Default: "ctrl+v".
@@ -729,6 +735,10 @@ pub(crate) struct KeysConfigOverlay {
     previous_sidebar_entry: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_sidebar_entry: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_sidebar_entry_previous: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_sidebar_entry_next: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     focus_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -880,6 +890,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(next_agent);
         apply_field!(previous_sidebar_entry);
         apply_field!(next_sidebar_entry);
+        apply_field!(move_sidebar_entry_previous);
+        apply_field!(move_sidebar_entry_next);
         apply_field!(focus_agent);
         apply_field!(remote_image_paste);
         apply_field!(new_tab);
@@ -988,6 +1000,11 @@ impl KeysConfig {
         copy_effective_action_field!(next_agent, keybinds.next_agent);
         copy_effective_action_field!(previous_sidebar_entry, keybinds.previous_sidebar_entry);
         copy_effective_action_field!(next_sidebar_entry, keybinds.next_sidebar_entry);
+        copy_effective_action_field!(
+            move_sidebar_entry_previous,
+            keybinds.move_sidebar_entry_previous
+        );
+        copy_effective_action_field!(move_sidebar_entry_next, keybinds.move_sidebar_entry_next);
         copy_effective_indexed_field!(focus_agent, keybinds.focus_agent);
         copy_user_field!(remote_image_paste);
         copy_effective_action_field!(new_tab, keybinds.new_tab);
@@ -1367,6 +1384,8 @@ impl Default for KeysConfig {
             next_agent: BindingConfig::empty(),
             previous_sidebar_entry: BindingConfig::empty(),
             next_sidebar_entry: BindingConfig::empty(),
+            move_sidebar_entry_previous: BindingConfig::empty(),
+            move_sidebar_entry_next: BindingConfig::empty(),
             focus_agent: BindingConfig::empty(),
             remote_image_paste: "ctrl+v".into(),
             new_tab: BindingConfig::one("prefix+c"),

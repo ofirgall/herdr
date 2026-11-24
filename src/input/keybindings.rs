@@ -34,6 +34,8 @@ pub(crate) enum KeybindAction {
     NextAgent,
     PreviousSidebarEntry,
     NextSidebarEntry,
+    MoveSidebarEntryPrevious,
+    MoveSidebarEntryNext,
     NewTab,
     RenameTab,
     PreviousTab,
@@ -122,6 +124,14 @@ pub(crate) fn resolve_non_indexed_action(
         (
             &keybinds.next_sidebar_entry,
             KeybindAction::NextSidebarEntry,
+        ),
+        (
+            &keybinds.move_sidebar_entry_previous,
+            KeybindAction::MoveSidebarEntryPrevious,
+        ),
+        (
+            &keybinds.move_sidebar_entry_next,
+            KeybindAction::MoveSidebarEntryNext,
         ),
         (&keybinds.new_tab, KeybindAction::NewTab),
         (&keybinds.rename_tab, KeybindAction::RenameTab),
