@@ -238,7 +238,10 @@ impl App {
             return false;
         }
 
-        let argv = prefixed_resume_argv(&self.resume_command_prefix, &plan.argv);
+        let argv = prefixed_resume_argv(
+            &self.resume_command_prefix,
+            &resume_argv_with_executable(&self.resume_executable, &plan.agent, &plan.argv),
+        );
         let Some(resume_command) = shell_command_from_argv(&argv) else {
             tracing::warn!(
                 pane = pane_id.raw(),
@@ -352,6 +355,34 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
         pane_inner.width.saturating_sub(1),
         pane_inner.height,
     )
+}
+
+/// The resume command with its executable replaced by the agent's
+/// `[session.resume_executable]` entry. An entry that would make the command
+/// unsafe to type into a shell is ignored, like an invalid prefix.
+fn resume_argv_with_executable(
+    executables: &std::collections::BTreeMap<String, Vec<String>>,
+    agent: &str,
+    argv: &[String],
+) -> Vec<String> {
+    let Some(executable) = executables.get(agent) else {
+        return argv.to_vec();
+    };
+    if executable.is_empty() || argv.is_empty() {
+        return argv.to_vec();
+    }
+    let replaced: Vec<String> = executable.iter().chain(&argv[1..]).cloned().collect();
+    match crate::agent_resume::validate_resume_argv(&replaced) {
+        Ok(()) => replaced,
+        Err(err) => {
+            tracing::warn!(
+                agent = %agent,
+                err = %err,
+                "ignoring invalid session.resume_executable for agent resume"
+            );
+            argv.to_vec()
+        }
+    }
 }
 
 /// The resume command run inside `[session] resume_command_prefix`. A prefix that
@@ -986,6 +1017,39 @@ mod tests {
             words(&["kv", "--ai", "--", "claude", "--resume", "id"])
         );
         assert_eq!(prefixed_resume_argv(&[], &resume), resume);
+    }
+
+    #[test]
+    fn resume_executable_replaces_only_the_matching_agent_command() {
+        let executables = std::collections::BTreeMap::from([(
+            "claude".to_string(),
+            words(&["cswap", "run", "--"]),
+        )]);
+        assert_eq!(
+            resume_argv_with_executable(
+                &executables,
+                "claude",
+                &words(&["claude", "--resume", "id"])
+            ),
+            words(&["cswap", "run", "--", "--resume", "id"])
+        );
+        let codex = words(&["codex", "resume", "id"]);
+        assert_eq!(
+            resume_argv_with_executable(&executables, "codex", &codex),
+            codex
+        );
+    }
+
+    #[test]
+    fn invalid_resume_executable_falls_back_to_the_plain_command() {
+        let resume = words(&["claude", "--resume", "id"]);
+        for invalid in [words(&["/usr/bin/cswap"]), words(&[])] {
+            let executables = std::collections::BTreeMap::from([("claude".to_string(), invalid)]);
+            assert_eq!(
+                resume_argv_with_executable(&executables, "claude", &resume),
+                resume
+            );
+        }
     }
 
     #[test]

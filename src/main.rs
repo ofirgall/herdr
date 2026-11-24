@@ -441,6 +441,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Words placed in front of each agent resume command, to restore agents inside
 # a wrapper: ["kv", "--ai", "--"] runs `kv --ai -- claude --resume <id>`.
 # resume_command_prefix = []
+# Replace an agent's executable in its resume command, keyed by agent name:
+# claude = ["cswap", "run", "--"] runs `cswap run -- --resume <id>`.
+# [session.resume_executable]
+# claude = ["cswap", "run", "--"]
 
 [remote]
 # Whether herdr manages the ssh config used for `herdr --remote`.

@@ -144,6 +144,7 @@ pub struct App {
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
     startup_per_agent_delay: Duration,
     resume_command_prefix: Vec<String>,
+    resume_executable: std::collections::BTreeMap<String, Vec<String>>,
     next_agent_resume_at: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
     pub(crate) session_save_thread: Option<std::thread::JoinHandle<()>>,
@@ -662,6 +663,7 @@ impl App {
                 config.session.startup_per_agent_delay_ms.into(),
             ),
             resume_command_prefix: config.session.resume_command_prefix.clone(),
+            resume_executable: config.session.resume_executable.clone(),
             next_agent_resume_at: None,
             session_save_deadline: None,
             session_save_thread: None,
@@ -936,6 +938,7 @@ impl App {
 
         if !invalid_section("session") {
             self.resume_command_prefix = config.session.resume_command_prefix.clone();
+            self.resume_executable = config.session.resume_executable.clone();
         }
         if !invalid_section("session")
             && Duration::from_millis(config.session.startup_per_agent_delay_ms.into())

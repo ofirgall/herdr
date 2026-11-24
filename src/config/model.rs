@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, num::NonZeroUsize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroUsize,
+};
 
 use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -465,6 +468,10 @@ pub struct SessionConfig {
     /// Command words placed in front of every agent resume command, for a
     /// wrapper such as `["kv", "--ai", "--"]`. Empty runs the resume command as is.
     pub resume_command_prefix: Vec<String>,
+    /// Per-agent command words that replace the agent's executable in its resume
+    /// command, keyed by agent name: `claude = ["cswap", "run", "--"]` runs
+    /// `cswap run -- --resume <id>`. Agents without an entry keep their default.
+    pub resume_executable: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for SessionConfig {
@@ -473,6 +480,7 @@ impl Default for SessionConfig {
             resume_agents_on_restore: true,
             startup_per_agent_delay_ms: 100,
             resume_command_prefix: Vec::new(),
+            resume_executable: BTreeMap::new(),
         }
     }
 }
@@ -1689,6 +1697,20 @@ startup_per_agent_delay_ms = 0
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.session.resume_agents_on_restore);
         assert_eq!(config.session.startup_per_agent_delay_ms, 0);
+        assert!(config.session.resume_executable.is_empty());
+    }
+
+    #[test]
+    fn resume_executable_parses_per_agent_commands() {
+        let toml = r#"
+[session.resume_executable]
+claude = ["cswap", "run", "--"]
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.session.resume_executable.get("claude"),
+            Some(&vec!["cswap".to_string(), "run".into(), "--".into()])
+        );
     }
 
     #[test]
