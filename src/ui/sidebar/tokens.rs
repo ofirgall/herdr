@@ -168,6 +168,10 @@ pub(crate) fn agent_rows(
                     let style = kind
                         .text_value()
                         .map_or(Some(style), |value| configured.style_for_value(value))?;
+                    let style = match configured.focused_style() {
+                        Some(focused) if context.focused => style.overlaid(focused),
+                        _ => style,
+                    };
                     Some(ResolvedToken::new(kind, style).with_link(custom_link))
                 })
                 .collect::<Vec<_>>();

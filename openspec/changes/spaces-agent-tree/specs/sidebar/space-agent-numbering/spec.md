@@ -73,3 +73,19 @@ An `agent_index_focused` agent token SHALL be accepted wherever agent tokens are
 #### Scenario: Unknown token stays an error
 - **WHEN** a config uses `agent_index_focussed`
 - **THEN** config loading reports an unknown sidebar token
+
+### Requirement: Focused style on agent tokens
+
+An agent token SHALL accept `focused`, a table of `fg`, `bold` and `dim`, in both `[ui.sidebar.agents] rows` and `[ui.sidebar.spaces] agent_rows`. On the row of the focused agent, the token's style SHALL be its `style`, then a matching rule, then `focused` over them, the same order as space tokens. On every other row `focused` SHALL have no effect. An unknown key inside `focused` SHALL be a config error.
+
+#### Scenario: Focused agent number
+- **WHEN** `agent_rows` contains `{token = "agent_index", fg = "#714fb0", focused = {fg = "#c6a6ff", bold = true}}` and the second child is the focused agent
+- **THEN** that child's number is `#c6a6ff` and bold, and every other child's number is `#714fb0` and not bold
+
+#### Scenario: Agents section row
+- **WHEN** the agents section rows contain the same token
+- **THEN** only the focused agent's row shows the focused style
+
+#### Scenario: Unknown key
+- **WHEN** an agent token has `focused = {italic = true}`
+- **THEN** config loading reports an error

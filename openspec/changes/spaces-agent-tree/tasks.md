@@ -4,6 +4,7 @@
 
 - [x] 1.1 Add `AgentSidebarToken::AgentIndexFocused` ("agent_index_focused") with parse and serialize support. Add `focused: bool` to `AgentTokenContext`, passing `agent.focused` from every caller. Verify with token tests: the token renders the index only when focused, is elided with no stray separator otherwise, and a misspelled token is still a config error.
 - [x] 1.2 Add `ClientShellConfig::tree_agent_numbering()` (`spaces.agents != Off && !agents.enabled`). Verify with unit tests covering all four on/off combinations.
+- [x] 1.3 Accept `focused` on agent tokens (`AgentSidebarToken::Styled`), applied over `style` and rules on the focused agent's row, in the agents section and in space children. Verify with parse and round-trip tests, an unknown-key rejection test, and a render test where only the focused agent's `agent_index` gets the focused fg and bold in both lists.
 
 ## 2. Tree order and child numbering
 

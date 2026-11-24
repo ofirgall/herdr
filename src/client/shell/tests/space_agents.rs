@@ -747,6 +747,48 @@ fn focused_agent_tab_names_use_tab_focused_and_bold() {
 }
 
 #[test]
+fn focused_style_on_agent_index_applies_only_to_the_focused_agents_row() {
+    use ratatui::style::Color;
+    let base = Color::Rgb(0x71, 0x4f, 0xb0);
+    let bright = Color::Rgb(0xc6, 0xa6, 0xff);
+    let token =
+        r##"{token = "agent_index", fg = "#714fb0", focused = {fg = "#c6a6ff", bold = true}}"##;
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.agents = SpaceAgentsMode::Expanded;
+    config.ui.sidebar.agents.rows = toml::from_str::<crate::config::AgentsSidebarConfig>(&format!(
+        "rows = [[{token}, \"tab\"]]"
+    ))
+    .unwrap()
+    .rows;
+    config.ui.sidebar.spaces.agent_rows = toml::from_str::<crate::config::SpacesSidebarConfig>(
+        &format!("agent_rows = [[{token}, \"tab\"]]"),
+    )
+    .unwrap()
+    .agent_rows;
+    let mut snapshot = snapshot();
+    snapshot.tabs = vec![
+        tab("tab_1", "ws_1", 1, "alpha"),
+        tab("tab_2", "ws_1", 2, "bravo"),
+    ];
+    snapshot.agents = vec![
+        agent("pane_1", "ws_1", "tab_1", AgentStatus::Idle),
+        agent("pane_2", "ws_1", "tab_2", AgentStatus::Idle),
+    ];
+    snapshot.agents[0].focused = true;
+    let mut state = state_with(ClientShellConfig::from_config(&config), snapshot);
+    let frame = state.compose(106, 30).expect("composed frame");
+    // Each agent shows as a space child and as an agents panel row.
+    assert_eq!(
+        sidebar_word_styles(&frame, "1 alpha"),
+        vec![(bright, true); 2]
+    );
+    assert_eq!(
+        sidebar_word_styles(&frame, "2 bravo"),
+        vec![(base, false); 2]
+    );
+}
+
+#[test]
 fn tab_stripped_hides_the_tab_position_in_panel_and_space_children() {
     let tabs = ["1| web", "2| zsh"];
     let (spaces, panel) = sidebar_text_with_tab_tokens("tab_stripped", tabs);

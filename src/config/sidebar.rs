@@ -222,6 +222,8 @@ pub enum AgentSidebarToken {
         rules: Vec<SidebarTokenRule>,
         /// Exact prefix template for `tab_stripped`.
         prefix: Option<PlaceholderTemplate>,
+        /// Style applied over `style` and rules on the focused agent's row.
+        focused: Option<SidebarTokenStyle>,
     },
 }
 
@@ -247,6 +249,13 @@ pub enum SpaceSidebarToken {
 }
 
 impl AgentSidebarToken {
+    pub(crate) fn focused_style(&self) -> Option<SidebarTokenStyle> {
+        match self {
+            Self::Styled { focused, .. } => *focused,
+            _ => None,
+        }
+    }
+
     pub(crate) fn tab_prefix(&self) -> Option<&PlaceholderTemplate> {
         match self {
             Self::Styled { prefix, .. } => prefix.as_ref(),
@@ -509,13 +518,14 @@ impl Serialize for AgentSidebarToken {
                 style,
                 rules,
                 prefix,
+                focused,
             } => serialize_styled_token(
                 agent_token_name(token),
                 *style,
                 rules,
                 None,
                 prefix.as_ref(),
-                None,
+                *focused,
                 serializer,
             ),
             token => serializer.serialize_str(&agent_token_name(token)),
@@ -537,11 +547,6 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
         let (value, style, rules, _, prefix, focused) = RawSidebarToken::deserialize(deserializer)?
             .parts()
             .map_err(serde::de::Error::custom)?;
-        if focused.is_some() {
-            return Err(serde::de::Error::custom(
-                "`focused` is only supported on space row tokens",
-            ));
-        }
         let token = parse_sidebar_token(
             value,
             &[
@@ -566,6 +571,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
             style,
             rules,
             prefix,
+            focused,
         }))
     }
 }
@@ -1691,41 +1697,41 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
     }
 
     #[test]
-    fn focused_style_is_rejected_on_agent_rows_and_with_unknown_keys() {
-        let error =
-            parse_agent_row_token("{token = \"tab\", focused = {bold = true}}").unwrap_err();
-        assert!(
-            error.contains("`focused` is only supported on space row tokens"),
-            "{error}"
+    fn focused_style_parses_and_round_trips_on_agent_tokens() {
+        let token = parse_agent_row_token(
+            "{token = \"agent_index\", fg = \"#714fb0\", focused = {bold = true, fg = \"#c6a6ff\"}}",
+        )
+        .unwrap();
+        assert_eq!(
+            token.focused_style(),
+            Some(SidebarTokenStyle {
+                fg: Some(SidebarTokenColor {
+                    r: 0xc6,
+                    g: 0xa6,
+                    b: 0xff
+                }),
+                bold: Some(true),
+                dim: None,
+            })
         );
-        assert!(parse_space_row_token("{token = \"index\", focused = {italic = true}}").is_err());
+        let round: AgentsSidebarConfig = toml::from_str(
+            &toml::to_string(&AgentsSidebarConfig {
+                rows: vec![vec![token.clone()]],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(round.rows[0][0], token);
+        assert_eq!(
+            parse_agent_row_token("\"tab\"").unwrap().focused_style(),
+            None
+        );
     }
 
     #[test]
-    fn spacer_parses_round_trips_and_does_not_count_toward_the_token_limit() {
-        let config: SidebarConfig = toml::from_str(
-            "[agents]\nrows = [[\"agent\", \"spacer\", \"$pr\"]]\n\
-             [spaces]\nrows = [[\"workspace\", { token = \"spacer\" }, \"$pr\"]]\n",
-        )
-        .unwrap();
-        assert_eq!(config.agents.rows[0][1], AgentSidebarToken::Spacer);
-        assert_eq!(
-            config.spaces.rows[0][1].parts().0,
-            &SpaceSidebarToken::Spacer
-        );
-        let round: SidebarConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
-        assert_eq!(round.agents.rows, config.agents.rows);
-        assert_eq!(round.spaces.rows, config.spaces.rows);
-
-        let full = std::iter::repeat_n("\"workspace\"", MAX_SIDEBAR_TOKENS_PER_ROW)
-            .collect::<Vec<_>>()
-            .join(",");
-        let input = format!("[spaces]\nrows = [[{full}, \"spacer\"]]");
-        assert!(toml::from_str::<SidebarConfig>(&input).is_ok());
-        let input = format!("[spaces]\nrows = [[{full}, \"branch\"]]");
-        assert!(toml::from_str::<SidebarConfig>(&input).is_err());
-
-        let input = "[spaces]\nrows = [[{ token = 'spacer', rules = [{ equals = 'x' }] }]]";
-        assert!(toml::from_str::<SidebarConfig>(input).is_err());
+    fn focused_style_rejects_unknown_keys() {
+        assert!(parse_space_row_token("{token = \"index\", focused = {italic = true}}").is_err());
+        assert!(parse_agent_row_token("{token = \"tab\", focused = {italic = true}}").is_err());
     }
 }

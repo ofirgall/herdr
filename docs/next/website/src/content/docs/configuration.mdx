@@ -602,7 +602,7 @@ The first matching rule wins. Its specified style fields override the occurrence
 
 Rules work with text-valued built-ins and custom `$name` tokens in Agent rows, `rows_by_agent` overrides, and Space rows. Custom tokens match their reported value: `$load` reporting `"90"` selects red and bold above, `"60"` selects yellow, and `"90%"` keeps white. Unreported tokens still disappear. `state_icon` and composite `git_status` accept fixed styles only, not rules. Unknown conditions and malformed rules are rejected when loading config; regex, fuzzy matching, and scripts are not supported.
 
-Space-row tokens also accept `focused`, a table of `fg`, `bold`, and `dim` applied only on the focused space, over the token's own style and any matching rule:
+Space-row and agent-row tokens also accept `focused`, a table of `fg`, `bold`, and `dim` applied only on the focused space, or on the focused agent's row, over the token's own style and any matching rule:
 
 ```toml
 [ui.sidebar.spaces]
@@ -611,7 +611,14 @@ rows = [
 ]
 ```
 
-Unspecified fields keep the token's style. Agent rows reject `focused`.
+Unspecified fields keep the token's style. In agent rows, both `[ui.sidebar.agents] rows` and `[ui.sidebar.spaces] agent_rows`, `focused` applies on the focused agent's row, the same one `agent_index_focused` marks:
+
+```toml
+[ui.sidebar.spaces]
+agent_rows = [
+  [{ token = "agent_index", fg = "#714fb0", focused = { fg = "#c6a6ff", bold = true } }, "tab"],
+]
+```
 
 `row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group; set `subspace_row_gap` under `[ui.sidebar.spaces]` to add blank rows before each worktree child as well, with the tree connector continuing through them. Set `row_gap_after_agents_only = true` to add these gaps only after a Space whose agent children are shown, or after the last worktree child of a group.
 
