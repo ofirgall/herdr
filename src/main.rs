@@ -353,7 +353,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # status_indicators = "dots"
 
 # Per-state glyph overrides; unset states keep the status_indicators glyph.
-# status_icons = { blocked = "!", working = "◐" }
+# A list of glyphs animates, advancing one frame every animation_interval_ms (default 120).
+# status_icons = { blocked = "!", working = ["◐", "◓", "◑", "◒"], animation_interval_ms = 120 }
 
 # Show agent status glyphs in tab labels with the status color as tab background; colors
 # default to the theme, and inactive_dim fades unfocused tabs.

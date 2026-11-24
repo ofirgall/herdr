@@ -1956,11 +1956,17 @@ impl ClientShellState {
         false
     }
 
+    /// Advance animated status icons. Returns true when a repaint is needed.
+    pub(crate) fn tick_status_icon_animation(&mut self, now: std::time::Instant) -> bool {
+        self.config.status_indicators.tick(now)
+    }
+
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
         let default = std::time::Duration::from_millis(100);
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.config.status_indicators.next_frame_deadline(now))
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

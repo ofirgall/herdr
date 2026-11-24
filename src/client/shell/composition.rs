@@ -156,6 +156,7 @@ impl ClientShellState {
     ) -> Option<crate::client::frame_output::ComposedFrame> {
         self.last_composed_at = Some(std::time::Instant::now());
         self.selection_repaint_deadline = None;
+        self.config.status_indicators.begin_compose();
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
             self.reveal_navigation_workspace = true;
             self.reveal_mobile_workspace = true;

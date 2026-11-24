@@ -425,6 +425,14 @@ working = "◐"
 done = "✓"
 ```
 
+Any state can animate: give it an array of glyphs instead of one, and Herdr shows them in order, advancing one frame every `animation_interval_ms` milliseconds (default `120`, minimum `16`). Herdr only repaints for animation while an animated glyph is on screen.
+
+```toml
+[ui.status_icons]
+working = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+animation_interval_ms = 80
+```
+
 Tabs can show the status of the agents inside them too. With `[ui.tab_status]` enabled, each tab with agent state gets its status glyph before the label and the status color as its background, with text in whichever theme color reads better, or in the `fg` color when set. Tabs without agents keep their plain style. Unfocused tab backgrounds fade toward the plain tab color by `inactive_dim` percent (default 40, `0` disables it) so the focused tab stands out. Colors default to the theme's status colors; override any state with a hex, named, or `rgb(r,g,b)` color:
 
 ```toml

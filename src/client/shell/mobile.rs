@@ -294,7 +294,7 @@ fn render_agent_summary(
             continue;
         }
         let indicators = &config.status_indicators;
-        let symbol = match (indicators.icons.get(status), indicators.style, status) {
+        let symbol = match (indicators.icon(status), indicators.style, status) {
             (Some(glyph), _, _) => Some(glyph),
             (None, crate::config::StatusIndicatorStyle::Dots, AgentStatus::Blocked) => Some("◉"),
             (None, crate::config::StatusIndicatorStyle::Dots, AgentStatus::Done) => Some("●"),
