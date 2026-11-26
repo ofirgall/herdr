@@ -70,17 +70,17 @@ fn fit_columns(text: &str, width: usize) -> String {
 }
 
 /// Sidebar presentation state of subagent rows for one endpoint: panes whose
-/// subagent rows are expanded and panes showing history instead of the current
-/// list. Never persisted or sent to the server.
+/// subagent rows are collapsed (rows are expanded by default) and panes showing
+/// history instead of the current list. Never persisted or sent to the server.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct SubagentViewState {
-    pub(super) expanded: HashSet<String>,
+    pub(super) collapsed: HashSet<String>,
     pub(super) history: HashSet<String>,
 }
 
 impl SubagentViewState {
     pub(super) fn is_empty(&self) -> bool {
-        self.expanded.is_empty() && self.history.is_empty()
+        self.collapsed.is_empty() && self.history.is_empty()
     }
 
     fn toggle(set: &mut HashSet<String>, pane_id: &str) {
@@ -97,7 +97,7 @@ impl SubagentViewState {
                 .iter()
                 .any(|agent| agent.pane_id == *pane_id)
         };
-        self.expanded.retain(present);
+        self.collapsed.retain(present);
         self.history.retain(present);
     }
 }
@@ -130,7 +130,7 @@ impl<'a> SubagentSection<'a> {
         if agent.subagent_history.is_empty() && agent.subagents.is_empty() {
             return None;
         }
-        let expanded = view.is_some_and(|view| view.expanded.contains(&agent.pane_id));
+        let expanded = !view.is_some_and(|view| view.collapsed.contains(&agent.pane_id));
         let history_mode = view.is_some_and(|view| view.history.contains(&agent.pane_id));
         let running = agent
             .subagents
@@ -154,13 +154,9 @@ impl<'a> SubagentSection<'a> {
         })
     }
 
-    /// Rows drawn beneath the agent's own rows: the mode row and the list.
+    /// Rows drawn beneath the agent's own rows: the active list.
     fn extra_height(&self) -> usize {
-        if self.expanded {
-            1 + self.rows.len()
-        } else {
-            0
-        }
+        self.rows.len()
     }
 }
 
@@ -539,25 +535,34 @@ pub(super) fn render_children(
             status_icon(child.status, &config.status_indicators),
             status_style,
         );
-        // The chevron (and running count) take the right edge of the first row;
-        // tokens truncate before it.
+        // The right edge of the first row holds `[count] ↺ ▸`; tokens truncate
+        // before it. A row too narrow for the history icon drops it first.
         let chevron = child.subagents.as_ref().and_then(|section| {
             let glyph = if section.expanded { "▾" } else { "▸" };
             let count = (section.running > 0).then(|| section.running.to_string());
-            let width = count
+            let count_width = count
                 .as_ref()
-                .map_or(0, |count| super::render::display_width(count) + 1)
-                + 1;
-            let first_indent = space_indent + CHILD_INDENT;
-            (width < area.width.saturating_sub(first_indent)).then_some((count, glyph, width))
+                .map_or(0, |count| super::render::display_width(count) + 1);
+            let available = area.width.saturating_sub(space_indent + CHILD_INDENT);
+            let with_icon = count_width + SUBAGENT_ICON_WIDTH + 1;
+            let without_icon = count_width + 1;
+            if with_icon < available {
+                Some((count, glyph, with_icon, true))
+            } else if without_icon < available {
+                Some((count, glyph, without_icon, false))
+            } else {
+                None
+            }
         });
-        let reserved = chevron.as_ref().map_or(0, |(_, _, width)| width + 1);
-        if let Some((count, glyph, width)) = &chevron {
+        let reserved = chevron.as_ref().map_or(0, |(_, _, width, _)| width + 1);
+        if let (Some((count, glyph, width, icon_shown)), Some(section)) =
+            (&chevron, child.subagents.as_ref())
+        {
             let mut x = area.x + area.width - width;
-            hits.subagent_toggles
-                .push((Rect::new(x, y, *width, 1), child.pane_id.clone()));
             if let Some(count) = count {
                 let count_width = super::render::display_width(count);
+                hits.subagent_toggles
+                    .push((Rect::new(x, y, count_width, 1), child.pane_id.clone()));
                 super::render::put_text(
                     buffer,
                     x,
@@ -571,6 +576,21 @@ pub(super) fn render_children(
                 );
                 x += count_width + 1;
             }
+            if *icon_shown {
+                let style = if section.history_mode {
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.overlay0)
+                };
+                hits.subagent_modes
+                    .push((Rect::new(x, y, 1, 1), child.pane_id.clone()));
+                super::render::put_text(buffer, x, y, 1, SUBAGENT_HISTORY_ICON, style);
+                x += SUBAGENT_ICON_WIDTH;
+            }
+            hits.subagent_toggles
+                .push((Rect::new(x, y, 1, 1), child.pane_id.clone()));
             super::render::put_text(buffer, x, y, 1, glyph, Style::default().fg(palette.accent));
         }
         for (index, tokens) in child.rows.iter().take(token_height as usize).enumerate() {
@@ -614,80 +634,58 @@ pub(super) fn render_children(
                 y + token_height,
                 y + height,
                 space_indent + CHILD_INDENT,
-                child,
                 section,
+                child.focused,
                 config,
-                hits,
             );
         }
         y += height;
     }
 }
 
+/// History-mode icon left of the chevron, and its width plus the gap after it.
+const SUBAGENT_HISTORY_ICON: &str = "↺";
+const SUBAGENT_ICON_WIDTH: u16 = 2;
+
+/// Narrowest text area (icon, space, two columns of description) that still
+/// leaves room for the timing.
+const SUBAGENT_MIN_TEXT: usize = 4;
+
 /// Columns from one subagent nesting level's connector to the next.
 const SUBAGENT_LEVEL_WIDTH: u16 = 3;
 
-/// Draws the mode row and the subagent rows of an expanded agent child on
-/// rows `top..bottom`, with connectors starting at `base` (relative to `area`),
-/// and records their hits.
-#[allow(clippy::too_many_arguments)]
+/// Draws the subagent rows of an expanded agent child on
+/// rows `top..bottom`, with connectors starting at `base` (relative to `area`).
 fn render_subagent_rows(
     buffer: &mut Buffer,
     area: Rect,
     top: u16,
     bottom: u16,
     base: u16,
-    child: &SpaceAgentChild<'_>,
     section: &SubagentSection<'_>,
+    parent_focused: bool,
     config: &ClientShellConfig,
-    hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
     let tree_style = Style::default().fg(palette.overlay0);
     if base >= area.width || top >= bottom {
         return;
     }
+    // Same color as the agent's tab name: `subagent`, else `tab`, else the
+    // row's secondary color that an unthemed tab name uses.
+    let color = palette
+        .subagent_color(parent_focused)
+        .unwrap_or(palette.overlay0);
+    let text_style = Style::default().fg(color);
+    let dim_style = Style::default().fg(color).add_modifier(Modifier::DIM);
     let right = area.x + area.width;
     let connector_width = |x: u16| (right - x).min(2);
     let text_width = |x: u16| right.saturating_sub(x);
 
-    // Mode row.
-    let mode_connector = config.tree_agents.connector(section.rows.is_empty());
     let connector_x = area.x + base;
-    super::render::put_text(
-        buffer,
-        connector_x,
-        top,
-        connector_width(connector_x),
-        mode_connector,
-        tree_style,
-    );
-    hits.subagent_modes.push((
-        Rect::new(connector_x, top, right - connector_x, 1),
-        child.pane_id.clone(),
-    ));
-    let active = Style::default()
-        .fg(palette.accent)
-        .add_modifier(Modifier::BOLD);
-    let inactive = Style::default().fg(palette.overlay0);
-    let (current_style, history_style) = if section.history_mode {
-        (inactive, active)
-    } else {
-        (active, inactive)
-    };
-    let mut x = connector_x + SUBAGENT_LEVEL_WIDTH;
-    for (text, style) in [
-        ("current", current_style),
-        (" · ", inactive),
-        ("history", history_style),
-    ] {
-        let width = text_width(x);
-        super::render::put_text(buffer, x, top, width, text, style);
-        x = x.saturating_add(super::render::display_width(text));
-    }
 
     for (index, row) in section.rows.iter().enumerate() {
-        let y = top + 1 + index as u16;
+        let y = top + index as u16;
         if y >= bottom {
             break;
         }
@@ -713,20 +711,40 @@ fn render_subagent_rows(
             tree_style,
         );
         let content_x = row_x + SUBAGENT_LEVEL_WIDTH;
-        let width = usize::from(text_width(content_x));
-        if width == 0 {
+        let full_width = usize::from(text_width(content_x));
+        if full_width == 0 {
             continue;
         }
-        let (icon, icon_style) = subagent_icon(row.subagent.state, config);
+        // Right-aligned timing; the description truncates first and the kind
+        // is dropped before the timing. Too narrow for any description: no timing.
+        let subagent = row.subagent;
+        let timing = super::subagent_timing::row_timing(
+            subagent.state,
+            subagent.started_at_ms,
+            subagent.ended_at_ms,
+            config.subagent_clock.now_ms,
+        )
+        .filter(|timing| {
+            full_width >= usize::from(super::render::display_width(timing)) + 1 + SUBAGENT_MIN_TEXT
+        });
+        let timing_width = timing.as_ref().map_or(0, |timing| {
+            usize::from(super::render::display_width(timing))
+        });
+        if timing.is_some() && subagent.state == crate::api::schema::SubagentStatus::Running {
+            config.subagent_clock.mark_running_drawn();
+        }
+        let width = if timing.is_some() {
+            full_width - timing_width - 1
+        } else {
+            full_width
+        };
+        let (icon, icon_style) = subagent_icon(subagent.state, config);
         // The description leads because the sidebar is narrow and it tells
         // subagents apart; the kind follows dimmed when space remains.
-        let (primary, secondary) = if row.subagent.description.is_empty() {
-            (row.subagent.kind.as_str(), "")
+        let (primary, secondary) = if subagent.description.is_empty() {
+            (subagent.kind.as_str(), "")
         } else {
-            (
-                row.subagent.description.as_str(),
-                row.subagent.kind.as_str(),
-            )
+            (subagent.description.as_str(), subagent.kind.as_str())
         };
         let primary = crate::ui::truncate_end(primary, width.saturating_sub(2));
         let remaining = width
@@ -735,17 +753,30 @@ fn render_subagent_rows(
         let mut spans = vec![
             Span::styled(icon, icon_style),
             Span::raw(" "),
-            Span::styled(primary, Style::default().fg(palette.subtext0)),
+            Span::styled(primary, text_style),
         ];
         if remaining > 0 && !secondary.is_empty() {
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 crate::ui::truncate_end(secondary, remaining),
-                Style::default().fg(palette.overlay0),
+                dim_style,
             ));
         }
-        Paragraph::new(Line::from(spans))
-            .render(Rect::new(content_x, y, text_width(content_x), 1), buffer);
+        Paragraph::new(Line::from(spans)).render(
+            Rect::new(content_x, y, u16::try_from(width).unwrap_or(u16::MAX), 1),
+            buffer,
+        );
+        if let Some(timing) = timing {
+            let timing_width = u16::try_from(timing_width).unwrap_or(u16::MAX);
+            super::render::put_text(
+                buffer,
+                right - timing_width,
+                y,
+                timing_width,
+                &timing,
+                dim_style,
+            );
+        }
     }
 }
 
@@ -1059,7 +1090,45 @@ impl ClientShellState {
         pane_id: &str,
     ) {
         let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
-        SubagentViewState::toggle(&mut view.expanded, pane_id);
+        SubagentViewState::toggle(&mut view.collapsed, pane_id);
+    }
+
+    /// Whether `pane_id` is an agent in the active snapshot with subagent rows
+    /// to show or hide.
+    pub(super) fn agent_has_subagents(&self, pane_id: &str) -> bool {
+        self.snapshot.as_deref().is_some_and(|snapshot| {
+            snapshot.agents.iter().any(|agent| {
+                agent.pane_id == pane_id
+                    && (!agent.subagents.is_empty() || !agent.subagent_history.is_empty())
+            })
+        })
+    }
+
+    /// Flips the focused agent's subagent rows (the `toggle_subagents` key).
+    /// Returns true when there was something to toggle.
+    pub(super) fn toggle_focused_subagents(&mut self) -> bool {
+        let Some(pane_id) = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone())
+        else {
+            return false;
+        };
+        if !self.agent_has_subagents(&pane_id) {
+            return false;
+        }
+        let endpoint_id = self.active_endpoint_id.clone();
+        self.toggle_subagents_expanded(&endpoint_id, &pane_id);
+        true
+    }
+
+    /// Whether `pane_id`'s subagent rows are expanded and in history mode.
+    pub(super) fn subagent_view_flags(&self, pane_id: &str) -> (bool, bool) {
+        let view = self.subagent_views.get(&self.active_endpoint_id);
+        (
+            !view.is_some_and(|view| view.collapsed.contains(pane_id)),
+            view.is_some_and(|view| view.history.contains(pane_id)),
+        )
     }
 
     /// Flips `pane_id` between its current and history subagent lists.

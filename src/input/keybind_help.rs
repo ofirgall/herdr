@@ -214,6 +214,10 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.toggle_space_index),
                     "toggle space jump number",
                 ),
+                entry(
+                    binding_label(&keybinds.toggle_subagents),
+                    "toggle subagent rows",
+                ),
                 entry(binding_label(&keybinds.focus_pane_left), "focus pane left"),
                 entry(binding_label(&keybinds.focus_pane_down), "focus pane down"),
                 entry(binding_label(&keybinds.focus_pane_up), "focus pane up"),

@@ -119,6 +119,8 @@ mod tests {
             background: false,
             finished: false,
             created_at: None,
+            started_at: None,
+            ended_at: None,
         }
     }
 

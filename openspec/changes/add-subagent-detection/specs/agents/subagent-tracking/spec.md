@@ -121,7 +121,7 @@ Subagent records that are missing, partially written, malformed, or in an unreco
 
 ### Requirement: Subagents exposed through the JSON API
 
-Pane information returned by the JSON API SHALL include the pane's current subagents, with id, type, description, parent subagent id, whether it runs in the background, and state (`running` or `done`). Herdr SHALL emit an event when a pane's subagent list changes.
+Pane information returned by the JSON API SHALL include the pane's current subagents, with id, type, description, parent subagent id, whether it runs in the background, state (`running` or `done`), and start and end timestamps when known. Herdr SHALL emit an event when a pane's subagent list changes.
 
 #### Scenario: Reading a pane with subagents
 - **WHEN** a client requests pane information for a pane with running subagents

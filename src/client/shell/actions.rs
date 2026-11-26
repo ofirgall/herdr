@@ -19,6 +19,11 @@ impl ClientShellState {
                 outcome.resize = true;
                 self.persist_chrome_preferences(outcome);
             }
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSubagents) => {
+                if self.toggle_focused_subagents() {
+                    outcome.repaint = true;
+                }
+            }
             crate::input::KeybindMatch::Action(action) => {
                 if self.workspace_preview_action_blocked()
                     && matches!(

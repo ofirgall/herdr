@@ -1104,6 +1104,15 @@
             "description": {
               "type": "string"
             },
+            "ended_at_ms": {
+              "description": "Unix milliseconds when the subagent finished (done) or was last active\n(interrupted). Omitted while running.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "id": {
               "type": "string"
             },
@@ -1114,6 +1123,15 @@
               "description": "Id of the parent subagent; null for a child of the root agent.",
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "started_at_ms": {
+              "description": "Unix milliseconds when the subagent started, when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
                 "null"
               ]
             },
@@ -9007,6 +9025,15 @@
             "description": {
               "type": "string"
             },
+            "ended_at_ms": {
+              "description": "Unix milliseconds when the subagent finished (done) or was last active\n(interrupted). Omitted while running.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "id": {
               "type": "string"
             },
@@ -9017,6 +9044,15 @@
               "description": "Id of the parent subagent; null for a child of the root agent.",
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "started_at_ms": {
+              "description": "Unix milliseconds when the subagent started, when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
                 "null"
               ]
             },

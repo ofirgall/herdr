@@ -471,7 +471,17 @@ pub(crate) fn pane_subagent_info(
                 crate::api::schema::SubagentStatus::Interrupted
             }
         },
+        started_at_ms: subagent.started_at.and_then(unix_millis),
+        ended_at_ms: match subagent.state {
+            crate::subagents::SubagentState::Running => None,
+            _ => subagent.ended_at.and_then(unix_millis),
+        },
     }
+}
+
+fn unix_millis(time: std::time::SystemTime) -> Option<u64> {
+    let millis = time.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    u64::try_from(millis).ok()
 }
 
 fn terminal_agent_session_info(

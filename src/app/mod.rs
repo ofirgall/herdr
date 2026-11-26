@@ -3560,6 +3560,58 @@ mod tests {
     }
 
     #[test]
+    fn subagent_theme_colors_default_to_tab_colors_and_follow_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        let base = state::Palette::catppuccin();
+        assert_eq!((base.subagent, base.subagent_focused), (None, None));
+        assert_eq!(base.subagent_color(false), None);
+        assert_eq!(base.subagent_color(true), None);
+
+        // Unset tokens follow the tab tokens.
+        let tabs = "[theme.custom]\ntab = \"#5c6fae\"\ntab_focused = \"#a97cfa\"\n";
+        let dark = palette(tabs, HostAppearance::Dark);
+        assert_eq!(dark.subagent_color(false), dark.tab);
+        assert_eq!(dark.subagent_color(true), dark.tab_focused);
+        let tab_only = palette("[theme.custom]\ntab = \"#5c6fae\"\n", HostAppearance::Dark);
+        assert_eq!(tab_only.subagent_color(true), tab_only.tab);
+
+        // Custom tokens win, and `subagent` also feeds the focused fallback
+        // ahead of `tab`.
+        let custom = format!("{tabs}subagent = \"#119955\"\n");
+        let dark = palette(&custom, HostAppearance::Dark);
+        assert_eq!(dark.subagent, Some(Color::Rgb(0x11, 0x99, 0x55)));
+        assert_eq!(dark.subagent_color(false), dark.subagent);
+        assert_eq!(dark.subagent_color(true), dark.tab_focused);
+        let subagent_only = palette(
+            "[theme.custom]\ntab = \"#5c6fae\"\nsubagent = \"#119955\"\n",
+            HostAppearance::Dark,
+        );
+        assert_eq!(subagent_only.subagent_color(true), subagent_only.subagent);
+        let focused = format!("{custom}subagent_focused = \"#222222\"\n");
+        let dark = palette(&focused, HostAppearance::Dark);
+        assert_eq!(
+            dark.subagent_color(true),
+            Some(Color::Rgb(0x22, 0x22, 0x22))
+        );
+        assert_eq!(dark.subagent_color(false), dark.subagent);
+
+        // Light/dark overrides apply after `[theme.custom]`.
+        let modes = "[theme]\nauto_switch = true\n[theme.custom]\nsubagent = \"#119955\"\n[theme.custom.light]\nsubagent = \"#444444\"\nsubagent_focused = \"#555555\"\n";
+        let light = palette(modes, HostAppearance::Light);
+        assert_eq!(light.subagent, Some(Color::Rgb(0x44, 0x44, 0x44)));
+        assert_eq!(light.subagent_focused, Some(Color::Rgb(0x55, 0x55, 0x55)));
+        let dark = palette(modes, HostAppearance::Dark);
+        assert_eq!(dark.subagent, Some(Color::Rgb(0x11, 0x99, 0x55)));
+        assert_eq!(dark.subagent_focused, None);
+    }
+
+    #[test]
     fn index_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
         use crate::terminal_theme::HostAppearance;
         let palette = |toml: &str, appearance| {

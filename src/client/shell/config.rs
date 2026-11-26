@@ -136,6 +136,7 @@ impl ClientShellConfig {
             pull_requests: config.ui.sidebar.pull_requests.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
             status_indicators: super::StatusIndicators::from_config(config),
+            subagent_clock: super::subagent_timing::SubagentClock::default(),
             tab_status: super::TabStatus::from_config(config),
             sound_enabled: config.ui.sound.enabled,
             toast_delivery: config.ui.toast.delivery,

@@ -34,6 +34,7 @@ mod scroll;
 mod settings;
 mod space_agents;
 mod state;
+mod subagent_timing;
 mod surface_patch;
 mod text_editor;
 mod word_selection;

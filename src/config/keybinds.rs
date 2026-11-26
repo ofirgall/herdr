@@ -412,6 +412,7 @@ pub struct Keybinds {
     pub resize_pane_right: ActionKeybinds,
     pub toggle_sidebar: ActionKeybinds,
     pub toggle_space_index: ActionKeybinds,
+    pub toggle_subagents: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
 }
 
@@ -600,6 +601,7 @@ impl Config {
             resize_pane_right: empty_action!(),
             toggle_sidebar: empty_action!(),
             toggle_space_index: empty_action!(),
+            toggle_subagents: empty_action!(),
             custom_commands: Vec::new(),
         };
 
@@ -770,6 +772,7 @@ impl Config {
             apply_action!(keybinds.resize_pane_right, resize_pane_right, source);
             apply_action!(keybinds.toggle_sidebar, toggle_sidebar, source);
             apply_action!(keybinds.toggle_space_index, toggle_space_index, source);
+            apply_action!(keybinds.toggle_subagents, toggle_subagents, source);
 
             if source == field_source!(indexed) {
                 append_legacy_indexed_bindings(
@@ -2348,6 +2351,32 @@ switch_workspace = "prefix+shift+1..9"
         bindings
             .iter()
             .find_map(|binding| binding.matched_index(key))
+    }
+
+    #[test]
+    fn toggle_subagents_defaults_to_prefix_a_and_parses() {
+        let defaults = Config::default().keybinds();
+        assert_eq!(defaults.toggle_subagents.labels(), ["prefix+a"]);
+        // No other default binding may use the same key.
+        let keys = toml::Value::try_from(&Config::default().keys).unwrap();
+        let taken = keys
+            .as_table()
+            .unwrap()
+            .values()
+            .flat_map(|value| match value {
+                toml::Value::String(label) => vec![label.as_str()],
+                toml::Value::Array(items) => items.iter().filter_map(|i| i.as_str()).collect(),
+                _ => Vec::new(),
+            })
+            .filter(|label| *label == "prefix+a")
+            .count();
+        assert_eq!(taken, 1);
+
+        let config: Config = toml::from_str("[keys]\ntoggle_subagents = \"prefix+u\"\n").unwrap();
+        assert!(config.collect_diagnostics().is_empty());
+        assert_eq!(config.keybinds().toggle_subagents.labels(), ["prefix+u"]);
+        let off: Config = toml::from_str("[keys]\ntoggle_subagents = \"\"\n").unwrap();
+        assert!(off.keybinds().toggle_subagents.bindings.is_empty());
     }
 
     #[test]

@@ -26,6 +26,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) pull_requests: crate::config::PullRequestsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) status_indicators: super::StatusIndicators,
+    pub(super) subagent_clock: super::subagent_timing::SubagentClock,
     pub(super) tab_status: super::TabStatus,
     pub(super) sound_enabled: bool,
     pub(super) toast_delivery: crate::config::ToastDelivery,
@@ -102,9 +103,9 @@ pub(super) struct ShellHitMap {
     pub(super) agents: Vec<(Rect, String)>,
     /// Agent children nested under spaces: `(rect, pane_id)`.
     pub(super) space_agents: Vec<(Rect, String)>,
-    /// Subagent chevrons (with the running count) on agent children: `(rect, pane_id)`.
+    /// Subagent chevrons and running counts on agent children: `(rect, pane_id)`.
     pub(super) subagent_toggles: Vec<(Rect, String)>,
-    /// Mode rows (`current · history`) of expanded agent children: `(rect, pane_id)`.
+    /// History-mode icons of agent children with subagents: `(rect, pane_id)`.
     pub(super) subagent_modes: Vec<(Rect, String)>,
     /// Visible linked sidebar tokens; empty in the collapsed and multi-machine sidebars.
     pub(super) token_links: Vec<TokenLinkHit>,
@@ -548,6 +549,8 @@ pub(super) enum ClientContextMenuAction {
     ToggleGroup,
     ToggleAgents,
     ToggleSkipIndex,
+    ToggleSubagents,
+    ToggleSubagentHistory,
     NewTab,
     RenamePane,
     ClearPaneName,
@@ -575,6 +578,12 @@ pub(super) enum ClientContextMenuTarget {
     Tab {
         tab_id: String,
         workspace_id: String,
+    },
+    /// An agent child in the spaces tree that has subagent rows.
+    Agent {
+        pane_id: String,
+        subagents_expanded: bool,
+        history_mode: bool,
     },
     Pane {
         pane_id: String,
@@ -1973,12 +1982,18 @@ impl ClientShellState {
         self.config.status_indicators.tick(now)
     }
 
+    /// Repaints running subagent timers. Returns true when a repaint is needed.
+    pub(crate) fn tick_subagent_timing(&mut self, now: std::time::Instant) -> bool {
+        self.config.subagent_clock.tick(now)
+    }
+
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
         let default = std::time::Duration::from_millis(100);
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
             .chain(self.config.status_indicators.next_frame_deadline(now))
+            .chain(self.config.subagent_clock.next_deadline(now))
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

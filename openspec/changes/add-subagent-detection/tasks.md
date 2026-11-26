@@ -51,3 +51,15 @@
 - [x] 8.3 Render chevron + running count, mode row, and subagent rows under agent children in the spaces tree with expand/mode state in `ClientShellState`; verify render tests (collapsed, expanded current/history, empty current with history, interrupted icon, nested, long description) and that agents without history render byte-identical
 - [x] 8.4 Hit-test chevron, mode row, and subagent rows (focus parent pane) via `ShellHitMap`; verify click tests including after scrolling and after the list changes
 - [x] 8.5 Live check in a throwaway session on the new base and full test/clippy comparison against plain `fork-v0.9.x`
+
+## 9. Mode icon and default expanded
+
+- [x] 9.1 Replace the mode row with a history-mode icon left of the chevron (hit-tested, toggles only that agent's mode) and make subagent rows expanded by default (track collapsed panes instead of expanded); verify render/click tests and a live client check
+
+## 10. Timing, theme tokens, keybinding
+
+- [x] 10.1 Record `started_at` / `ended_at` per D9 in the Claude source; carry them through `Subagent`, `PaneSubagentInfo` (`started_at_ms` / `ended_at_ms`), schema, docs; verify fixture tests (finished, unfinished, missing transcript fallback)
+- [x] 10.2 Render right-aligned timing in subagent rows with a coarse client re-render tick only while running rows are visible; verify formatting unit tests and render tests with an injected clock
+- [x] 10.3 Add `subagent` / `subagent_focused` theme tokens defaulting to `tab` / `tab_focused`; verify theme parsing and render style tests, update configuration docs
+- [x] 10.4 Add the `toggle_subagents` keybinding (bound by default to a free prefix key) and context-menu items; verify keybind parsing/default tests and toggle tests, update keybinding docs
+- [x] 10.5 Live client check of 9.1 and 10.x and full test/clippy comparison

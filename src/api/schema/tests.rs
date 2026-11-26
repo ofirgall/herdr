@@ -571,6 +571,8 @@ fn pane_subagents_response_round_trips() {
             parent_id: None,
             background: false,
             state: SubagentStatus::Interrupted,
+            started_at_ms: Some(1_000),
+            ended_at_ms: Some(5_000),
         }],
     };
     let json = serde_json::to_value(&result).unwrap();

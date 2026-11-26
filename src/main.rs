@@ -198,6 +198,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
 # toggle_space_index = ""  # optional, skips or restores the focused space in jump numbers
+# toggle_subagents = "prefix+a"  # collapses or expands the focused agent's subagent rows in the sidebar
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.

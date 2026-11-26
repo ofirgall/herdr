@@ -752,11 +752,14 @@ If no native session reference is stored, the field is omitted.
       "description": "Find the config loader",
       "parent_id": null,
       "background": false,
-      "state": "running"
+      "state": "running",
+      "started_at_ms": 1790000000000
     }
   ]
 }
 ```
+
+`started_at_ms` is when the subagent started, in Unix milliseconds. `ended_at_ms` is when it finished (`done`) or was last active (`interrupted`); it is omitted while the subagent is `running`. Both are omitted when Herdr cannot determine them.
 
 `parent_id` is the `id` of the parent subagent, or `null` for a direct child of the pane's agent. `state` is `running` or `done`; in the `history` scope it can also be `interrupted` (an unfinished subagent from an earlier run of a resumed session).
 

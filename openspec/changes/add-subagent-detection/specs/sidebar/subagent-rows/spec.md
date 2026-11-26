@@ -26,9 +26,13 @@ An agent entry in the spaces sidebar whose pane has one or more subagents in its
 - **WHEN** a pane's current list is empty but its session history is not
 - **THEN** the agent row SHALL show a chevron and no running count
 
-### Requirement: Subagent rows are collapsed by default
+### Requirement: Subagent rows are expanded by default
 
-Subagent rows SHALL be collapsed by default. Clicking an agent row's chevron SHALL toggle between expanded and collapsed for that agent row only. Expanded state SHALL be sidebar presentation state, like the panel's scroll position. It SHALL NOT appear in the JSON API or in persisted session state.
+Subagent rows SHALL be expanded by default. Clicking an agent row's chevron SHALL toggle between expanded and collapsed for that agent row only. Expanded state SHALL be sidebar presentation state, like the panel's scroll position. It SHALL NOT appear in the JSON API or in persisted session state.
+
+#### Scenario: Default expanded
+- **WHEN** an agent row first gets subagents
+- **THEN** its subagent rows SHALL be shown beneath it
 
 #### Scenario: Expand an agent's subagents
 - **WHEN** the user clicks the chevron of a collapsed agent row with subagents
@@ -40,7 +44,7 @@ Subagent rows SHALL be collapsed by default. Clicking an agent row's chevron SHA
 
 #### Scenario: Expand state not exposed or persisted
 - **WHEN** the user expands an agent row and Herdr later restarts or restores the session
-- **THEN** the agent row SHALL be collapsed
+- **THEN** the agent row SHALL be expanded (the default)
 - **AND** the JSON API SHALL NOT report expand state
 
 #### Scenario: Pane closes while expanded
@@ -89,21 +93,53 @@ Expanded subagent rows SHALL take part in the spaces sidebar's height, scrolling
 
 ### Requirement: Per-agent subagent list mode
 
-Each agent row SHALL have a subagent list mode, `current` (default) or `history`. When expanded, the entry SHALL show a mode row above its subagent rows indicating the active mode; clicking it SHALL toggle that agent row's mode only. In `current` mode the rows SHALL show the current list; in `history` mode they SHALL show the session history, with `interrupted` entries using a distinct indicator. The mode SHALL be sidebar presentation state: not in the JSON API, not persisted, and discarded when the pane closes.
+Each agent row SHALL have a subagent list mode, `current` (default) or `history`. An agent row with a chevron SHALL show a history-mode icon next to the chevron whose styling indicates the active mode; clicking it SHALL toggle that agent row's mode only. In `current` mode the rows SHALL show the current list; in `history` mode they SHALL show the session history, with `interrupted` entries using a distinct indicator. The mode SHALL be sidebar presentation state: not in the JSON API, not persisted, and discarded when the pane closes.
 
 #### Scenario: Switch to history
-- **WHEN** the user clicks the mode row of an expanded agent in `current` mode
+- **WHEN** the user clicks the history-mode icon of an expanded agent in `current` mode
 - **THEN** that agent's rows SHALL show its session history
 - **AND** other agents' modes SHALL be unchanged
 
 #### Scenario: Switch back
-- **WHEN** the user clicks the mode row of an agent in `history` mode
+- **WHEN** the user clicks the history-mode icon of an agent in `history` mode
 - **THEN** that agent's rows SHALL show the current list
 
 #### Scenario: Current mode with empty current list
 - **WHEN** an expanded agent in `current` mode has history but no current subagents
-- **THEN** only the mode row SHALL be shown beneath it
+- **THEN** no subagent rows SHALL be shown beneath it
 
 #### Scenario: Mode not persisted
 - **WHEN** Herdr restarts or the pane closes
 - **THEN** the agent row's mode SHALL be `current`
+
+### Requirement: Subagent rows show timing
+
+Each subagent row SHALL show right-aligned timing: for a running subagent, the elapsed time since it started; for a done subagent, how long it ran and how long ago it finished; for an interrupted subagent, how long it ran and how long ago it was last active. The description SHALL truncate before the timing.
+
+#### Scenario: Running subagent timing
+- **WHEN** a subagent has been running for 2 minutes 14 seconds
+- **THEN** its row SHALL show `2m14s` and keep counting up without user input
+
+#### Scenario: Done subagent timing
+- **WHEN** a subagent ran for 12 seconds and finished 3 minutes ago
+- **THEN** its row SHALL show `12s·3m ago`
+
+### Requirement: Subagent rows are themeable
+
+Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, which SHALL default to the agent tab-name colors (`tab`, `tab_focused`).
+
+#### Scenario: Default colors
+- **WHEN** the theme sets no subagent tokens
+- **THEN** subagent rows SHALL use the same colors as the agent's tab name
+
+#### Scenario: Custom color
+- **WHEN** the theme sets `subagent`
+- **THEN** subagent rows SHALL use that color
+
+### Requirement: Keyboard toggle for subagent rows
+
+A `toggle_subagents` key binding, bound by default, SHALL collapse or expand the subagent rows of the focused agent.
+
+#### Scenario: Toggle with the keyboard
+- **WHEN** the focused agent's subagent rows are expanded and the user presses the `toggle_subagents` binding
+- **THEN** they SHALL collapse

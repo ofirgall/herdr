@@ -868,6 +868,8 @@ mod tests {
             parent: parent.map(str::to_owned),
             background: false,
             state,
+            started_at: None,
+            ended_at: None,
         };
         let before = snapshot(&app, "boot", 1, None, None);
         assert_eq!(before.agents.len(), 1);

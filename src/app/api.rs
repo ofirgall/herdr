@@ -1851,6 +1851,8 @@ mod tests {
             parent: None,
             background: false,
             state,
+            started_at: None,
+            ended_at: None,
         };
         app.state
             .terminals

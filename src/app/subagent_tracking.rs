@@ -296,6 +296,8 @@ mod tests {
                 background: false,
                 finished,
                 created_at: None,
+                started_at: None,
+                ended_at: None,
             };
             app.handle_internal_event_with_render_impact(AppEvent::SubagentsScanned {
                 terminal_id: terminal_id.clone(),
@@ -327,6 +329,8 @@ mod tests {
             parent: Some("root_child".into()),
             background: true,
             state,
+            started_at: None,
+            ended_at: None,
         }
     }
 

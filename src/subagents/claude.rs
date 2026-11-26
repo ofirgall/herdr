@@ -38,7 +38,13 @@ fn agent_id_from_meta_name(name: &str) -> Option<&str> {
     (!id.is_empty()).then_some(id)
 }
 
-fn parse_meta(id: &str, bytes: &[u8], created_at: Option<SystemTime>) -> Option<SubagentRecord> {
+fn parse_meta(
+    id: &str,
+    bytes: &[u8],
+    created_at: Option<SystemTime>,
+    started_at: Option<SystemTime>,
+    ended_at: Option<SystemTime>,
+) -> Option<SubagentRecord> {
     let meta: Meta = serde_json::from_slice(bytes).ok()?;
     Some(SubagentRecord {
         id: id.to_string(),
@@ -50,7 +56,30 @@ fn parse_meta(id: &str, bytes: &[u8], created_at: Option<SystemTime>) -> Option<
         background: meta.request_shape.as_deref() == Some("background"),
         finished: meta.finished == Some(true),
         created_at,
+        started_at,
+        ended_at,
     })
+}
+
+/// Start/end times per design D9. Start is the transcript's birth time
+/// (fallback: meta birth, then mtime); Claude rewrites the meta on finish, so
+/// its birth time is not a start time. End is the meta mtime when finished,
+/// otherwise the transcript's mtime (last activity).
+fn timing(
+    meta: Option<&std::fs::Metadata>,
+    transcript: Option<&std::fs::Metadata>,
+    finished: bool,
+) -> (Option<SystemTime>, Option<SystemTime>) {
+    let birth =
+        |m: Option<&std::fs::Metadata>| m.and_then(|m| m.created().or_else(|_| m.modified()).ok());
+    let mtime = |m: Option<&std::fs::Metadata>| m.and_then(|m| m.modified().ok());
+    let started = birth(transcript).or_else(|| birth(meta));
+    let ended = if finished {
+        mtime(meta)
+    } else {
+        mtime(transcript).or_else(|| mtime(meta))
+    };
+    (started, ended)
 }
 
 impl SubagentSource for ClaudeSubagentSource {
@@ -80,12 +109,17 @@ impl SubagentSource for ClaudeSubagentSource {
                     continue;
                 }
             };
-            let created_at = entry
-                .metadata()
-                .ok()
+            let meta_fs = entry.metadata().ok();
+            let created_at = meta_fs
+                .as_ref()
                 .and_then(|m| m.created().or_else(|_| m.modified()).ok());
-            match parse_meta(id, &bytes, created_at) {
-                Some(r) => records.push(r),
+            let transcript = std::fs::metadata(dir.join(format!("agent-{id}.jsonl"))).ok();
+            match parse_meta(id, &bytes, created_at, None, None) {
+                Some(mut r) => {
+                    (r.started_at, r.ended_at) =
+                        timing(meta_fs.as_ref(), transcript.as_ref(), r.finished);
+                    records.push(r);
+                }
                 None => tracing::debug!(?path, "skipping malformed subagent meta"),
             }
         }
@@ -146,13 +180,20 @@ mod tests {
 
     #[test]
     fn finished_false_is_running() {
-        let r = parse_meta("x", br#"{"agentType":"t","finished":false}"#, None).unwrap();
+        let r = parse_meta(
+            "x",
+            br#"{"agentType":"t","finished":false}"#,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(!r.finished);
     }
 
     #[test]
     fn minimal_meta_uses_defaults() {
-        let r = parse_meta("x", b"{}", None).unwrap();
+        let r = parse_meta("x", b"{}", None, None, None).unwrap();
         assert_eq!(r.kind, "");
         assert_eq!(r.tool_use_id, None);
         assert_eq!(r.spawn_depth, 1);
@@ -169,6 +210,68 @@ mod tests {
         let recs = ClaudeSubagentSource.scan(t.path());
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].id, "good");
+    }
+
+    fn set_mtime(path: &Path, secs: u64) -> SystemTime {
+        let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+        t
+    }
+
+    #[test]
+    fn timing_finished_uses_meta_mtime_and_transcript_birth() {
+        let t = TempDir::new();
+        write(t.path(), "agent-aaa.meta.json", FINISHED);
+        write(t.path(), "agent-aaa.jsonl", "{}\n");
+        let meta_end = set_mtime(&t.path().join("agent-aaa.meta.json"), 2_000_000_000);
+        set_mtime(&t.path().join("agent-aaa.jsonl"), 1_900_000_000);
+        let r = &ClaudeSubagentSource.scan(t.path())[0];
+        let birth = fs::metadata(t.path().join("agent-aaa.jsonl"))
+            .unwrap()
+            .created()
+            .or_else(|_| {
+                fs::metadata(t.path().join("agent-aaa.jsonl"))
+                    .unwrap()
+                    .modified()
+            })
+            .unwrap();
+        // Birth time is not settable, so only assert on the source used.
+        assert!(r.started_at.is_some());
+        if fs::metadata(t.path().join("agent-aaa.jsonl"))
+            .unwrap()
+            .created()
+            .is_ok()
+        {
+            assert_eq!(r.started_at, Some(birth));
+        }
+        assert_eq!(r.ended_at, Some(meta_end));
+    }
+
+    #[test]
+    fn timing_unfinished_uses_transcript_mtime_as_last_activity() {
+        let t = TempDir::new();
+        write(t.path(), "agent-aaa.meta.json", RUNNING);
+        write(t.path(), "agent-aaa.jsonl", "{}\n");
+        set_mtime(&t.path().join("agent-aaa.meta.json"), 1_800_000_000);
+        let activity = set_mtime(&t.path().join("agent-aaa.jsonl"), 1_900_000_000);
+        let r = &ClaudeSubagentSource.scan(t.path())[0];
+        assert_eq!(r.ended_at, Some(activity));
+        assert!(r.started_at.is_some());
+    }
+
+    #[test]
+    fn timing_without_transcript_falls_back_to_meta() {
+        let t = TempDir::new();
+        write(t.path(), "agent-aaa.meta.json", RUNNING);
+        let meta_mtime = set_mtime(&t.path().join("agent-aaa.meta.json"), 1_800_000_000);
+        let r = &ClaudeSubagentSource.scan(t.path())[0];
+        assert!(r.started_at.is_some());
+        assert_eq!(r.ended_at, Some(meta_mtime));
     }
 
     #[test]

@@ -35,6 +35,10 @@ pub struct SubagentRecord {
     pub finished: bool,
     /// File birth time, falling back to mtime.
     pub created_at: Option<SystemTime>,
+    /// When the subagent started (transcript birth time; design D9).
+    pub started_at: Option<SystemTime>,
+    /// Finish time when finished, otherwise last activity.
+    pub ended_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +63,11 @@ pub struct Subagent {
     pub parent: Option<String>,
     pub background: bool,
     pub state: SubagentState,
+    /// Wall-clock start, for client-side elapsed display.
+    pub started_at: Option<SystemTime>,
+    /// Wall-clock end (finished) or last activity (interrupted). Always
+    /// `None` while `Running`.
+    pub ended_at: Option<SystemTime>,
 }
 
 pub trait SubagentSource: Send + Sync {
@@ -104,7 +113,9 @@ pub fn reconcile(input: ReconcileInput<'_>) -> Vec<Subagent> {
             continue; // duplicate record id; first wins
         }
         let previous = prev.get(rec.id.as_str());
+        let mut ended_at = None;
         let state = if rec.finished {
+            ended_at = rec.ended_at.or_else(|| previous.and_then(|p| p.ended_at));
             match previous.map(|p| &p.state) {
                 Some(SubagentState::Running) => SubagentState::Done { done_at: input.now },
                 Some(done @ SubagentState::Done { .. }) => done.clone(),
@@ -131,6 +142,8 @@ pub fn reconcile(input: ReconcileInput<'_>) -> Vec<Subagent> {
                 parent: None,
                 background: rec.background,
                 state,
+                started_at: rec.started_at,
+                ended_at,
             },
         ));
     }
@@ -214,6 +227,11 @@ pub fn reconcile_history(
         } else {
             SubagentState::Running
         };
+        let ended_at = if state == SubagentState::Running {
+            None
+        } else {
+            rec.ended_at
+        };
         out.push((
             rec.created_at,
             Subagent {
@@ -223,6 +241,8 @@ pub fn reconcile_history(
                 parent: None,
                 background: rec.background,
                 state,
+                started_at: rec.started_at,
+                ended_at,
             },
         ));
     }
@@ -289,6 +309,8 @@ mod tests {
             background: false,
             finished,
             created_at: None,
+            started_at: None,
+            ended_at: None,
         }
     }
 
@@ -300,6 +322,8 @@ mod tests {
             parent: None,
             background: false,
             state,
+            started_at: None,
+            ended_at: None,
         }
     }
 
@@ -319,6 +343,36 @@ mod tests {
             parents,
             now,
         })
+    }
+
+    #[test]
+    fn running_has_no_end_and_done_carries_record_end() {
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let t1 = SystemTime::UNIX_EPOCH + Duration::from_secs(160);
+        let now = Instant::now();
+        let mut r = rec("a", false);
+        r.started_at = Some(t0);
+        r.ended_at = Some(t1); // last activity: must not leak while running
+        let out = run(&[], &[r.clone()], true, None, &HashMap::new(), now);
+        assert_eq!(out[0].started_at, Some(t0));
+        assert_eq!(out[0].ended_at, None);
+
+        r.finished = true;
+        let out = run(&out, &[r.clone()], true, None, &HashMap::new(), now);
+        assert!(matches!(out[0].state, SubagentState::Done { .. }));
+        assert_eq!(out[0].ended_at, Some(t1));
+
+        let hist = reconcile_history(&[r.clone()], true, None, &HashMap::new());
+        assert_eq!(hist[0].ended_at, Some(t1));
+        r.finished = false;
+        let hist = reconcile_history(&[r.clone()], true, None, &HashMap::new());
+        assert_eq!(hist[0].state, SubagentState::Running);
+        assert_eq!(hist[0].ended_at, None);
+        let observed = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(500));
+        r.created_at = Some(t0);
+        let hist = reconcile_history(&[r], true, observed, &HashMap::new());
+        assert_eq!(hist[0].state, SubagentState::Interrupted);
+        assert_eq!(hist[0].ended_at, Some(t1));
     }
 
     #[test]

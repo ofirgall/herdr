@@ -45,6 +45,28 @@ impl ClientContextMenuOverlay {
                     Action::ToggleGroup,
                 ),
             ],
+            ClientContextMenuTarget::Agent {
+                subagents_expanded,
+                history_mode,
+                ..
+            } => vec![
+                item(
+                    if *subagents_expanded {
+                        "Collapse subagents"
+                    } else {
+                        "Expand subagents"
+                    },
+                    Action::ToggleSubagents,
+                ),
+                item(
+                    if *history_mode {
+                        "Show current subagents"
+                    } else {
+                        "Show subagent history"
+                    },
+                    Action::ToggleSubagentHistory,
+                ),
+            ],
             ClientContextMenuTarget::Tab { .. } => vec![
                 item("New tab", Action::NewTab),
                 item("Rename", Action::Rename),
@@ -154,6 +176,26 @@ impl ClientShellState {
         }));
     }
 
+    /// Opens the subagent menu for the agent child `pane_id`; false when it
+    /// has no subagent rows.
+    pub(super) fn open_agent_context_menu(&mut self, pane_id: String, x: u16, y: u16) -> bool {
+        if !self.agent_has_subagents(&pane_id) {
+            return false;
+        }
+        let (subagents_expanded, history_mode) = self.subagent_view_flags(&pane_id);
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Agent {
+                pane_id,
+                subagents_expanded,
+                history_mode,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+        true
+    }
+
     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
         let Some(tab) = self
             .snapshot
@@ -228,6 +270,18 @@ impl ClientShellState {
                 close_group,
                 ..
             } => self.activate_workspace_context_action(workspace_id, close_group, action, outcome),
+            ClientContextMenuTarget::Agent { pane_id, .. } => {
+                let endpoint_id = self.active_endpoint_id.clone();
+                match action {
+                    ClientContextMenuAction::ToggleSubagents => {
+                        self.toggle_subagents_expanded(&endpoint_id, &pane_id)
+                    }
+                    ClientContextMenuAction::ToggleSubagentHistory => {
+                        self.toggle_subagent_history(&endpoint_id, &pane_id)
+                    }
+                    _ => {}
+                }
+            }
             ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id,

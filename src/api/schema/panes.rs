@@ -586,6 +586,13 @@ pub struct PaneSubagentInfo {
     pub parent_id: Option<String>,
     pub background: bool,
     pub state: SubagentStatus,
+    /// Unix milliseconds when the subagent started, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
+    /// Unix milliseconds when the subagent finished (done) or was last active
+    /// (interrupted). Omitted while running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
