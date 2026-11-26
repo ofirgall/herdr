@@ -63,7 +63,7 @@
 - [x] 10.3 Add `subagent` / `subagent_focused` theme tokens defaulting to `tab` / `tab_focused`; verify theme parsing and render style tests, update configuration docs
 - [x] 10.4 Add the `toggle_subagents` keybinding (bound by default to a free prefix key) and context-menu items; verify keybind parsing/default tests and toggle tests, update keybinding docs
 - [x] 10.5 Live client check of 9.1 and 10.x and full test/clippy comparison
-- [x] 10.6 Add `shell` / `shell_focused` theme tokens for the `shells` group defaulting to the subagent colors; verify theme parsing and render style tests, update configuration docs
+- [x] 10.6 Add `shell` / `shell_focused` theme tokens for shell rows defaulting to the subagent colors; verify theme parsing and render style tests, update configuration docs
 
 ## 11. Background shells
 
@@ -73,3 +73,4 @@
 - [x] 11.4 Wire `ClientShellAgent.background_shells` / `background_shell_history` (optional serde) and client-shell projection, refreshing the snapshot on change; verify wire round-trip and projection tests
 - [x] 11.5 Spaces sidebar `shells` group (header + rows, icons, timing, fold, count, collapse/history/keybinding/context menu, click focuses parent); verify render/click tests and a live client check with a real background shell
 - [x] 11.6 Make the `shells` header a toggle (running count + chevron, click collapses only the shell rows; per-agent presentation state, pruned with the agent); verify render/click tests and a live client check
+- [x] 11.7 Drop the `shells` header: show shell rows at the subagent level after the subagent rows, with the subagent state icons and a `$ ` prefix; verify render tests

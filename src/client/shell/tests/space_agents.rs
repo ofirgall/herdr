@@ -2815,7 +2815,7 @@ fn shells_only_state() -> ClientShellState {
 }
 
 #[test]
-fn shells_only_agent_shows_chevron_count_header_and_rows() {
+fn shells_only_agent_shows_shell_rows_like_subagent_rows() {
     let mut state = shells_only_state();
     let rows = compose_rows(&mut state);
     let agent = row_index(&rows, "↺");
@@ -2823,22 +2823,19 @@ fn shells_only_agent_shows_chevron_count_header_and_rows() {
         rows[agent].contains('1') && rows[agent].contains('▾'),
         "{rows:#?}"
     );
-    let header = &rows[agent + 1];
-    // `shells` on the left, the running count and chevron on the right.
-    assert!(body(header).contains("shells"), "{rows:#?}");
-    assert!(body(header).ends_with("1 ▾"), "{rows:#?}");
-    assert!(header.contains('└') || header.contains("╰"), "{rows:#?}");
-    assert!(body(&rows[agent + 2]).contains("$ server"), "{rows:#?}");
-    assert!(body(&rows[agent + 2]).ends_with("2m14s"), "{rows:#?}");
-    assert!(body(&rows[agent + 3]).contains("build"), "{rows:#?}");
-    // Shell rows hang one level deeper than the header's connector.
-    assert_eq!(
-        col(&rows[agent + 2], "$") - col(&rows[agent + 1], "shells"),
-        3,
+    // No `shells` header: the shell rows hang directly under the agent.
+    assert!(
+        !rows.iter().any(|r| body(r).contains("shells")),
         "{rows:#?}"
     );
+    assert!(rows[agent + 1].contains('├'), "{rows:#?}");
+    assert!(body(&rows[agent + 1]).contains("$ server"), "{rows:#?}");
+    assert!(body(&rows[agent + 1]).ends_with("2m14s"), "{rows:#?}");
+    assert!(rows[agent + 2].contains('└'), "{rows:#?}");
+    assert!(body(&rows[agent + 2]).contains("$ b"), "{rows:#?}");
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 2);
     // Shell rows focus the parent pane.
-    let click = left_click(&mut state, 12, (agent + 2) as u16);
+    let click = left_click(&mut state, 12, (agent + 1) as u16);
     assert!(matches!(
         &click.actions[..],
         [ClientShellAction::Endpoint { request, .. }]
@@ -2866,21 +2863,24 @@ fn shells_follow_subagents_with_branch_connectors_and_count_both() {
     let last = |row: &str| row.contains('└');
     assert!(branch(&rows[agent + 1]) && body(&rows[agent + 1]).contains("find auth code"));
     assert!(branch(&rows[agent + 2]) && body(&rows[agent + 2]).contains("outline"));
-    // The subagent group's last row is a branch because shells follow.
+    // The last subagent row is a branch because shell rows follow at the
+    // same level.
     assert!(branch(&rows[agent + 3]) && body(&rows[agent + 3]).contains("run tests"));
-    assert!(last(&rows[agent + 4]) && body(&rows[agent + 4]).contains("shells"));
-    assert!(body(&rows[agent + 4]).ends_with("1 ▾"), "{rows:#?}");
-    assert!(body(&rows[agent + 5]).contains("$ dev"), "{rows:#?}");
+    assert!(last(&rows[agent + 4]) && body(&rows[agent + 4]).contains("$ dev"));
     assert_eq!(
         col(&rows[agent + 3], "├"),
         col(&rows[agent + 4], "└"),
         "{rows:#?}"
     );
-    eprintln!("{}", rows[agent..=agent + 5].join("\n"));
+    assert_eq!(
+        col(&rows[agent + 3], "run tests") - col(&rows[agent + 3], "├"),
+        col(&rows[agent + 4], "$ dev") - col(&rows[agent + 4], "└"),
+        "{rows:#?}"
+    );
 }
 
 #[test]
-fn shell_tokens_color_the_shells_group_apart_from_subagents() {
+fn shell_tokens_color_shell_rows_apart_from_subagents() {
     use ratatui::style::Color;
     let subagent = Color::Rgb(0x11, 0x99, 0x55);
     let shell_color = Color::Rgb(0x55, 0x11, 0x99);
@@ -2914,18 +2914,14 @@ fn shell_tokens_color_the_shells_group_apart_from_subagents() {
     // Unset shell tokens: shells follow the subagent colors.
     let mut state = build("pane_c");
     assert_eq!(subagent_text_style(&mut state, "server").fg, Some(subagent));
-    assert_eq!(subagent_text_style(&mut state, "shells").fg, Some(subagent));
 
-    // `shell` colors the header and rows; subagent rows keep their own.
+    // `shell` colors the shell rows; subagent rows keep their own.
     state.config.palette.shell = Some(shell_color);
     assert_eq!(subagent_text_style(&mut state, "build").fg, Some(subagent));
     assert_eq!(
         subagent_text_style(&mut state, "server").fg,
         Some(shell_color)
     );
-    let header = subagent_text_style(&mut state, "shells");
-    assert_eq!(header.fg, Some(shell_color));
-    assert!(header.add_modifier.contains(ratatui::style::Modifier::DIM));
 
     // Focused parent: `shell` beats the focused subagent color, and
     // `shell_focused` beats both.
@@ -2951,7 +2947,7 @@ fn shell_tokens_color_the_shells_group_apart_from_subagents() {
 }
 
 #[test]
-fn nested_subagent_trunk_continues_through_the_shells_group() {
+fn nested_subagent_trunk_continues_through_to_the_shell_rows() {
     let mut snapshot = agents_snapshot();
     set_subagents(
         &mut snapshot,
@@ -3003,27 +2999,36 @@ fn shell_icons_colors_and_timing_per_state() {
         let x = col(&rows[y], glyph);
         style_of(state, y as u16, x as u16).fg
     };
-    assert!(body(&rows[agent + 2]).contains("$ runs"), "{rows:#?}");
+    // Running shells use the subagent running icon; `$` marks every shell.
+    let running = super::super::status_icon(
+        crate::api::schema::AgentStatus::Working,
+        &state.config.status_indicators,
+    )
+    .to_owned();
+    assert!(
+        body(&rows[agent + 1]).contains(&format!("{running} $ runs")),
+        "{rows:#?}"
+    );
     assert_eq!(
-        icon_color(&mut state, agent + 2, "$"),
+        icon_color(&mut state, agent + 1, &running),
         Some(super::super::status_color(
             crate::api::schema::AgentStatus::Working,
             &palette
         ))
     );
-    assert!(body(&rows[agent + 2]).ends_with("4m52s"), "{rows:#?}");
-    assert!(body(&rows[agent + 3]).ends_with("12s·3m ago"), "{rows:#?}");
-    for (offset, text) in [(4, "fail"), (5, "kill")] {
-        assert!(body(&rows[agent + offset]).contains(&format!("\u{2717} {text}")));
+    assert!(body(&rows[agent + 1]).ends_with("4m52s"), "{rows:#?}");
+    assert!(body(&rows[agent + 2]).ends_with("12s·3m ago"), "{rows:#?}");
+    for (offset, text) in [(3, "fail"), (4, "kill")] {
+        assert!(body(&rows[agent + offset]).contains(&format!("\u{2717} $ {text}")));
         assert_eq!(
             icon_color(&mut state, agent + offset, "\u{2717}"),
             Some(palette.red)
         );
     }
-    assert!(body(&rows[agent + 6]).contains("! stale"), "{rows:#?}");
-    assert_eq!(icon_color(&mut state, agent + 6, "!"), Some(palette.peach));
+    assert!(body(&rows[agent + 5]).contains("! $ "), "{rows:#?}");
+    assert_eq!(icon_color(&mut state, agent + 5, "!"), Some(palette.peach));
     // An empty description falls back to the command's first line.
-    assert!(body(&rows[agent + 7]).contains("cmd-f"), "{rows:#?}");
+    assert!(body(&rows[agent + 6]).contains("$ cmd-f"), "{rows:#?}");
     assert!(!rows.iter().any(|row| row.contains("second line")));
 }
 
@@ -3080,14 +3085,13 @@ fn shell_fold_is_independent_from_the_subagent_fold() {
     let rows = tall_rows(&mut state);
     let agent = row_index(&rows, "↺");
     assert!(rows[agent + 1].contains("+3 earlier"), "{rows:#?}");
-    let header = row_index(&rows, "shells");
-    assert!(rows[header + 1].contains("+2 earlier"), "{rows:#?}");
-    assert!(rows[header + 2].contains("task 02"), "{rows:#?}");
+    let shell_fold = row_index(&rows, "+2 earlier");
+    assert!(rows[shell_fold + 1].contains("$ task 02"), "{rows:#?}");
     assert_eq!(state.hits.shell_folds.len(), 1);
     assert_eq!(state.hits.subagent_folds.len(), 1);
     assert_eq!(
         usize::from(state.hits.workspaces[0].child_rows),
-        3 + 1 + max + 1 + 1 + max
+        3 + 1 + max + 1 + max
     );
 
     // The shell fold shows every shell row and leaves the subagent fold alone.
@@ -3096,9 +3100,8 @@ fn shell_fold_is_independent_from_the_subagent_fold() {
     assert!(outcome.actions.is_empty());
     let rows = tall_rows(&mut state);
     assert!(rows.iter().any(|r| r.contains("+3 earlier")), "{rows:#?}");
-    let header = row_index(&rows, "shells");
-    assert!(rows[header + 1].contains("show fewer"), "{rows:#?}");
-    assert!(rows[header + 2].contains("task 00"), "{rows:#?}");
+    let shell_fold = row_index(&rows, "$ task 00") - 1;
+    assert!(rows[shell_fold].contains("show fewer"), "{rows:#?}");
 
     // The subagent fold flips independently.
     let fold = state.hits.subagent_folds[0].0;
@@ -3146,74 +3149,10 @@ fn running_shell_rows_keep_the_timer_ticking() {
 }
 
 #[test]
-fn agents_without_subagents_or_shells_are_unchanged_by_the_shells_group() {
+fn agents_without_subagents_or_shells_are_unchanged_by_shell_rows() {
     let mut state = subagent_state(agents_snapshot());
     let rows = compose_rows(&mut state);
     assert!(!rows.iter().any(|r| r.contains("shells")));
     assert!(state.hits.subagent_toggles.is_empty());
     assert!(state.hits.shell_folds.is_empty());
-}
-
-#[test]
-fn shells_header_collapses_only_the_shell_rows() {
-    let mut snapshot = mixed_snapshot();
-    set_shells(
-        &mut snapshot,
-        "pane_a",
-        vec![
-            shell("a", Shell::Running, "dev", Some(1_000), None),
-            shell("b", Shell::Done, "build", Some(1_100), Some(1_112)),
-        ],
-        vec![],
-    );
-    let mut state = subagent_state(snapshot);
-    let rows = compose_rows(&mut state);
-    let header = row_index(&rows, "shells");
-    assert_eq!(state.hits.shell_toggles.len(), 1);
-    let before = state.hits.workspaces[0].child_rows;
-
-    // Clicking the header (label or chevron) collapses the shell rows only.
-    let toggle = state.hits.shell_toggles[0].0;
-    assert_eq!(usize::from(toggle.y), header);
-    let outcome = click_hit(&mut state, toggle);
-    assert!(outcome.repaint && outcome.actions.is_empty());
-    let rows = compose_rows(&mut state);
-    let header = row_index(&rows, "shells");
-    assert!(body(&rows[header]).ends_with("1 ▸"), "{rows:#?}");
-    assert!(!rows
-        .iter()
-        .any(|r| r.contains("$ dev") || r.contains("build")));
-    assert!(
-        rows.iter().any(|r| r.contains("find auth code")),
-        "{rows:#?}"
-    );
-    assert_eq!(state.hits.workspaces[0].child_rows, before - 2);
-    // The agent row keeps counting the running shell.
-    assert!(
-        body(&rows[row_index(&rows, "↺")]).contains("3 ↺ ▾"),
-        "{rows:#?}"
-    );
-
-    // The chevron end of the header expands them again.
-    let toggle = state.hits.shell_toggles[0].0;
-    click_hit(
-        &mut state,
-        Rect::new(toggle.x + toggle.width - 1, toggle.y, 1, 1),
-    );
-    let rows = compose_rows(&mut state);
-    assert!(rows.iter().any(|r| r.contains("$ dev")), "{rows:#?}");
-    assert_eq!(state.hits.workspaces[0].child_rows, before);
-}
-
-#[test]
-fn collapsed_shells_state_is_pruned_with_the_agent() {
-    let mut state = shells_only_state();
-    let endpoint = state.active_endpoint_id.clone();
-    state.toggle_shells_expanded(&endpoint, "pane_a");
-    let mut view = state.subagent_views[&endpoint].clone();
-    assert!(view.shells_collapsed.contains("pane_a") && !view.is_empty());
-    let mut snapshot = agents_snapshot();
-    snapshot.agents.retain(|agent| agent.pane_id != "pane_a");
-    view.prune(&snapshot);
-    assert!(view.is_empty());
 }

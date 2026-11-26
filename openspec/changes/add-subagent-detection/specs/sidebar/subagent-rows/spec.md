@@ -126,7 +126,7 @@ Each subagent row SHALL show right-aligned timing: for a running subagent, the e
 
 ### Requirement: Subagent rows are themeable
 
-Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, which SHALL default to the agent tab-name colors (`tab`, `tab_focused`). Background shell rows and their `shells` group SHALL use the theme tokens `shell` and `shell_focused`, which SHALL default to the subagent colors.
+Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, which SHALL default to the agent tab-name colors (`tab`, `tab_focused`). Background shell rows SHALL use the theme tokens `shell` and `shell_focused`, which SHALL default to the subagent colors.
 
 #### Scenario: Default colors
 - **WHEN** the theme sets no subagent tokens
@@ -138,11 +138,11 @@ Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, 
 
 #### Scenario: Shell color
 - **WHEN** the theme sets `shell` (or `shell_focused` while the parent agent is focused)
-- **THEN** the `shells` group header and its shell rows SHALL use that color, and subagent rows SHALL keep the subagent colors
+- **THEN** shell rows SHALL use that color, and subagent rows SHALL keep the subagent colors
 
 #### Scenario: Default shell color
 - **WHEN** the theme sets no shell tokens
-- **THEN** the `shells` group and its rows SHALL use the subagent colors
+- **THEN** shell rows SHALL use the subagent colors
 
 ### Requirement: Keyboard toggle for subagent rows
 
@@ -152,19 +152,14 @@ A `toggle_subagents` key binding, bound by default, SHALL collapse or expand the
 - **WHEN** the focused agent's subagent rows are expanded and the user presses the `toggle_subagents` binding
 - **THEN** they SHALL collapse
 
-### Requirement: Background shells shown as a separate group
+### Requirement: Background shells shown alongside subagents
 
-An expanded agent row SHALL show its background shells (of the active list mode) as a separate group after its subagent rows: a `shells` header row followed by one row per shell with a state indicator, the description or command, and right-aligned timing. The chevron and history-mode icon SHALL appear when an agent has subagents or background shells, and the running count SHALL include running shells. Collapse, history mode, folding, and clicking shell rows SHALL behave as for subagent rows. The `shells` header SHALL show the running shell count and an expand/collapse chevron, and clicking it SHALL show or hide that agent's shell rows only, as presentation state that is expanded by default, not persisted, and discarded when the pane closes.
+An expanded agent row SHALL show its background shells (of the active list mode) after its subagent rows, at the same level and without a group header: one row per shell with the subagent state indicator, a `$ ` prefix before the description or command, and right-aligned timing. The chevron and history-mode icon SHALL appear when an agent has subagents or background shells, and the running count SHALL include running shells. Collapse, history mode, folding, and clicking shell rows SHALL behave as for subagent rows.
 
 #### Scenario: Running background shell
 - **WHEN** an expanded agent has a running background shell described as "herdr server"
-- **THEN** a `shells` header row and a row showing "herdr server" with a running indicator and elapsed time SHALL appear beneath its subagent rows
+- **THEN** a row showing "$ herdr server" with a running indicator and elapsed time SHALL appear after its subagent rows at the same level
 
 #### Scenario: No background shells
 - **WHEN** an agent has no background shells in the active list
-- **THEN** no `shells` header row SHALL be shown
-
-#### Scenario: Collapse the shells group
-- **WHEN** the user clicks the `shells` header of an expanded agent
-- **THEN** its shell rows SHALL be hidden while the header and its subagent rows stay shown
-- **AND** clicking the header again SHALL show the shell rows
+- **THEN** no shell rows SHALL be shown

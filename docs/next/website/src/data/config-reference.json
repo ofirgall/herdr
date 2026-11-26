@@ -218,7 +218,7 @@
           "key": "theme.custom.shell",
           "type": "color",
           "default": "unset",
-          "description": "Color for background shell rows and their shells group under an agent in the spaces sidebar (description; timing and the group label use a dimmed variant). Falls back to theme.custom.subagent, then theme.custom.tab, then the row's muted secondary color. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+          "description": "Color for background shell rows under an agent in the spaces sidebar (description; timing uses a dimmed variant). Falls back to theme.custom.subagent, then theme.custom.tab, then the row's muted secondary color. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.shell_focused",
