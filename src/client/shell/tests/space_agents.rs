@@ -2669,3 +2669,89 @@ fn agent_context_menu_toggles_subagent_rows_and_history() {
     right_click(&mut state, 12, other as u16);
     assert!(!menu_labels(&state).contains(&"Collapse subagents"));
 }
+
+fn long_history_snapshot(count: usize) -> ClientShellSnapshot {
+    let mut snapshot = agents_snapshot();
+    let history = (0..count)
+        .map(|i| {
+            sub(
+                &format!("h{i}"),
+                None,
+                Sub::Done,
+                "Explore",
+                &format!("job {i:02}"),
+            )
+        })
+        .collect::<Vec<_>>();
+    set_subagents(&mut snapshot, "pane_a", vec![], history);
+    snapshot
+}
+
+/// Spaces-section rows of a frame tall enough for long subagent lists.
+fn tall_rows(state: &mut ClientShellState) -> Vec<String> {
+    let frame = state.compose(106, 60).expect("composed frame");
+    frame_rows(&frame)
+        .into_iter()
+        .map(|row| row.chars().take(30).collect::<String>())
+        .take_while(|row| !row.starts_with('─'))
+        .collect()
+}
+
+fn history_state(count: usize) -> ClientShellState {
+    let mut state = subagent_state(long_history_snapshot(count));
+    let endpoint = state.active_endpoint_id.clone();
+    state.toggle_subagent_history(&endpoint, "pane_a");
+    state
+}
+
+#[test]
+fn long_subagent_lists_fold_older_rows_and_the_fold_row_toggles_them() {
+    let max = super::super::space_agents::SUBAGENT_ROWS_MAX;
+    // Exactly the limit: no fold row.
+    let mut state = history_state(max);
+    let rows = tall_rows(&mut state);
+    assert!(!rows.iter().any(|row| row.contains("earlier")), "{rows:#?}");
+    assert_eq!(state.hits.subagent_folds.len(), 0);
+
+    // Over the limit: the newest rows stay, the oldest fold into `+N earlier`.
+    let mut state = history_state(max + 4);
+    let rows = tall_rows(&mut state);
+    let agent_row = row_index(&rows, "↺");
+    assert!(rows[agent_row + 1].contains("+4 earlier"), "{rows:#?}");
+    assert!(rows[agent_row + 2].contains("job 04"), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("job 03")), "{rows:#?}");
+    let newest = format!("job {:02}", max + 3);
+    assert!(rows.iter().any(|row| row.contains(&newest)), "{rows:#?}");
+    // Three agent rows, the fold row, and the newest `max` subagent rows.
+    assert_eq!(
+        usize::from(state.hits.workspaces[0].child_rows),
+        3 + 1 + max
+    );
+
+    // Clicking the fold row shows every row, and `show fewer` folds again.
+    let fold = state.hits.subagent_folds[0].0;
+    let outcome = click_hit(&mut state, fold);
+    assert!(outcome.actions.is_empty(), "fold row must not focus");
+    let rows = tall_rows(&mut state);
+    assert!(rows[agent_row + 1].contains("show fewer"), "{rows:#?}");
+    assert!(rows[agent_row + 2].contains("job 00"), "{rows:#?}");
+    let fold = state.hits.subagent_folds[0].0;
+    click_hit(&mut state, fold);
+    let rows = tall_rows(&mut state);
+    assert!(rows[agent_row + 1].contains("+4 earlier"), "{rows:#?}");
+}
+
+#[test]
+fn overflowing_spaces_list_draws_no_scrollbar_and_keeps_full_width_rows() {
+    let mut state = history_state(8);
+    let frame = state.compose(106, 12).expect("frame");
+    assert!(state.hits.workspace_max_scroll > 0, "list should overflow");
+    assert_eq!(state.hits.workspace_scrollbar, Rect::default());
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let body = state.hits.workspace_body;
+    // The chevron sits in the last column, and no column draws a scrollbar.
+    let chevron = toggle_for(&state, "pane_a");
+    assert_eq!(chevron.x, body.right() - 1);
+    assert_eq!(buffer[(chevron.x, chevron.y)].symbol(), "▾");
+    assert!((body.y..body.bottom()).all(|y| buffer[(body.right() - 1, y)].symbol() != "▕"));
+}

@@ -1018,50 +1018,36 @@ fn sidebar_scrollbars_use_proportional_shared_geometry_and_drag() {
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("overflowing sidebars");
 
-    for agent in [false, true] {
-        let (track, metrics) = if agent {
-            (
-                state.hits.agent_scrollbar,
-                state.hits.agent_scroll_metrics.expect("agent metrics"),
-            )
-        } else {
-            (
-                state.hits.workspace_scrollbar,
-                state
-                    .hits
-                    .workspace_scroll_metrics
-                    .expect("workspace metrics"),
-            )
-        };
-        assert!(track.width > 0);
-        let thumb = crate::ui::scrollbar_thumb(metrics, track).expect("scrollbar thumb");
-        assert!(thumb.len > 1);
+    // The spaces list scrolls without a scrollbar; only the agents panel
+    // draws one.
+    assert_eq!(state.hits.workspace_scrollbar, Rect::default());
+    assert!(state.hits.workspace_max_scroll > 0);
+    let track = state.hits.agent_scrollbar;
+    let metrics = state.hits.agent_scroll_metrics.expect("agent metrics");
+    assert!(track.width > 0);
+    let thumb = crate::ui::scrollbar_thumb(metrics, track).expect("scrollbar thumb");
+    assert!(thumb.len > 1);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: track.x,
+        row: thumb.top,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let dragged =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: track.x,
-            row: thumb.top,
-            modifiers: KeyModifiers::empty(),
-        })]);
-        let dragged =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Drag(MouseButton::Left),
-                column: track.x,
-                row: track.bottom().saturating_sub(1),
-                modifiers: KeyModifiers::empty(),
-            })]);
-        assert!(dragged.repaint);
-        if agent {
-            assert_eq!(state.agent_scroll, metrics.max_offset_from_bottom);
-        } else {
-            assert_eq!(state.workspace_scroll, metrics.max_offset_from_bottom);
-        }
-        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Up(MouseButton::Left),
+            kind: MouseEventKind::Drag(MouseButton::Left),
             column: track.x,
             row: track.bottom().saturating_sub(1),
             modifiers: KeyModifiers::empty(),
         })]);
-    }
+    assert!(dragged.repaint);
+    assert_eq!(state.agent_scroll, metrics.max_offset_from_bottom);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: track.x,
+        row: track.bottom().saturating_sub(1),
+        modifiers: KeyModifiers::empty(),
+    })]);
 }
 
 #[test]

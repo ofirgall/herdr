@@ -493,8 +493,9 @@ fn render_spaces_section(
     *state.workspace_scroll = metrics
         .max_offset_from_bottom
         .saturating_sub(metrics.offset_from_bottom);
-    let show_scrollbar = metrics.max_offset_from_bottom > 0 && body.width > 1;
-    let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
+    // No scrollbar: rows always keep the full width (the list still scrolls
+    // with the wheel).
+    let content_width = body.width;
     let mut y = body.y;
     for (entry_position, entry) in entries.iter().enumerate().skip(*state.workspace_scroll) {
         let Some(workspace) = snapshot.workspaces.get(entry.index) else {
@@ -608,12 +609,6 @@ fn render_spaces_section(
             }
         }
         y = y.saturating_add(row_height + gap);
-    }
-
-    if show_scrollbar {
-        let track = Rect::new(body.right().saturating_sub(1), body.y, 1, body.height);
-        hits.workspace_scrollbar = track;
-        super::scroll::render_list_scrollbar(buffer, track, metrics, palette);
     }
 
     if let Some(row) = state.workspace_drop_indicator_row.filter(|row| {

@@ -70,17 +70,20 @@ fn fit_columns(text: &str, width: usize) -> String {
 }
 
 /// Sidebar presentation state of subagent rows for one endpoint: panes whose
-/// subagent rows are collapsed (rows are expanded by default) and panes showing
-/// history instead of the current list. Never persisted or sent to the server.
+/// subagent rows are collapsed (rows are expanded by default), panes showing
+/// history instead of the current list, and panes showing every row instead
+/// of the most recent [`SUBAGENT_ROWS_MAX`]. Never persisted or sent to the
+/// server.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct SubagentViewState {
     pub(super) collapsed: HashSet<String>,
     pub(super) history: HashSet<String>,
+    pub(super) show_all: HashSet<String>,
 }
 
 impl SubagentViewState {
     pub(super) fn is_empty(&self) -> bool {
-        self.collapsed.is_empty() && self.history.is_empty()
+        self.collapsed.is_empty() && self.history.is_empty() && self.show_all.is_empty()
     }
 
     fn toggle(set: &mut HashSet<String>, pane_id: &str) {
@@ -99,11 +102,16 @@ impl SubagentViewState {
         };
         self.collapsed.retain(present);
         self.history.retain(present);
+        self.show_all.retain(present);
     }
 }
 
 /// Deepest nesting level that still indents; deeper rows share its column.
 const SUBAGENT_MAX_DEPTH: usize = 6;
+
+/// Most subagent rows an expanded agent shows before older ones fold into a
+/// `+N earlier` row. Lists are ordered by start time, so the newest stay.
+pub(super) const SUBAGENT_ROWS_MAX: usize = 10;
 
 /// One subagent row beneath an agent child.
 pub(super) struct SubagentRow<'a> {
@@ -123,6 +131,10 @@ pub(super) struct SubagentSection<'a> {
     pub(super) history_mode: bool,
     /// Rows of the active list in tree order; empty unless `expanded`.
     pub(super) rows: Vec<SubagentRow<'a>>,
+    /// Older rows folded away (shown as `+N earlier`).
+    pub(super) hidden: usize,
+    /// Whether a fold row (`+N earlier` or `show fewer`) leads the rows.
+    pub(super) fold_row: bool,
 }
 
 impl<'a> SubagentSection<'a> {
@@ -132,12 +144,13 @@ impl<'a> SubagentSection<'a> {
         }
         let expanded = !view.is_some_and(|view| view.collapsed.contains(&agent.pane_id));
         let history_mode = view.is_some_and(|view| view.history.contains(&agent.pane_id));
+        let show_all = view.is_some_and(|view| view.show_all.contains(&agent.pane_id));
         let running = agent
             .subagents
             .iter()
             .filter(|subagent| subagent.state == crate::api::schema::SubagentStatus::Running)
             .count();
-        let rows = if expanded {
+        let mut rows = if expanded {
             subagent_tree_rows(if history_mode {
                 &agent.subagent_history
             } else {
@@ -146,17 +159,27 @@ impl<'a> SubagentSection<'a> {
         } else {
             Vec::new()
         };
+        let fold_row = rows.len() > SUBAGENT_ROWS_MAX;
+        let hidden = if fold_row && !show_all {
+            rows.len() - SUBAGENT_ROWS_MAX
+        } else {
+            0
+        };
+        rows.drain(..hidden);
         Some(Self {
             running,
             expanded,
             history_mode,
             rows,
+            hidden,
+            fold_row,
         })
     }
 
-    /// Rows drawn beneath the agent's own rows: the active list.
+    /// Rows drawn beneath the agent's own rows: the fold row, then the shown
+    /// part of the active list.
     fn extra_height(&self) -> usize {
-        self.rows.len()
+        usize::from(self.fold_row) + self.rows.len()
     }
 }
 
@@ -637,8 +660,9 @@ pub(super) fn render_children(
                 y + height,
                 space_indent + CHILD_INDENT,
                 section,
-                child.focused,
+                child,
                 config,
+                hits,
             );
         }
         y += height;
@@ -665,9 +689,11 @@ fn render_subagent_rows(
     bottom: u16,
     base: u16,
     section: &SubagentSection<'_>,
-    parent_focused: bool,
+    child: &SpaceAgentChild<'_>,
     config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
 ) {
+    let parent_focused = child.focused;
     let palette = &config.palette;
     let tree_style = Style::default().fg(palette.overlay0);
     if base >= area.width || top >= bottom {
@@ -685,6 +711,32 @@ fn render_subagent_rows(
     let text_width = |x: u16| right.saturating_sub(x);
 
     let connector_x = area.x + base;
+
+    // The fold row leads the rows: older subagents fold away above the newest.
+    let mut top = top;
+    if section.fold_row {
+        let label = if section.hidden > 0 {
+            format!("+{} earlier", section.hidden)
+        } else {
+            "show fewer".to_owned()
+        };
+        super::render::put_text(
+            buffer,
+            connector_x,
+            top,
+            connector_width(connector_x),
+            config.tree_agents.connector(section.rows.is_empty()),
+            tree_style,
+        );
+        let label_x = connector_x + SUBAGENT_LEVEL_WIDTH;
+        if label_x < right {
+            let width = super::render::display_width(&label).min(right - label_x);
+            super::render::put_text(buffer, label_x, top, width, &label, dim_style);
+            hits.subagent_folds
+                .push((Rect::new(label_x, top, width, 1), child.pane_id.clone()));
+        }
+        top += 1;
+    }
 
     for (index, row) in section.rows.iter().enumerate() {
         let y = top + index as u16;
@@ -1141,6 +1193,16 @@ impl ClientShellState {
     ) {
         let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
         SubagentViewState::toggle(&mut view.history, pane_id);
+    }
+
+    /// Flips `pane_id` between its newest subagent rows and every row.
+    pub(super) fn toggle_subagent_show_all(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        pane_id: &str,
+    ) {
+        let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
+        SubagentViewState::toggle(&mut view.show_all, pane_id);
     }
 
     /// Whether `workspace_id` has agents that the toggle could show or hide.
