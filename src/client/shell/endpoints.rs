@@ -618,6 +618,14 @@ impl ClientShellState {
                 .iter()
                 .any(|agent| &agent.pane_id == pane_id)
         });
+        // Pane ids in the subagent view that left the snapshot are dropped here,
+        // once per snapshot, so render never has to.
+        if let Some(view) = self.subagent_views.get_mut(endpoint_id) {
+            view.prune(&snapshot);
+            if view.is_empty() {
+                self.subagent_views.remove(endpoint_id);
+            }
+        }
         let endpoint = &mut self.endpoints[index];
         endpoint.agent_recency = recency;
         endpoint.snapshot_generation = generation;

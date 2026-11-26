@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Shows each agent's subagents in the sidebar agents panel as collapsible nested rows, so users can see delegated work without switching panes.
+Shows each agent's subagents under its agent entry in the spaces sidebar tree as collapsible nested rows, so users can see delegated work without switching panes.
 
 ## ADDED Requirements
 
 ### Requirement: Agent rows indicate subagents
 
-An agent row in the sidebar agents panel whose pane has one or more subagents in its session history SHALL show an expand/collapse chevron and the number of running subagents. Agent rows without subagents SHALL look exactly as they do today.
+An agent entry in the spaces sidebar whose pane has one or more subagents in its session history SHALL show an expand/collapse chevron and the number of running subagents. Agent rows without subagents SHALL look exactly as they do today.
 
 #### Scenario: Agent with running subagents
 - **WHEN** a pane's agent has two running subagents
@@ -75,13 +75,13 @@ Clicking a subagent row SHALL behave the same as clicking its parent agent row: 
 - **WHEN** the user clicks a subagent row
 - **THEN** the pane of its parent agent SHALL become focused
 
-### Requirement: Agent panel layout accounts for subagent rows
+### Requirement: Spaces sidebar layout accounts for subagent rows
 
-Expanded subagent rows SHALL take part in the agents panel's height, scrolling, scrollbar, and hit-testing, so that every visible row's click target matches what's drawn.
+Expanded subagent rows SHALL take part in the spaces sidebar's height, scrolling, scrollbar, and hit-testing, so that every visible row's click target matches what's drawn.
 
 #### Scenario: Expanded rows overflow the panel
-- **WHEN** expanded subagent rows make the panel content taller than its area
-- **THEN** the panel SHALL scroll and show a scrollbar as it does for agent rows
+- **WHEN** expanded subagent rows make the sidebar content taller than its area
+- **THEN** the sidebar SHALL scroll and show a scrollbar as it does for agent rows
 
 #### Scenario: Subagent list changes while expanded
 - **WHEN** a subagent is added or removed while its agent row is expanded

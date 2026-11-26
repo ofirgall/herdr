@@ -102,6 +102,10 @@ pub(super) struct ShellHitMap {
     pub(super) agents: Vec<(Rect, String)>,
     /// Agent children nested under spaces: `(rect, pane_id)`.
     pub(super) space_agents: Vec<(Rect, String)>,
+    /// Subagent chevrons (with the running count) on agent children: `(rect, pane_id)`.
+    pub(super) subagent_toggles: Vec<(Rect, String)>,
+    /// Mode rows (`current · history`) of expanded agent children: `(rect, pane_id)`.
+    pub(super) subagent_modes: Vec<(Rect, String)>,
     /// Visible linked sidebar tokens; empty in the collapsed and multi-machine sidebars.
     pub(super) token_links: Vec<TokenLinkHit>,
     /// Pull request check list toggles: `(rect, pull request URL)`.
@@ -917,6 +921,8 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     /// Per-space agent-children overrides: endpoint -> workspace id -> expanded.
     pub(super) space_agent_overrides: HashMap<ClientEndpointId, HashMap<String, bool>>,
+    /// Subagent rows presentation per endpoint; not persisted.
+    pub(super) subagent_views: HashMap<ClientEndpointId, super::space_agents::SubagentViewState>,
     /// Entry the last previous/next sidebar entry keybind moved to.
     pub(super) sidebar_entry_cursor: Option<super::space_agents::SidebarEntryCursor>,
     /// Pull requests whose checks are listed in the sidebar, by URL.
@@ -1116,6 +1122,7 @@ impl ClientShellState {
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             space_agent_overrides,
+            subagent_views: HashMap::new(),
             sidebar_entry_cursor: None,
             expanded_pull_requests: HashSet::new(),
             workspace_scroll: 0,

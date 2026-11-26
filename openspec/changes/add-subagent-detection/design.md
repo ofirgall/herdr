@@ -12,7 +12,7 @@
        isBuiltIn, model, finished?}
   ```
   We checked 26 recent records on this machine: `finished: true` appears on completion, and the key is **absent** while the subagent is running. Every observed record has `spawnDepth: 1`, so nested subagents haven't been seen in practice.
-- The TUI is drawn on the server from a shared `AppState` (`render_virtual_with_runtime_registry` in `src/server/headless.rs`), and frames are streamed to clients. Sidebar presentation state (for example `agent_panel_scroll`) lives in `AppState`. So subagent data reaches the TUI without a wire-protocol change.
+- Base is `fork-v0.9.x`, where the shell is rendered in the client (`src/client/shell/*`). The client is fed a JSON wire snapshot (`ClientShellSnapshot`, `src/protocol/wire.rs`) built by `src/server/client_shell.rs`, and owns presentation state (expand overrides, scroll, hit map) in `ClientShellState`. Agents appear in the spaces sidebar as children of their space (`src/client/shell/space_agents.rs`), one entry per tab agent.
 - The agents panel builds `AgentPanelEntry` values per render (`collect_agent_panel_entries_with_runtimes` in `src/ui/sidebar.rs`), and input hit-testing re-derives row geometry in `src/app/input/sidebar.rs` using `agent_entry_height_in_body`. Render and hit-test geometry have to stay in sync.
 
 ## Goals / Non-Goals
@@ -64,20 +64,14 @@ Each record has `toolUseId` (the `tool_use` block that spawned it). On scan, for
 - API: `PaneInfo` gains `subagents` (omitted/empty when none). A new event kind `pane.subagents_changed { pane_id }` goes through the existing event hub and subscriptions. Names are neutral (no "sidebar"/"row"). API field and event names get added to `docs/next` API docs.
 - Not persisted: subagents are re-derived after restore/handoff from the next scan, and the rules make stale data drop out.
 
-### D6. Sidebar rendering and input
-- `AgentPanelEntry` gains a borrowed or cloned summary: `subagent_running: usize`, `subagents: Vec<SubagentRow>` (flattened tree in display order with depth). These are built from already-computed state with no I/O. The clone is small and only happens for panes that have subagents.
-- `AppState` gains `expanded_subagent_panes: HashSet<PaneId>` (presentation state, next to `agent_panel_scroll`), pruned when panes close.
-- Row model: today every entry is one block of configured token rows. The panel's geometry functions (`agent_entry_height_in_body`, visible-count, scroll metrics, bottom-start) get extended so an entry's height = token rows + (expanded ? subagent rows : 0). Render and `src/app/input/sidebar.rs` hit-testing both call these same functions, so they stay in sync. Hit-testing returns either `AgentRow(pane)`, `Chevron(pane)`, or `SubagentRow(pane)`; `SubagentRow` focuses `pane`.
-- Chevron + count go at the right edge of the entry's first row (styled like `workspace_group_chevron_rect`), reserving width before the configured tokens truncate.
-- Subagent row: `"   ├ <kind>  <description…>  <state icon>"` using ASCII-safe tree glyphs consistent with existing sidebar glyph usage, `state_icon` styling (`Working` for running, idle/"done" style for done), indentation 2 cols per depth.
-
-### D8. Session history view
-Besides the current list (D3), the server keeps a per-pane **history** list: every parseable record of the watched session, rebuilt by a pure `reconcile_history` from the same scan (no extra I/O, no linger pruning). States: `finished` → `done`; unfinished and created at/after `session_observed_at` → `running`; unfinished and created before it (an earlier crashed/exited run of a resumed session) → `interrupted`. Liveness still applies: when the parent exits, is released, or switches session, history is cleared together with the current list. Ordered by creation time, tree attribution as in D4.
-- API: `PaneInfo.subagents` stays the current list. A new request `pane.subagents { pane_id, scope: "current" | "history" }` (default `current`) returns either list; `interrupted` only appears in `history`. `pane.subagents_changed` fires when either list changes (payload unchanged: the current list).
-- Sidebar: per-pane mode `current` (default) or `history`, stored in `AppState.subagent_history_panes: HashSet<PaneId>` next to `expanded_subagent_panes` (presentation state; not in the API, not persisted, pruned on pane close). The chevron appears when the history list is non-empty; the running count comes from the current list. An expanded entry renders a mode row (`current | history`, active one highlighted) above its subagent rows; clicking it flips that pane's mode. The mode row is part of the shared geometry (expanded height = 1 + rows of the active list). `interrupted` rows use a distinct muted/warning icon.
+### D6. Spaces sidebar rendering and input (client shell)
+- Wire: `ClientShellAgent` gains `subagents` and `subagent_history` (`Vec<ClientShellSubagent { id, kind, description, parent_id, background, state }>`), both `#[serde(default, skip_serializing_if = "Vec::is_empty")]` like `token_links`, filled by `src/server/client_shell.rs` from `TerminalState` (no I/O). A subagent list change must mark the client-shell snapshot as changed.
+- Placement: the spaces tree (`space_agents.rs`). Each agent child whose history is non-empty gets a `▸`/`▾` chevron plus running count at the right edge of its first row (like `render_agent_toggle` for spaces). Expanded, a mode row (`current · history`) and the active list's subagent rows are drawn beneath the agent child, one tree level deeper, using the existing tree glyphs/connectors, a state icon (running = working style, done = done style, interrupted = distinct `!` style), then the truncated description followed by the dimmed kind (description first because the sidebar is narrow). `SpaceAgentChild::height()` includes these rows so layout, scrolling, and hit-testing stay consistent. The flat agents panel is unchanged.
+- State: `ClientShellState` keeps per-endpoint sets of expanded panes and history-mode panes (not persisted in preferences, pruned when the pane disappears from the snapshot).
+- Hits: `ShellHitMap` gets subagent chevron and mode-row hit lists; subagent rows push the parent pane into `space_agents` so clicking focuses the parent pane. Subagent rows are not keyboard-navigable sidebar entries and don't change agent numbering.
 
 ### D7. Protocol
-No wire change is expected, because the TUI is drawn on the server. If any client-side code (e.g. mobile/remote) turns out to consume agent panel data over the wire, apply the `PROTOCOL_VERSION` rules then.
+The client-shell snapshot is JSON; the new `ClientShellAgent` fields are optional with serde defaults (the established `token_links` pattern), so old/new peers interoperate and `PROTOCOL_VERSION` is not bumped.
 
 ## Risks / Trade-offs
 

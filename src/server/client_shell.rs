@@ -158,6 +158,10 @@ pub(super) fn snapshot_with_completions(
         .map(|agent| {
             let pane_id = agent.pane_id;
             let focused = focused_pane_id.as_deref() == Some(pane_id.as_str());
+            let (subagents, subagent_history) = app
+                .parse_pane_id(&pane_id)
+                .map(|(ws_idx, pane)| app.pane_subagent_lists(ws_idx, pane))
+                .unwrap_or_default();
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
@@ -179,6 +183,8 @@ pub(super) fn snapshot_with_completions(
                 state_labels,
                 tokens,
                 token_links,
+                subagents,
+                subagent_history,
                 focused,
             }
         })
@@ -829,6 +835,74 @@ mod tests {
                 notes.preview
             )),
             Some(("0.8.3", "### Changed\n- Client shell", true))
+        );
+    }
+
+    #[test]
+    fn snapshot_projects_subagents_and_history_per_agent() {
+        use crate::subagents::{Subagent, SubagentState};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let workspace = crate::workspace::Workspace::test_new("subagents");
+        let pane = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let terminal_id = app.state.terminal_id_for_pane(0, pane).expect("terminal");
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal state")
+            .agent_name = Some("claude".into());
+
+        let sub = |id: &str, parent: Option<&str>, state: SubagentState| Subagent {
+            id: id.into(),
+            kind: "Explore".into(),
+            description: format!("task {id}"),
+            parent: parent.map(str::to_owned),
+            background: false,
+            state,
+        };
+        let before = snapshot(&app, "boot", 1, None, None);
+        assert_eq!(before.agents.len(), 1);
+        assert!(before.agents[0].subagents.is_empty());
+        assert!(before.agents[0].subagent_history.is_empty());
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal state")
+            .set_subagent_lists(
+                vec![sub("a", None, SubagentState::Running)],
+                vec![
+                    sub("a", None, SubagentState::Running),
+                    sub("b", Some("a"), SubagentState::Interrupted),
+                    sub("c", None, SubagentState::Finished),
+                ],
+            );
+        let after = snapshot(&app, "boot", 2, None, None);
+        let agent = &after.agents[0];
+        assert_ne!(before.agents, after.agents);
+        assert_eq!(agent.subagents.len(), 1);
+        assert_eq!(
+            agent.subagents[0].state,
+            crate::api::schema::SubagentStatus::Running
+        );
+        assert_eq!(agent.subagent_history.len(), 3);
+        assert_eq!(agent.subagent_history[1].parent_id.as_deref(), Some("a"));
+        assert_eq!(
+            agent.subagent_history[1].state,
+            crate::api::schema::SubagentStatus::Interrupted
+        );
+        assert_eq!(
+            agent.subagent_history[2].state,
+            crate::api::schema::SubagentStatus::Done
         );
     }
 

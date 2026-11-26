@@ -43,3 +43,11 @@
 - [x] 7.3 Add `subagent_history_panes` presentation state (pruned on pane close, not persisted); chevron shown when history is non-empty; expanded entries render a mode row plus the active list's rows; include the mode row in shared geometry; verify render tests (current/history, empty current with history, interrupted icon) and that panes without history render byte-identical
 - [x] 7.4 Hit-test the mode row (`SubagentModeToggle(pane)`) to flip only that pane's mode; verify click tests at several scroll offsets and that subagent-row clicks still focus the parent
 - [x] 7.5 Re-run the e2e check for history mode (resume a session with prior subagents, confirm `pane.subagents scope=history` lists them while `pane.get` does not) and the full test/lint comparison against baseline
+
+## 8. Port to fork-v0.9.x (client-rendered shell)
+
+- [x] 8.1 Rebase onto `fork-v0.9.x`, keeping the server/runtime/API work and dropping the server-rendered sidebar code (removed `AppState` expand/mode state); verify all subagent tests pass
+- [x] 8.2 Add `subagents` / `subagent_history` to `ClientShellAgent` (optional serde fields), fill them in `src/server/client_shell.rs`, and make subagent changes refresh the client snapshot; verify wire round-trip tests (field omitted when empty, old payload decodes) and a server projection test
+- [x] 8.3 Render chevron + running count, mode row, and subagent rows under agent children in the spaces tree with expand/mode state in `ClientShellState`; verify render tests (collapsed, expanded current/history, empty current with history, interrupted icon, nested, long description) and that agents without history render byte-identical
+- [x] 8.4 Hit-test chevron, mode row, and subagent rows (focus parent pane) via `ShellHitMap`; verify click tests including after scrolling and after the list changes
+- [x] 8.5 Live check in a throwaway session on the new base and full test/clippy comparison against plain `fork-v0.9.x`

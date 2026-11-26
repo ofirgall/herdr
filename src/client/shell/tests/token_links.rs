@@ -59,6 +59,8 @@ fn link_snapshot(workspaces: usize) -> ClientShellSnapshot {
         })
         .collect();
     snapshot.agents = vec![ClientShellAgent {
+        subagents: Default::default(),
+        subagent_history: Default::default(),
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

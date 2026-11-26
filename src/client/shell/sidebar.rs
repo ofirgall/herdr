@@ -405,7 +405,7 @@ fn render_spaces_section(
                     .unwrap_or(0)
             });
             space_expanded(&workspace.workspace_id)
-                .then(|| index.children(workspace, config, first_index))
+                .then(|| index.children(workspace, config, first_index, state.subagent_view))
                 .filter(|children| !children.is_empty())
         })
         .collect::<Vec<_>>();

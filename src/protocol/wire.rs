@@ -1223,6 +1223,12 @@ pub struct ClientShellAgent {
     /// Web links of the tokens that have one, sorted like `tokens`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_links: Vec<(String, String)>,
+    /// Current subagents of the agent (includes lingering done ones).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<crate::api::schema::PaneSubagentInfo>,
+    /// Session history of subagents, including interrupted ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagent_history: Vec<crate::api::schema::PaneSubagentInfo>,
     pub focused: bool,
 }
 
@@ -3975,6 +3981,8 @@ mod tests {
         assert_eq!(serde_json::to_value(&workspace).unwrap(), with_links);
 
         let agent = ClientShellAgent {
+            subagents: Default::default(),
+            subagent_history: Default::default(),
             pane_id: "w1:p1".into(),
             workspace_id: "w1".into(),
             tab_id: "w1:t1".into(),
@@ -3999,5 +4007,48 @@ mod tests {
         value["token_links"] = serde_json::json!([["pr", "https://example.com/1"]]);
         let decoded: ClientShellAgent = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.token_links.len(), 1);
+    }
+
+    #[test]
+    fn client_shell_subagents_are_optional_in_json() {
+        let agent = ClientShellAgent {
+            pane_id: "w1:p1".into(),
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            name: None,
+            display_agent: None,
+            agent: None,
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: crate::api::schema::AgentStatus::Idle,
+            state_change_seq: 0,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            token_links: Vec::new(),
+            subagents: Vec::new(),
+            subagent_history: Vec::new(),
+            focused: false,
+        };
+        // Empty lists are omitted, and a payload without them (an older peer) decodes.
+        let value = serde_json::to_value(&agent).unwrap();
+        assert!(value.get("subagents").is_none());
+        assert!(value.get("subagent_history").is_none());
+        let decoded: ClientShellAgent = serde_json::from_value(value.clone()).unwrap();
+        assert!(decoded.subagents.is_empty() && decoded.subagent_history.is_empty());
+
+        let mut with = value;
+        with["subagents"] = serde_json::json!([{
+            "id": "a", "kind": "Explore", "description": "find auth",
+            "parent_id": null, "background": false, "state": "running",
+        }]);
+        with["subagent_history"] = serde_json::json!([{
+            "id": "b", "kind": "Plan", "description": "x",
+            "parent_id": "a", "background": true, "state": "interrupted",
+        }]);
+        let decoded: ClientShellAgent = serde_json::from_value(with.clone()).unwrap();
+        assert_eq!(decoded.subagents.len(), 1);
+        assert_eq!(decoded.subagent_history[0].parent_id.as_deref(), Some("a"));
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), with);
     }
 }

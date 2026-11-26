@@ -10,6 +10,8 @@ fn config_with_sections(spaces: bool, agents: bool) -> ClientShellConfig {
 fn snapshot_with_agent() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.agents.push(ClientShellAgent {
+        subagents: Default::default(),
+        subagent_history: Default::default(),
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

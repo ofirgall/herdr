@@ -304,6 +304,39 @@ impl App {
         self.pane_info(ws_idx, tab.root_pane)
     }
 
+    /// Current and history subagent lists of a pane's terminal, for the
+    /// client-shell projection. Empty vectors for panes without subagents.
+    pub(crate) fn pane_subagent_lists(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> (
+        Vec<crate::api::schema::PaneSubagentInfo>,
+        Vec<crate::api::schema::PaneSubagentInfo>,
+    ) {
+        let terminal = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id));
+        match terminal {
+            Some(terminal) => (
+                terminal
+                    .subagents()
+                    .iter()
+                    .map(pane_subagent_info)
+                    .collect(),
+                terminal
+                    .subagent_history()
+                    .iter()
+                    .map(pane_subagent_info)
+                    .collect(),
+            ),
+            None => Default::default(),
+        }
+    }
+
     pub(super) fn pane_info(
         &self,
         ws_idx: usize,
@@ -421,7 +454,7 @@ impl App {
     }
 }
 
-pub(super) fn pane_subagent_info(
+pub(crate) fn pane_subagent_info(
     subagent: &crate::subagents::Subagent,
 ) -> crate::api::schema::PaneSubagentInfo {
     crate::api::schema::PaneSubagentInfo {

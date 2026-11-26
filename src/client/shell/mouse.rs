@@ -2133,6 +2133,30 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
+                let subagent_toggle = self
+                    .hits
+                    .subagent_toggles
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, pane_id)| pane_id.clone());
+                if let Some(pane_id) = subagent_toggle {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.toggle_subagents_expanded(&endpoint_id, &pane_id);
+                    outcome.repaint = true;
+                    return;
+                }
+                let subagent_mode = self
+                    .hits
+                    .subagent_modes
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, pane_id)| pane_id.clone());
+                if let Some(pane_id) = subagent_mode {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.toggle_subagent_history(&endpoint_id, &pane_id);
+                    outcome.repaint = true;
+                    return;
+                }
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
                     let (rect, key) = hit.group_toggle.as_ref()?;
                     super::contains(*rect, point).then(|| (hit.endpoint_id.clone(), key.clone()))

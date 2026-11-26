@@ -3,6 +3,8 @@ use crate::config::SpaceAgentsMode;
 
 fn agent(pane: &str, workspace: &str, tab: &str, status: AgentStatus) -> ClientShellAgent {
     ClientShellAgent {
+        subagents: Default::default(),
+        subagent_history: Default::default(),
         pane_id: pane.into(),
         workspace_id: workspace.into(),
         tab_id: tab.into(),
@@ -1790,4 +1792,442 @@ fn rendered_child_numbers_equal_one_plus_the_target_position() {
     // So does a collapsed worktree group (ws_2 hidden).
     state.collapsed_groups.insert("repo".into());
     check(&mut state);
+}
+
+fn sub(
+    id: &str,
+    parent: Option<&str>,
+    state: crate::api::schema::SubagentStatus,
+    kind: &str,
+    description: &str,
+) -> crate::api::schema::PaneSubagentInfo {
+    crate::api::schema::PaneSubagentInfo {
+        id: id.into(),
+        kind: kind.into(),
+        description: description.into(),
+        parent_id: parent.map(str::to_owned),
+        background: false,
+        state,
+    }
+}
+
+fn set_subagents(
+    snapshot: &mut ClientShellSnapshot,
+    pane: &str,
+    current: Vec<crate::api::schema::PaneSubagentInfo>,
+    history: Vec<crate::api::schema::PaneSubagentInfo>,
+) {
+    let agent = snapshot
+        .agents
+        .iter_mut()
+        .find(|agent| agent.pane_id == pane)
+        .expect("agent");
+    agent.subagents = current;
+    agent.subagent_history = history;
+}
+
+fn subagent_state(snapshot: ClientShellSnapshot) -> ClientShellState {
+    state_with(config_with_agents(SpaceAgentsMode::Expanded), snapshot)
+}
+
+fn click_hit(state: &mut ClientShellState, rect: Rect) -> ClientShellInput {
+    left_click(state, rect.x, rect.y)
+}
+
+fn toggle_for(state: &ClientShellState, pane: &str) -> Rect {
+    state
+        .hits
+        .subagent_toggles
+        .iter()
+        .find(|(_, id)| id == pane)
+        .unwrap_or_else(|| panic!("no chevron for {pane}"))
+        .0
+}
+
+use crate::api::schema::SubagentStatus as Sub;
+
+/// A sidebar row without trailing padding and the divider.
+fn body(row: &str) -> &str {
+    row[..row.rfind('│').unwrap_or(row.len())].trim_end()
+}
+
+/// Display column (in chars) where `needle` starts in `row`.
+fn col(row: &str, needle: &str) -> usize {
+    row[..row
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in {row:?}"))]
+        .chars()
+        .count()
+}
+
+fn mixed_snapshot() -> ClientShellSnapshot {
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        vec![
+            sub("s1", None, Sub::Running, "Explore", "find auth code"),
+            sub("s2", None, Sub::Running, "Plan", "outline"),
+            sub("s3", None, Sub::Done, "Bash", "run tests"),
+        ],
+        vec![
+            sub("s1", None, Sub::Done, "Explore", "find auth code"),
+            sub("h1", None, Sub::Interrupted, "Old", "stale task"),
+        ],
+    );
+    snapshot
+}
+
+#[test]
+fn agents_without_subagents_render_without_chevron_or_extra_hits() {
+    let mut state = subagent_state(agents_snapshot());
+    let rows = compose_rows(&mut state);
+    assert!(!rows.iter().any(|row| row.contains('▸')), "{rows:#?}");
+    assert!(state.hits.subagent_toggles.is_empty());
+    assert!(state.hits.subagent_modes.is_empty());
+    assert_eq!(state.hits.workspaces[0].child_rows, 3);
+}
+
+#[test]
+fn collapsed_agent_with_history_shows_chevron_and_running_count() {
+    let mut state = subagent_state(mixed_snapshot());
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(body(&rows[space + 1]).ends_with("2 ▸"), "{rows:#?}");
+    assert_eq!(state.hits.workspaces[0].child_rows, 3);
+    let toggle = toggle_for(&state, "pane_a");
+    assert_eq!((toggle.y as usize, toggle.width), (space + 1, 3));
+    // Other agents have no chevron.
+    assert_eq!(state.hits.subagent_toggles.len(), 1);
+}
+
+#[test]
+fn collapsed_chevron_has_no_count_without_running_subagents() {
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        vec![sub("s3", None, Sub::Done, "Bash", "run tests")],
+        vec![sub("s3", None, Sub::Done, "Bash", "run tests")],
+    );
+    let mut state = subagent_state(snapshot);
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(body(&rows[space + 1]).ends_with(" ▸"), "{rows:#?}");
+    assert!(!body(&rows[space + 1]).ends_with("0 ▸"));
+    assert_eq!(toggle_for(&state, "pane_a").width, 1);
+
+    // Only historical subagents: still a chevron, no count.
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        Vec::new(),
+        vec![sub("h", None, Sub::Done, "Old", "x")],
+    );
+    let mut state = subagent_state(snapshot);
+    compose_rows(&mut state);
+    assert_eq!(toggle_for(&state, "pane_a").width, 1);
+}
+
+#[test]
+fn expanded_current_mode_shows_mode_row_and_current_subagents() {
+    let mut state = subagent_state(mixed_snapshot());
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    let outcome = click_hit(&mut state, toggle);
+    assert!(outcome.actions.is_empty());
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(body(&rows[space + 1]).ends_with("2 ▾"), "{rows:#?}");
+    assert!(rows[space + 2].contains("current · history"), "{rows:#?}");
+    assert!(rows[space + 2].starts_with(" │  ├─ "), "{rows:#?}");
+    let working = status_icon(AgentStatus::Working, &state.config.status_indicators).to_owned();
+    let done = status_icon(AgentStatus::Done, &state.config.status_indicators).to_owned();
+    assert!(rows[space + 3].contains(&working) && rows[space + 3].contains("find auth code"));
+    assert!(rows[space + 4].contains("outline Plan"));
+    assert!(rows[space + 5].contains(&done) && rows[space + 5].contains("run tests Bash"));
+    // Subagent rows hang one tree level deeper than the agent's content.
+    let agent_icon = col(&rows[space + 1], &working);
+    assert_eq!(col(&rows[space + 3], "├─"), agent_icon, "{rows:#?}");
+    assert_eq!(col(&rows[space + 2], "├─"), agent_icon, "{rows:#?}");
+    assert!(rows[space + 5].contains("└─"), "{rows:#?}");
+    assert!(!rows[space + 3..space + 6]
+        .iter()
+        .any(|row| row.contains("stale task")));
+    // Rows below are pushed down by exactly the added rows.
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 1 + 3);
+    assert_eq!(
+        rows[space + 6]
+            .trim_start_matches([' ', '│'])
+            .chars()
+            .next(),
+        Some('├')
+    );
+}
+
+#[test]
+fn history_mode_lists_history_with_an_interrupted_icon() {
+    let mut state = subagent_state(mixed_snapshot());
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    compose_rows(&mut state);
+    let mode = state.hits.subagent_modes[0].0;
+    click_hit(&mut state, mode);
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(rows[space + 3].contains("find auth code"), "{rows:#?}");
+    assert!(rows[space + 4].contains('!') && rows[space + 4].contains("stale task Old"));
+    assert!(!rows.iter().any(|row| row.contains("run tests Bash")));
+    // The running count still comes from the current list.
+    assert!(body(&rows[space + 1]).ends_with("2 ▾"));
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 1 + 2);
+}
+
+#[test]
+fn expanded_agent_with_empty_current_list_shows_only_the_mode_row() {
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        Vec::new(),
+        vec![sub("h", None, Sub::Done, "Old", "x")],
+    );
+    let mut state = subagent_state(snapshot);
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(rows[space + 2].contains("current · history"));
+    assert!(rows[space + 2].contains("├─") || rows[space + 2].contains("└─"));
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 1);
+    assert!(!rows.iter().any(|row| row.contains("Old x")));
+}
+
+#[test]
+fn nested_subagents_indent_under_their_parent() {
+    let mut snapshot = agents_snapshot();
+    let list = vec![
+        sub("c", Some("p"), Sub::Running, "Child", "nested"),
+        sub("p", None, Sub::Running, "Parent", "top"),
+        sub("g", Some("c"), Sub::Done, "Grand", "dp"),
+        sub("z", None, Sub::Running, "Zed", "last"),
+    ];
+    set_subagents(&mut snapshot, "pane_a", list.clone(), list);
+    let mut state = subagent_state(snapshot);
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    // Tree order: parent, its child, the grandchild, then the next root.
+    let column = col;
+    assert!(rows[space + 3].contains("top Parent"), "{rows:#?}");
+    assert!(rows[space + 4].contains("nested Child"));
+    assert!(rows[space + 5].contains("dp Grand"));
+    assert!(rows[space + 6].contains("last Zed"));
+    let parent = column(&rows[space + 3], "top");
+    let child = column(&rows[space + 4], "nested");
+    let grand = column(&rows[space + 5], "dp");
+    assert_eq!(child, parent + 3, "{rows:#?}");
+    assert_eq!(grand, child + 3, "{rows:#?}");
+    assert_eq!(column(&rows[space + 6], "last"), parent);
+    // The parent's rail continues past its descendants because Zed follows.
+    let rail = col(&rows[space + 3], "├─");
+    assert_eq!(rows[space + 4].chars().nth(rail), Some('│'), "{rows:#?}");
+}
+
+#[test]
+fn long_descriptions_truncate_and_tokens_truncate_before_the_chevron() {
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        vec![sub(
+            "s",
+            None,
+            Sub::Running,
+            "Explore",
+            "a very long description that cannot possibly fit in the sidebar width",
+        )],
+        vec![sub("s", None, Sub::Running, "Explore", "x")],
+    );
+    snapshot.agents[1].name = Some("an-extremely-long-agent-name-here".into());
+    let mut state = subagent_state(snapshot);
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    // One row, ellipsized, never wrapped.
+    assert!(rows[space + 3].contains('…'), "{rows:#?}");
+    assert!(rows[space + 3].contains("a very long"), "{rows:#?}");
+    // The first row keeps its chevron at the right edge.
+    assert!(body(&rows[space + 1]).ends_with("1 ▾"), "{rows:#?}");
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 1 + 1);
+}
+
+#[test]
+fn subagent_hits_toggle_one_pane_and_subagent_rows_focus_the_parent() {
+    let mut snapshot = mixed_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_c",
+        vec![sub("c1", None, Sub::Running, "Other", "second")],
+        vec![sub("c1", None, Sub::Running, "Other", "second")],
+    );
+    let mut state = subagent_state(snapshot);
+    compose_rows(&mut state);
+    let toggle_a = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle_a);
+    compose_rows(&mut state);
+    // pane_c stays collapsed while pane_a is expanded.
+    let rows = compose_rows(&mut state);
+    assert!(!rows.iter().any(|row| row.contains("second Other")));
+    let view = &state.subagent_views[&state.active_endpoint_id];
+    assert!(view.expanded.contains("pane_a") && !view.expanded.contains("pane_c"));
+
+    // The mode row flips only pane_a.
+    let mode = state.hits.subagent_modes[0].clone();
+    assert_eq!(mode.1, "pane_a");
+    let outcome = click_hit(&mut state, mode.0);
+    assert!(outcome.actions.is_empty(), "mode row must not focus");
+    let view = &state.subagent_views[&state.active_endpoint_id];
+    assert!(view.history.contains("pane_a") && view.history.len() == 1);
+
+    // Back to current; expand pane_c too (its chevron moved down).
+    let mode = state.hits.subagent_modes[0].0;
+    click_hit(&mut state, mode);
+    compose_rows(&mut state);
+    let toggle_c = toggle_for(&state, "pane_c");
+    click_hit(&mut state, toggle_c);
+    let rows = compose_rows(&mut state);
+    assert!(rows.iter().any(|row| row.contains("second Other")));
+    assert!(rows.iter().any(|row| row.contains("find auth code")));
+
+    // A subagent row of pane_a focuses pane_a, wherever it was drawn.
+    let space = row_index(&rows, "client-shell");
+    let y = (space + 3) as u16;
+    let click = left_click(&mut state, 12, y);
+    let [ClientShellAction::Endpoint { request, .. }] = &click.actions[..] else {
+        panic!("subagent row click should focus the parent pane");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_a"
+    ));
+    // ... and a row of pane_c focuses pane_c.
+    let y = row_index(&rows, "second Other") as u16;
+    let click = left_click(&mut state, 12, y);
+    let [ClientShellAction::Endpoint { request, .. }] = &click.actions[..] else {
+        panic!("subagent row click should focus the parent pane");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_c"
+    ));
+}
+
+#[test]
+fn subagent_hits_follow_list_changes_and_pane_removal() {
+    let mut state = subagent_state(mixed_snapshot());
+    compose_rows(&mut state);
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    compose_rows(&mut state);
+    let before = state.hits.space_agents.clone();
+
+    // The current list grows: rows below move down and hits follow.
+    let mut grown = mixed_snapshot();
+    let mut current = grown.agents[1].subagents.clone();
+    current.push(sub("s4", None, Sub::Running, "Extra", "new one"));
+    grown.agents[1].subagents = current;
+    state.set_snapshot(Box::new(grown));
+    let rows = compose_rows(&mut state);
+    let space = row_index(&rows, "client-shell");
+    assert!(rows[space + 6].contains("new one Extra"), "{rows:#?}");
+    assert_eq!(state.hits.workspaces[0].child_rows, 3 + 1 + 4);
+    let after = state.hits.space_agents.clone();
+    assert_ne!(before, after);
+    // The next agent child (pane_c) starts after the new rows; clicking it focuses it.
+    let (rect, pane) = after.iter().find(|(_, pane)| pane == "pane_c").unwrap();
+    let click = left_click(&mut state, rect.x + 5, rect.y);
+    let [ClientShellAction::Endpoint { request, .. }] = &click.actions[..] else {
+        panic!("expected focus");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneFocus(target) if &target.pane_id == pane
+    ));
+
+    // The pane disappears: its view state is pruned, a re-added pane is collapsed.
+    let mut without = mixed_snapshot();
+    without.agents.retain(|agent| agent.pane_id != "pane_a");
+    state.set_snapshot(Box::new(without));
+    assert!(!state.subagent_views.contains_key(&state.active_endpoint_id));
+    state.set_snapshot(Box::new(mixed_snapshot()));
+    let rows = compose_rows(&mut state);
+    assert!(!rows.iter().any(|row| row.contains("current · history")));
+}
+
+#[test]
+fn subagent_rows_survive_sidebar_scrolling_and_hits_match_drawn_rows() {
+    let mut snapshot = mixed_snapshot();
+    for (index, id) in ["ws_4", "ws_5", "ws_6"].into_iter().enumerate() {
+        snapshot
+            .workspaces
+            .push(workspace(id, 4 + index, &format!("space-{id}")));
+        let tab_id = format!("tab_{id}");
+        snapshot.tabs.push(tab(&tab_id, id, 1, "t"));
+        for n in 0..3 {
+            snapshot.agents.push(agent(
+                &format!("pane_{id}_{n}"),
+                id,
+                &tab_id,
+                AgentStatus::Idle,
+            ));
+        }
+    }
+    let mut state = subagent_state(snapshot);
+    state.compose(106, 18).expect("frame");
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    for scroll in 0..state.snapshot.as_deref().unwrap().workspaces.len() {
+        state.workspace_scroll = scroll;
+        state.reveal_focused_workspace = false;
+        let frame = state.compose(106, 18).expect("frame");
+        let rows = frame_rows(&frame);
+        for hit in &state.hits.workspaces {
+            if hit.workspace_id == "ws_1" {
+                // All of ws_1's rows are drawn with it, so mode row and chevron hits are inside.
+                let (mode, _) = state.hits.subagent_modes[0].clone();
+                assert!(mode.y >= hit.rect.bottom());
+                assert!(rows[mode.y as usize].contains("current · history"));
+                let (chevron, _) = toggle_for_pair(&state, "pane_a");
+                assert!(rows[chevron.y as usize].contains('▾'));
+            }
+        }
+    }
+}
+
+fn toggle_for_pair(state: &ClientShellState, pane: &str) -> (Rect, String) {
+    (toggle_for(state, pane), pane.to_owned())
+}
+
+#[test]
+fn subagent_rows_do_not_join_keyboard_entries_or_tree_numbering() {
+    let plain = subagent_state(agents_snapshot());
+    let mut with = subagent_state(mixed_snapshot());
+    compose_rows(&mut with);
+    let toggle = toggle_for(&with, "pane_a");
+    click_hit(&mut with, toggle);
+    compose_rows(&mut with);
+    let snapshot = with.snapshot.clone().unwrap();
+    assert_eq!(
+        with.sidebar_entries(&snapshot),
+        plain.sidebar_entries(plain.snapshot.as_deref().unwrap())
+    );
+    assert_eq!(tree_order(&with), tree_order(&plain));
 }
