@@ -2543,6 +2543,35 @@ fn subagent_focused_color_applies_only_while_the_parent_is_focused() {
     assert_eq!(subagent_text_style(&mut state, "build").fg, Some(tab));
 }
 
+#[test]
+fn focused_agent_highlight_covers_its_subagent_rows() {
+    let build = |focus: &str| {
+        let mut snapshot = mixed_snapshot();
+        snapshot.focused_pane_id = Some(focus.into());
+        for agent in &mut snapshot.agents {
+            agent.focused = agent.pane_id == focus;
+        }
+        subagent_state(snapshot)
+    };
+    let row_bg = |state: &mut ClientShellState, text: &str| {
+        let rows = compose_rows(state);
+        let y = row_index(&rows, text);
+        let x = col(&rows[y], text);
+        style_of(state, y as u16, x as u16).bg
+    };
+    // Parent focused: every subagent row shares the focused-row background.
+    let mut state = build("pane_a");
+    let highlight = Some(state.config.palette.active_row_bg);
+    for text in ["find auth code", "outline", "run tests"] {
+        assert_eq!(row_bg(&mut state, text), highlight, "{text}");
+    }
+    // Parent not focused: no highlight on its subagent rows.
+    let mut state = build("pane_c");
+    for text in ["find auth code", "outline", "run tests"] {
+        assert_ne!(row_bg(&mut state, text), highlight, "{text}");
+    }
+}
+
 fn press_toggle_subagents(state: &mut ClientShellState) -> ClientShellInput {
     let mut outcome = ClientShellInput::default();
     state.record_binding(

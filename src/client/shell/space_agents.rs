@@ -477,9 +477,11 @@ pub(super) fn render_children(
         hits.space_agents.push((rect, child.pane_id.clone()));
         let token_height = child.token_height().min(height);
         if child.focused {
+            // The highlight spans the agent's subagent rows too, so the agent
+            // and its subagents read as one focused block.
             let start = space_indent.min(area.width);
             buffer.set_style(
-                Rect::new(area.x + start, y, area.width - start, token_height),
+                Rect::new(area.x + start, y, area.width - start, height),
                 Style::default().bg(palette.active_row_bg),
             );
         }
