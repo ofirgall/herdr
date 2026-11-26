@@ -89,6 +89,12 @@ pub struct Palette {
     /// Optional color for subagent rows of the focused agent. Falls back to
     /// `tab_focused`, then `subagent`, then `tab`, then the secondary color.
     pub subagent_focused: Option<Color>,
+    /// Optional color for the background shell rows (and their `shells`
+    /// group) under an agent. Falls back to the subagent colors.
+    pub shell: Option<Color>,
+    /// Optional color for background shell rows of the focused agent. Falls
+    /// back to `shell`, then to the focused subagent colors.
+    pub shell_focused: Option<Color>,
 }
 
 impl Palette {
@@ -110,6 +116,19 @@ impl Palette {
             self.subagent_focused.or(self.tab_focused).or(base)
         } else {
             base
+        }
+    }
+
+    /// The theme color for background shell row text, if any: `shell`, then
+    /// the subagent color; for the focused agent `shell_focused`, `shell`,
+    /// then the focused subagent color. `None` means the row's secondary color.
+    pub fn shell_color(&self, focused: bool) -> Option<Color> {
+        if focused {
+            self.shell_focused
+                .or(self.shell)
+                .or_else(|| self.subagent_color(true))
+        } else {
+            self.shell.or_else(|| self.subagent_color(false))
         }
     }
 
@@ -151,6 +170,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -182,6 +203,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -213,6 +236,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -244,6 +269,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -275,6 +302,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -306,6 +335,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -337,6 +368,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -368,6 +401,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -399,6 +434,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -430,6 +467,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -461,6 +500,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -492,6 +533,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -523,6 +566,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -554,6 +599,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -585,6 +632,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -616,6 +665,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -647,6 +698,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -678,6 +731,8 @@ impl Palette {
             tab_focused: None,
             subagent: None,
             subagent_focused: None,
+            shell: None,
+            shell_focused: None,
         }
     }
 
@@ -784,6 +839,12 @@ impl Palette {
         if let Some(c) = &custom.subagent_focused {
             self.subagent_focused = Some(parse_color(c));
         }
+        if let Some(c) = &custom.shell {
+            self.shell = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.shell_focused {
+            self.shell_focused = Some(parse_color(c));
+        }
         self
     }
 
@@ -863,6 +924,12 @@ impl Palette {
         }
         if let Some(c) = &custom.subagent_focused {
             self.subagent_focused = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.shell {
+            self.shell = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.shell_focused {
+            self.shell_focused = Some(parse_color(c));
         }
         self
     }

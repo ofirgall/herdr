@@ -3613,6 +3613,47 @@ mod tests {
     }
 
     #[test]
+    fn shell_theme_colors_default_to_subagent_colors_and_follow_custom_overrides() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+        let palette = |toml: &str, appearance| {
+            let config: Config = toml::from_str(toml).unwrap();
+            let runtime = client_theme_runtime_from_config(&config);
+            client_palette_for_appearance(&runtime, appearance)
+        };
+        let base = state::Palette::catppuccin();
+        assert_eq!((base.shell, base.shell_focused), (None, None));
+        assert_eq!(base.shell_color(false), None);
+        assert_eq!(base.shell_color(true), None);
+
+        // Unset shell tokens follow the subagent chain.
+        let subagents = "[theme.custom]\ntab = \"#5c6fae\"\nsubagent = \"#119955\"\nsubagent_focused = \"#222222\"\n";
+        let dark = palette(subagents, HostAppearance::Dark);
+        assert_eq!(dark.shell_color(false), dark.subagent_color(false));
+        assert_eq!(dark.shell_color(true), dark.subagent_color(true));
+
+        // `shell` wins over the subagent colors, focused or not.
+        let custom = format!("{subagents}shell = \"#551199\"\n");
+        let dark = palette(&custom, HostAppearance::Dark);
+        assert_eq!(dark.shell, Some(Color::Rgb(0x55, 0x11, 0x99)));
+        assert_eq!(dark.shell_color(false), dark.shell);
+        assert_eq!(dark.shell_color(true), dark.shell);
+        let focused = format!("{custom}shell_focused = \"#995511\"\n");
+        let dark = palette(&focused, HostAppearance::Dark);
+        assert_eq!(dark.shell_color(true), Some(Color::Rgb(0x99, 0x55, 0x11)));
+        assert_eq!(dark.shell_color(false), dark.shell);
+
+        // Light/dark overrides apply after `[theme.custom]`.
+        let modes = "[theme]\nauto_switch = true\n[theme.custom]\nshell = \"#551199\"\n[theme.custom.light]\nshell = \"#444444\"\nshell_focused = \"#555555\"\n";
+        let light = palette(modes, HostAppearance::Light);
+        assert_eq!(light.shell, Some(Color::Rgb(0x44, 0x44, 0x44)));
+        assert_eq!(light.shell_focused, Some(Color::Rgb(0x55, 0x55, 0x55)));
+        let dark = palette(modes, HostAppearance::Dark);
+        assert_eq!(dark.shell, Some(Color::Rgb(0x55, 0x11, 0x99)));
+        assert_eq!(dark.shell_focused, None);
+    }
+
+    #[test]
     fn index_focused_theme_color_is_unset_by_default_and_follows_custom_overrides() {
         use crate::terminal_theme::HostAppearance;
         let palette = |toml: &str, appearance| {

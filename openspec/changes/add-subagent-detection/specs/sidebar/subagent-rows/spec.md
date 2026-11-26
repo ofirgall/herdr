@@ -126,7 +126,7 @@ Each subagent row SHALL show right-aligned timing: for a running subagent, the e
 
 ### Requirement: Subagent rows are themeable
 
-Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, which SHALL default to the agent tab-name colors (`tab`, `tab_focused`).
+Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, which SHALL default to the agent tab-name colors (`tab`, `tab_focused`). Background shell rows and their `shells` group SHALL use the theme tokens `shell` and `shell_focused`, which SHALL default to the subagent colors.
 
 #### Scenario: Default colors
 - **WHEN** the theme sets no subagent tokens
@@ -135,6 +135,14 @@ Subagent row text SHALL use the theme tokens `subagent` and `subagent_focused`, 
 #### Scenario: Custom color
 - **WHEN** the theme sets `subagent`
 - **THEN** subagent rows SHALL use that color
+
+#### Scenario: Shell color
+- **WHEN** the theme sets `shell` (or `shell_focused` while the parent agent is focused)
+- **THEN** the `shells` group header and its shell rows SHALL use that color, and subagent rows SHALL keep the subagent colors
+
+#### Scenario: Default shell color
+- **WHEN** the theme sets no shell tokens
+- **THEN** the `shells` group and its rows SHALL use the subagent colors
 
 ### Requirement: Keyboard toggle for subagent rows
 

@@ -215,6 +215,18 @@
           "description": "Color for subagent rows of the focused agent. Falls back to theme.custom.tab_focused, then theme.custom.subagent, then theme.custom.tab, then the row's muted secondary color. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.shell",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for background shell rows and their shells group under an agent in the spaces sidebar (description; timing and the group label use a dimmed variant). Falls back to theme.custom.subagent, then theme.custom.tab, then the row's muted secondary color. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.shell_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for background shell rows of the focused agent. Falls back to theme.custom.shell, then theme.custom.subagent_focused, then theme.custom.tab_focused, then theme.custom.subagent, then theme.custom.tab, then the row's muted secondary color. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.accent",
           "type": "color",
           "default": "unset",
@@ -363,6 +375,18 @@
           "type": "color",
           "default": "unset",
           "description": "Override the subagent_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.shell",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the shell color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.shell_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the shell_focused color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.accent",
@@ -525,6 +549,18 @@
           "type": "color",
           "default": "unset",
           "description": "Override the subagent_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.shell",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the shell color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.shell_focused",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the shell_focused color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "terminal.shell_mode",

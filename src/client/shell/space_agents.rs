@@ -884,6 +884,12 @@ fn render_subagent_rows(
     if !shells_follow || top >= bottom {
         return;
     }
+    // Shells take their own color: `shell`, else the subagent color.
+    let shell_color = palette
+        .shell_color(parent_focused)
+        .unwrap_or(palette.overlay0);
+    let text_style = Style::default().fg(shell_color);
+    let dim_style = text_style.add_modifier(Modifier::DIM);
     // The `shells` header is the last connector at the subagent level; its
     // rows hang one level deeper.
     super::render::put_text(

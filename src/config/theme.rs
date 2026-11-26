@@ -125,6 +125,8 @@ pub struct CustomThemeColors {
     pub tab_focused: Option<String>,
     pub subagent: Option<String>,
     pub subagent_focused: Option<String>,
+    pub shell: Option<String>,
+    pub shell_focused: Option<String>,
     /// Overrides applied when `auto_switch` selects a light appearance.
     pub light: Option<ModeThemeColors>,
     /// Overrides applied when `auto_switch` selects a dark appearance.
@@ -160,6 +162,8 @@ pub struct ModeThemeColors {
     pub tab_focused: Option<String>,
     pub subagent: Option<String>,
     pub subagent_focused: Option<String>,
+    pub shell: Option<String>,
+    pub shell_focused: Option<String>,
 }
 
 /// Parse a color string into a ratatui Color.

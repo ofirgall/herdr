@@ -63,6 +63,7 @@
 - [x] 10.3 Add `subagent` / `subagent_focused` theme tokens defaulting to `tab` / `tab_focused`; verify theme parsing and render style tests, update configuration docs
 - [x] 10.4 Add the `toggle_subagents` keybinding (bound by default to a free prefix key) and context-menu items; verify keybind parsing/default tests and toggle tests, update keybinding docs
 - [x] 10.5 Live client check of 9.1 and 10.x and full test/clippy comparison
+- [x] 10.6 Add `shell` / `shell_focused` theme tokens for the `shells` group defaulting to the subagent colors; verify theme parsing and render style tests, update configuration docs
 
 ## 11. Background shells
 

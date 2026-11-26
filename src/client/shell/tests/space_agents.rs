@@ -2880,6 +2880,77 @@ fn shells_follow_subagents_with_branch_connectors_and_count_both() {
 }
 
 #[test]
+fn shell_tokens_color_the_shells_group_apart_from_subagents() {
+    use ratatui::style::Color;
+    let subagent = Color::Rgb(0x11, 0x99, 0x55);
+    let shell_color = Color::Rgb(0x55, 0x11, 0x99);
+    let shell_focused = Color::Rgb(0x99, 0x55, 0x11);
+    let subagent_focused = Color::Rgb(0x22, 0x22, 0x22);
+    let build = |focus: &str| {
+        let mut snapshot = agents_snapshot();
+        snapshot.focused_pane_id = Some(focus.into());
+        for agent in &mut snapshot.agents {
+            agent.focused = agent.pane_id == focus;
+        }
+        set_subagents(
+            &mut snapshot,
+            "pane_a",
+            vec![timed_sub("r", Sub::Running, "build", Some(1_000), None)],
+            vec![],
+        );
+        set_shells(
+            &mut snapshot,
+            "pane_a",
+            vec![shell("a", Shell::Running, "server", Some(1_000), None)],
+            vec![],
+        );
+        let mut state = subagent_state(snapshot);
+        state.config.subagent_clock.fixed_ms = Some(1_134_000);
+        state.config.palette.subagent = Some(subagent);
+        state.config.palette.subagent_focused = Some(subagent_focused);
+        state
+    };
+
+    // Unset shell tokens: shells follow the subagent colors.
+    let mut state = build("pane_c");
+    assert_eq!(subagent_text_style(&mut state, "server").fg, Some(subagent));
+    assert_eq!(subagent_text_style(&mut state, "shells").fg, Some(subagent));
+
+    // `shell` colors the header and rows; subagent rows keep their own.
+    state.config.palette.shell = Some(shell_color);
+    assert_eq!(subagent_text_style(&mut state, "build").fg, Some(subagent));
+    assert_eq!(
+        subagent_text_style(&mut state, "server").fg,
+        Some(shell_color)
+    );
+    let header = subagent_text_style(&mut state, "shells");
+    assert_eq!(header.fg, Some(shell_color));
+    assert!(header.add_modifier.contains(ratatui::style::Modifier::DIM));
+
+    // Focused parent: `shell` beats the focused subagent color, and
+    // `shell_focused` beats both.
+    let mut state = build("pane_a");
+    assert_eq!(
+        subagent_text_style(&mut state, "server").fg,
+        Some(subagent_focused)
+    );
+    state.config.palette.shell = Some(shell_color);
+    assert_eq!(
+        subagent_text_style(&mut state, "server").fg,
+        Some(shell_color)
+    );
+    state.config.palette.shell_focused = Some(shell_focused);
+    assert_eq!(
+        subagent_text_style(&mut state, "server").fg,
+        Some(shell_focused)
+    );
+    assert_eq!(
+        subagent_text_style(&mut state, "build").fg,
+        Some(subagent_focused)
+    );
+}
+
+#[test]
 fn nested_subagent_trunk_continues_through_the_shells_group() {
     let mut snapshot = agents_snapshot();
     set_subagents(
