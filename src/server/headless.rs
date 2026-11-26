@@ -3369,6 +3369,8 @@ impl HeadlessServer {
         }
         let mut changed = false;
 
+        changed |= self.app.run_subagent_tasks(now);
+
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.
 

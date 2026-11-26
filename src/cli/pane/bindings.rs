@@ -24,6 +24,10 @@ const RIGHT_CLICK: &[Choice<PaneRightClickTarget>] = &[
     Choice::new("herdr", PaneRightClickTarget::Herdr),
     Choice::new("pane", PaneRightClickTarget::Pane),
 ];
+const SUBAGENT_SCOPES: &[Choice<PaneSubagentsScope>] = &[
+    Choice::new("current", PaneSubagentsScope::Current),
+    Choice::new("history", PaneSubagentsScope::History),
+];
 const STATES: &[Choice<PaneAgentState>] = &[
     Choice::new("idle", PaneAgentState::Idle),
     Choice::new("working", PaneAgentState::Working),
@@ -148,6 +152,14 @@ pub(crate) fn right_click() -> Input<PaneRightClickTarget> {
         Ok(())
     })
     .configure(|arg| choices(arg, RIGHT_CLICK))
+}
+
+pub(crate) fn subagents_scope() -> Input<PaneSubagentsScope> {
+    Input::value("scope", "current|history", |slot, value| {
+        *slot = parse_choice(SUBAGENT_SCOPES, "--scope", value)?;
+        Ok(())
+    })
+    .configure(|arg| choices(arg, SUBAGENT_SCOPES))
 }
 
 pub(crate) fn environment() -> Input<HashMap<String, String>> {
@@ -530,6 +542,24 @@ pub(super) const LEAVES: &[Leaf] = &[
             Ok(Method::PaneProcessInfo(params))
         },
     },
+    Leaf {
+        name: "subagents",
+        about: "Show pane subagents",
+        id: "cli:pane:subagents",
+        output: Output::Json,
+        arguments: PaneSubagentsProjection::arguments,
+        method: |matches| {
+            let mut params = PaneSubagentsProjection::from_matches(matches)?;
+            params.pane_id = super::caller_target(
+                matches,
+                params.pane_id,
+                crate::cli::target::caller_pane_id().as_deref(),
+                false,
+                false,
+            )?;
+            Ok(Method::PaneSubagents(params))
+        },
+    },
     leaf!(
         "neighbor",
         "Find a pane neighbor",
@@ -755,6 +785,7 @@ mod choice_tests {
         assert_choices_cover_api_enum(super::DIRECTIONS);
         assert_choices_cover_api_enum(super::SPLITS);
         assert_choices_cover_api_enum(super::RIGHT_CLICK);
+        assert_choices_cover_api_enum(super::SUBAGENT_SCOPES);
         assert_choices_cover_api_enum(super::STATES);
     }
 }

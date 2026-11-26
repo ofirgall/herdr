@@ -362,6 +362,11 @@ impl App {
             links: terminal.metadata_tokens.links(),
             agent_session: terminal_agent_session_info(terminal),
             scroll: None,
+            subagents: terminal
+                .subagents()
+                .iter()
+                .map(pane_subagent_info)
+                .collect(),
             revision: terminal.revision,
         })
     }
@@ -413,6 +418,26 @@ impl App {
                     is_linked_worktree: space.is_linked_worktree,
                 }),
         }
+    }
+}
+
+pub(super) fn pane_subagent_info(
+    subagent: &crate::subagents::Subagent,
+) -> crate::api::schema::PaneSubagentInfo {
+    crate::api::schema::PaneSubagentInfo {
+        id: subagent.id.clone(),
+        kind: subagent.kind.clone(),
+        description: subagent.description.clone(),
+        parent_id: subagent.parent.clone(),
+        background: subagent.background,
+        state: match subagent.state {
+            crate::subagents::SubagentState::Running => crate::api::schema::SubagentStatus::Running,
+            crate::subagents::SubagentState::Done { .. }
+            | crate::subagents::SubagentState::Finished => crate::api::schema::SubagentStatus::Done,
+            crate::subagents::SubagentState::Interrupted => {
+                crate::api::schema::SubagentStatus::Interrupted
+            }
+        },
     }
 }
 

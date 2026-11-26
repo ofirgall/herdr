@@ -119,6 +119,17 @@ pub enum AppEvent {
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         session_start_source: Option<String>,
+        /// Raw `agent_session_path` from the report (the transcript file for
+        /// Claude). Kept apart from `session_ref`, which drops it for Claude.
+        session_transcript: Option<std::path::PathBuf>,
+    },
+    /// A background scan of an agent's subagent metadata directory finished.
+    SubagentsScanned {
+        terminal_id: crate::terminal::TerminalId,
+        /// Transcript the scan was made for; stale results are dropped.
+        transcript: std::path::PathBuf,
+        records: Vec<crate::subagents::SubagentRecord>,
+        parents: std::collections::HashMap<String, Option<String>>,
     },
     /// A reporter supplied the command that resumes its own session.
     AgentResumeReported {

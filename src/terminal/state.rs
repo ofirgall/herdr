@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
 // Effective state arbitration is intentionally centralized here. Full lifecycle
 // Herdr hook integrations are hook-authoritative while live; screen recovery
@@ -162,6 +162,18 @@ pub struct TerminalState {
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
     pub restore_error: Option<String>,
+    /// Subagents of the current Claude session. Runtime-only, never persisted.
+    /// Mutated only through `set_subagents` and the clear methods.
+    subagents: Vec<crate::subagents::Subagent>,
+    /// Every parseable subagent of the watched session (history view). Same
+    /// lifecycle as `subagents` but never linger-pruned.
+    subagent_history: Vec<crate::subagents::Subagent>,
+    /// Bumped on every `set_subagent_lists` change so callers can detect mutations.
+    subagents_revision: u64,
+    /// When Herdr received the current `SessionStart` report (resume-leftover filter).
+    session_observed_at: Option<SystemTime>,
+    /// Transcript path from the latest Claude session report; the watch target.
+    agent_session_transcript: Option<PathBuf>,
 }
 
 impl TerminalState {
@@ -202,7 +214,136 @@ impl TerminalState {
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
             restore_error: None,
+            subagents: Vec::new(),
+            subagent_history: Vec::new(),
+            subagents_revision: 0,
+            session_observed_at: None,
+            agent_session_transcript: None,
         }
+    }
+
+    /// Subagents currently shown for this terminal's agent (read-only view).
+    pub fn subagents(&self) -> &[crate::subagents::Subagent] {
+        &self.subagents
+    }
+
+    /// Full session history of subagents (read-only view).
+    pub fn subagent_history(&self) -> &[crate::subagents::Subagent] {
+        &self.subagent_history
+    }
+
+    /// Monotonic counter bumped whenever either subagent list changes.
+    pub(crate) fn subagents_revision(&self) -> u64 {
+        self.subagents_revision
+    }
+
+    /// Transcript path of the tracked Claude session, if any.
+    pub fn agent_session_transcript(&self) -> Option<&Path> {
+        self.agent_session_transcript.as_deref()
+    }
+
+    /// Single place where the subagent lists are replaced. Returns whether
+    /// either changed.
+    pub(crate) fn set_subagent_lists(
+        &mut self,
+        current: Vec<crate::subagents::Subagent>,
+        history: Vec<crate::subagents::Subagent>,
+    ) -> bool {
+        if self.subagents == current && self.subagent_history == history {
+            return false;
+        }
+        self.subagents = current;
+        self.subagent_history = history;
+        self.subagents_revision = self.subagents_revision.wrapping_add(1);
+        true
+    }
+
+    /// Test helper: replace only the current list, leaving history as is.
+    #[cfg(test)]
+    pub(crate) fn set_subagents(&mut self, list: Vec<crate::subagents::Subagent>) -> bool {
+        let history = self.subagent_history.clone();
+        self.set_subagent_lists(list, history)
+    }
+
+    /// Drop both lists immediately (no linger). Returns whether either was non-empty.
+    pub(crate) fn clear_subagents(&mut self) -> bool {
+        self.set_subagent_lists(Vec::new(), Vec::new())
+    }
+
+    /// Drop the list and stop tracking the session (agent released or exited).
+    pub(crate) fn clear_subagent_tracking(&mut self) -> bool {
+        self.agent_session_transcript = None;
+        self.session_observed_at = None;
+        self.clear_subagents()
+    }
+
+    /// Record a Claude session report. Returns whether the subagent list changed
+    /// (cleared because the session changed).
+    pub(crate) fn note_agent_session_transcript(
+        &mut self,
+        transcript: Option<PathBuf>,
+        session_ref_changed: bool,
+    ) -> bool {
+        let session_changed = session_ref_changed || self.agent_session_transcript != transcript;
+        self.agent_session_transcript = transcript;
+        self.session_observed_at = Some(SystemTime::now());
+        if session_changed {
+            self.clear_subagents()
+        } else {
+            false
+        }
+    }
+
+    /// A live Claude process is currently detected in this terminal.
+    pub(crate) fn subagent_parent_live(&self) -> bool {
+        self.detected_agent == Some(Agent::Claude) && self.recent_agent_process_exit.is_none()
+    }
+
+    /// Fold a finished background scan into the list. Stale scans (the session
+    /// moved on) are dropped. Returns whether the list changed.
+    pub(crate) fn apply_subagent_scan(
+        &mut self,
+        transcript: &Path,
+        records: &[crate::subagents::SubagentRecord],
+        parents: &HashMap<String, Option<String>>,
+        now: Instant,
+    ) -> bool {
+        if self.agent_session_transcript.as_deref() != Some(transcript) {
+            return false;
+        }
+        let list = crate::subagents::reconcile(crate::subagents::ReconcileInput {
+            previous: &self.subagents,
+            records,
+            parent_live: self.subagent_parent_live(),
+            session_observed_at: self.session_observed_at,
+            parents,
+            now,
+        });
+        let history = crate::subagents::reconcile_history(
+            records,
+            self.subagent_parent_live(),
+            self.session_observed_at,
+            parents,
+        );
+        self.set_subagent_lists(list, history)
+    }
+
+    /// Remove lingering `Done` entries older than the linger window.
+    pub(crate) fn prune_subagents(&mut self, now: Instant) -> bool {
+        crate::subagents::prune_done(&mut self.subagents, now, crate::subagents::DONE_LINGER)
+    }
+
+    /// When the earliest lingering `Done` entry expires.
+    pub(crate) fn next_subagent_prune_deadline(&self) -> Option<Instant> {
+        self.subagents
+            .iter()
+            .filter_map(|subagent| match subagent.state {
+                crate::subagents::SubagentState::Done { done_at } => {
+                    Some(done_at + crate::subagents::DONE_LINGER)
+                }
+                _ => None,
+            })
+            .min()
     }
 
     pub fn set_detected_agent_process_at(
@@ -2328,6 +2469,7 @@ impl TerminalState {
     }
 
     pub fn clear_agent_runtime_identity_after_respawn(&mut self) {
+        self.clear_subagent_tracking();
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;

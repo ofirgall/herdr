@@ -537,7 +537,55 @@ pub struct PaneInfo {
     pub agent_session: Option<AgentSessionInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll: Option<PaneScrollInfo>,
+    /// Subagents currently tracked for this pane's agent. Display-only;
+    /// omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<PaneSubagentInfo>,
     pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentStatus {
+    Running,
+    Done,
+    /// History scope only: unfinished subagent of an earlier run of a
+    /// resumed session.
+    Interrupted,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneSubagentsScope {
+    // Subagents currently shown for the pane (matches `PaneInfo.subagents`).
+    #[default]
+    Current,
+    // Every subagent of the watched session, including finished and
+    // interrupted ones.
+    History,
+}
+
+crate::cli::projection::cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+    pub struct PaneSubagentsParams => PaneSubagentsProjection {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub pane_id: Option<String> => binding::target(false),
+        #[serde(default)]
+        pub scope: PaneSubagentsScope => Field::new(PaneSubagentsScope::Current).input(binding::subagents_scope()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneSubagentInfo {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    /// Id of the parent subagent; null for a child of the root agent.
+    pub parent_id: Option<String>,
+    pub background: bool,
+    pub state: SubagentStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

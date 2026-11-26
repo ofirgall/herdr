@@ -6,6 +6,7 @@
 - `ui.status_icons` states now accept a list of glyphs that animate, with `ui.status_icons.animation_interval_ms` setting the delay between frames.
 - `[ui.sidebar.tree.worktrees]` and `[ui.sidebar.tree.agents]` set the sidebar's tree connector glyphs, for example rounded or dotted lines.
 - `[ui.sidebar.spaces] agents` with the Agents section turned off (`[ui.sidebar.agents] enabled = false`) now numbers agents 1..N down the whole space tree. `focus_agent`, `next_agent` and `previous_agent` follow that order, and the new `agent_index_focused` token shows the number only on the focused agent.
+- Claude Code panes now track their running subagents, with finished subagents lingering for about 30 seconds. Subagents are exposed as `PaneInfo.subagents` and the `pane.subagents_changed` event in the socket API. Tracking is display-only and does not affect agent status. The new `pane.subagents` request (`herdr pane subagents [--scope current|history]`) also returns the pane's full session history, including finished and `interrupted` subagents.
 
 ### Changed
 - Agents listed under their space in the sidebar now hang off `├─`/`└─` tree connectors, matching worktree children.

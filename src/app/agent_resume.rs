@@ -290,6 +290,8 @@ impl App {
                     err = %err,
                     "failed to start shell for deferred agent resume"
                 );
+                self.state.clear_subagent_tracking_for(&terminal_id);
+                self.flush_subagent_changes();
                 if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
                     terminal.pending_agent_resume_plan = None;
                     terminal.restore_error = Some(format!("Could not start the saved shell: {err}. Fix the shell configuration and restart this session."));

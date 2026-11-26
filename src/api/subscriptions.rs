@@ -161,6 +161,9 @@ impl ActiveSubscription {
             Subscription::PaneAgentDetected {} => {
                 Ok(event_subscription(EventKind::PaneAgentDetected))
             }
+            Subscription::PaneSubagentsChanged {} => {
+                Ok(event_subscription(EventKind::PaneSubagentsChanged))
+            }
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
             Subscription::PaneOutputMatched {
                 pane_id,
@@ -717,6 +720,7 @@ mod tests {
             links: Default::default(),
             agent_session: None,
             scroll,
+            subagents: Vec::new(),
             revision: 0,
         }
     }
@@ -861,6 +865,29 @@ mod tests {
             assert_eq!(subscription.last_sequence, event_hub.current_sequence());
             assert!(subscription.initial_event.is_none());
         }
+    }
+
+    #[test]
+    fn pane_subagents_subscription_uses_dedicated_event_kind() {
+        let event_hub = EventHub::default();
+        let (api_tx, _api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let subscription = ActiveSubscription::new(
+            Subscription::PaneSubagentsChanged {},
+            "test",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+        )
+        .expect("pane subagents subscription");
+
+        assert!(matches!(
+            subscription,
+            ActiveSubscription::Event(ActiveEventSubscription {
+                event_kind: EventKind::PaneSubagentsChanged,
+                ..
+            })
+        ));
     }
 
     #[test]

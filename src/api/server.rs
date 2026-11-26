@@ -1156,6 +1156,7 @@ mod tests {
             links: Default::default(),
             agent_session: None,
             scroll: None,
+            subagents: Vec::new(),
             revision: 0,
         }
     }

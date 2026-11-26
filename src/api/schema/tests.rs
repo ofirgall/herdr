@@ -531,6 +531,57 @@ fn pane_process_info_request_round_trips() {
 }
 
 #[test]
+fn pane_subagents_request_round_trips_and_defaults_to_current() {
+    let request = Request {
+        id: "req_subagents".into(),
+        method: Method::PaneSubagents(PaneSubagentsParams {
+            pane_id: Some("w1-1".into()),
+            scope: PaneSubagentsScope::History,
+        }),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "pane.subagents");
+    assert_eq!(json["params"]["pane_id"], "w1-1");
+    assert_eq!(json["params"]["scope"], "history");
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, request);
+
+    let defaulted: Request = serde_json::from_value(serde_json::json!({
+        "id": "r", "method": "pane.subagents", "params": {"pane_id": "w1-1"}
+    }))
+    .unwrap();
+    assert_eq!(
+        defaulted.method,
+        Method::PaneSubagents(PaneSubagentsParams {
+            pane_id: Some("w1-1".into()),
+            scope: PaneSubagentsScope::Current,
+        })
+    );
+}
+
+#[test]
+fn pane_subagents_response_round_trips() {
+    let result = ResponseResult::PaneSubagents {
+        pane_id: "w1-1".into(),
+        scope: PaneSubagentsScope::History,
+        subagents: vec![PaneSubagentInfo {
+            id: "a1".into(),
+            kind: "explore".into(),
+            description: "look".into(),
+            parent_id: None,
+            background: false,
+            state: SubagentStatus::Interrupted,
+        }],
+    };
+    let json = serde_json::to_value(&result).unwrap();
+    assert_eq!(json["type"], "pane_subagents");
+    assert_eq!(json["scope"], "history");
+    assert_eq!(json["subagents"][0]["state"], "interrupted");
+    let restored: ResponseResult = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, result);
+}
+
+#[test]
 fn event_envelope_round_trips() {
     let events = [
         EventEnvelope {
@@ -841,6 +892,7 @@ fn worktree_request_and_response_round_trip() {
                 links: Default::default(),
                 agent_session: None,
                 scroll: None,
+                subagents: Vec::new(),
                 revision: 0,
             },
             worktree: WorktreeInfo {
@@ -1273,6 +1325,7 @@ fn create_response_round_trips_with_root_pane() {
                 links: Default::default(),
                 agent_session: None,
                 scroll: None,
+                subagents: Vec::new(),
                 revision: 0,
             },
         },

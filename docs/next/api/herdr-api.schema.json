@@ -710,6 +710,33 @@
             },
             {
               "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "subagents": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/PaneSubagentInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pane_subagents_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "subagents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "layout": {
                   "$ref": "#/schemas/event/$defs/PaneLayoutSnapshot"
                 },
@@ -773,6 +800,7 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
+            "pane_subagents_changed",
             "layout_updated",
             "pull_requests_updated"
           ],
@@ -867,6 +895,13 @@
                 "type": "string"
               },
               "type": "object"
+            },
+            "subagents": {
+              "description": "Subagents currently tracked for this pane's agent. Display-only;\nomitted when empty.",
+              "items": {
+                "$ref": "#/schemas/event/$defs/PaneSubagentInfo"
+              },
+              "type": "array"
             },
             "tab_id": {
               "type": "string"
@@ -1058,6 +1093,40 @@
             "offset_from_bottom",
             "max_offset_from_bottom",
             "viewport_rows"
+          ],
+          "type": "object"
+        },
+        "PaneSubagentInfo": {
+          "properties": {
+            "background": {
+              "type": "boolean"
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "parent_id": {
+              "description": "Id of the parent subagent; null for a child of the root agent.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/event/$defs/SubagentStatus"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "description",
+            "background",
+            "state"
           ],
           "type": "object"
         },
@@ -1269,6 +1338,22 @@
             "down"
           ],
           "type": "string"
+        },
+        "SubagentStatus": {
+          "oneOf": [
+            {
+              "enum": [
+                "running",
+                "done"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "History scope only: unfinished subagent of an earlier run of a\nresumed session.",
+              "type": "string"
+            }
+          ]
         },
         "TabInfo": {
           "properties": {
@@ -3526,6 +3611,28 @@
           ],
           "type": "object"
         },
+        "PaneSubagentsParams": {
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "$ref": "#/schemas/request/$defs/PaneSubagentsScope",
+              "default": "current"
+            }
+          },
+          "type": "object"
+        },
+        "PaneSubagentsScope": {
+          "enum": [
+            "current",
+            "history"
+          ],
+          "type": "string"
+        },
         "PaneSwapParams": {
           "properties": {
             "direction": {
@@ -4513,6 +4620,18 @@
               "required": [
                 "type",
                 "pane_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "pane.subagents_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
               ],
               "type": "object"
             },
@@ -5826,6 +5945,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneProcessInfoParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.subagents",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneSubagentsParams"
             }
           },
           "required": [
@@ -7772,6 +7907,33 @@
             },
             {
               "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "subagents": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneSubagentInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pane_subagents_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "subagents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "layout": {
                   "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
                 },
@@ -7850,6 +8012,7 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
+            "pane_subagents_changed",
             "layout_updated",
             "pull_requests_updated"
           ],
@@ -8324,6 +8487,13 @@
                 "type": "string"
               },
               "type": "object"
+            },
+            "subagents": {
+              "description": "Subagents currently tracked for this pane's agent. Display-only;\nomitted when empty.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PaneSubagentInfo"
+              },
+              "type": "array"
             },
             "tab_id": {
               "type": "string"
@@ -8828,6 +8998,47 @@
             "viewport_rows"
           ],
           "type": "object"
+        },
+        "PaneSubagentInfo": {
+          "properties": {
+            "background": {
+              "type": "boolean"
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "parent_id": {
+              "description": "Id of the parent subagent; null for a child of the root agent.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/SubagentStatus"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "description",
+            "background",
+            "state"
+          ],
+          "type": "object"
+        },
+        "PaneSubagentsScope": {
+          "enum": [
+            "current",
+            "history"
+          ],
+          "type": "string"
         },
         "PaneSwapReason": {
           "enum": [
@@ -10275,6 +10486,33 @@
             },
             {
               "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "scope": {
+                  "$ref": "#/schemas/success_response/$defs/PaneSubagentsScope"
+                },
+                "subagents": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneSubagentInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pane_subagents",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "scope",
+                "subagents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "layout": {
                   "$ref": "#/schemas/success_response/$defs/LayoutDescription"
                 },
@@ -11136,6 +11374,22 @@
             "down"
           ],
           "type": "string"
+        },
+        "SubagentStatus": {
+          "oneOf": [
+            {
+              "enum": [
+                "running",
+                "done"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "History scope only: unfinished subagent of an earlier run of a\nresumed session.",
+              "type": "string"
+            }
+          ]
         },
         "TabInfo": {
           "properties": {

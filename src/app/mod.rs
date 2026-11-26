@@ -24,6 +24,7 @@ pub(crate) mod pull_requests;
 mod runtime;
 mod session;
 pub mod state;
+mod subagent_tracking;
 mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;
@@ -141,6 +142,10 @@ pub struct App {
     pub(crate) update_manifest_check_enabled: bool,
     pub(crate) loaded_host_cursor: crate::config::HostCursorModeConfig,
     pub(crate) agent_metadata_deadline: Option<Instant>,
+    /// Lazily started filesystem watcher for Claude subagent metadata.
+    pub(crate) subagent_watcher: Option<crate::subagents::SubagentWatcher>,
+    /// Terminal -> transcript currently registered with the watcher.
+    pub(crate) subagent_tracked: HashMap<crate::terminal::TerminalId, std::path::PathBuf>,
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
     startup_per_agent_delay: Duration,
     resume_command_prefix: Vec<String>,
@@ -531,6 +536,7 @@ impl App {
             config_diagnostic,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            subagent_changed_terminals: Vec::new(),
             outer_terminal_focus: None,
             prefix_keys,
             headless_size: config.headless_size(),
@@ -658,6 +664,8 @@ impl App {
             update_manifest_check_enabled: config.update.manifest_check,
             loaded_host_cursor: config.ui.host_cursor,
             agent_metadata_deadline: None,
+            subagent_watcher: None,
+            subagent_tracked: HashMap::new(),
             pending_agent_resume_deadline: None,
             startup_per_agent_delay: Duration::from_millis(
                 config.session.startup_per_agent_delay_ms.into(),

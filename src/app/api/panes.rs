@@ -12,9 +12,9 @@ use crate::api::schema::{
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
     PaneScrollParams, PaneSelectionReadParams, PaneSendInputParams, PaneSendKeysParams,
-    PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneSwapReason, PaneSwapResult,
-    PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode, PaneZoomParams, PaneZoomReason,
-    PaneZoomResult, ResponseResult,
+    PaneSendTextParams, PaneSplitParams, PaneSubagentsParams, PaneSubagentsScope, PaneSwapParams,
+    PaneSwapReason, PaneSwapResult, PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode,
+    PaneZoomParams, PaneZoomReason, PaneZoomResult, ResponseResult,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
 use crate::app::App;
@@ -567,6 +567,45 @@ impl App {
                     tty: None,
                     foreground_processes,
                 },
+            },
+        )
+    }
+
+    pub(super) fn handle_pane_subagents(
+        &mut self,
+        id: String,
+        params: PaneSubagentsParams,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.resolve_optional_pane(params.pane_id.as_deref()) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some(terminal) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+        else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let list = match params.scope {
+            PaneSubagentsScope::Current => terminal.subagents(),
+            PaneSubagentsScope::History => terminal.subagent_history(),
+        };
+        let subagents = list
+            .iter()
+            .map(crate::app::creation::pane_subagent_info)
+            .collect();
+
+        encode_success(
+            id,
+            ResponseResult::PaneSubagents {
+                pane_id: public_pane_id,
+                scope: params.scope,
+                subagents,
             },
         )
     }
@@ -1613,6 +1652,11 @@ impl App {
         let report_is_newer = self
             .pane_terminal(ws_idx, pane_id)
             .is_some_and(|terminal| terminal.hook_report_is_newer(&params.source, params.seq));
+        let session_transcript = params
+            .agent_session_path
+            .as_deref()
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from);
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1621,6 +1665,7 @@ impl App {
         );
         self.handle_internal_event(crate::events::AppEvent::AgentSessionReported {
             pane_id,
+            session_transcript,
             session_ref: session_ref.clone(),
             source: params.source.clone(),
             agent_label: agent_label.clone(),

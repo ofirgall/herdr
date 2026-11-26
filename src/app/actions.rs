@@ -1547,18 +1547,41 @@ impl AppState {
                 seq,
                 session_ref,
                 session_start_source,
-            } => self
-                .update_terminal_state(pane_id, |terminal| {
-                    terminal.set_agent_session_ref_for_session_start(
+                session_transcript,
+            } => {
+                let track_subagents = agent_label == crate::detect::agent_label(Agent::Claude);
+                self.update_terminal_state(pane_id, |terminal| {
+                    let mutation = terminal.set_agent_session_ref_for_session_start(
                         source,
                         agent_label,
                         session_ref,
                         seq,
                         session_start_source,
-                    )
+                    );
+                    // Accepted Claude reports (re)point subagent tracking at the
+                    // reported transcript; rejected/stale reports change nothing.
+                    if track_subagents {
+                        if let Some(mutation) = &mutation {
+                            terminal.note_agent_session_transcript(
+                                session_transcript,
+                                mutation.session_ref_changed,
+                            );
+                        }
+                    }
+                    mutation
                 })
                 .into_iter()
-                .collect(),
+                .collect()
+            }
+            AppEvent::SubagentsScanned {
+                terminal_id,
+                transcript,
+                records,
+                parents,
+            } => {
+                self.apply_subagent_scan(&terminal_id, &transcript, &records, &parents);
+                Vec::new()
+            }
             AppEvent::HookMetadataReported {
                 pane_id,
                 source,
@@ -1711,7 +1734,20 @@ impl AppState {
             let previous_agent_name = terminal.agent_name.clone();
             let had_completion = terminal.last_agent_completion_seq.is_some() || !previous_seen;
             let resume_revision = terminal.reported_resume_revision();
+            let subagents_revision_before = terminal.subagents_revision();
             let mutation = update(terminal);
+            // Subagents die with their agent: release/exit clears them (and stops
+            // tracking) at once; a session change or lost live process clears the list.
+            if let Some(mutation) = &mutation {
+                if mutation.agent_released {
+                    terminal.clear_subagent_tracking();
+                } else if mutation.session_ref_changed || !terminal.subagent_parent_live() {
+                    terminal.clear_subagents();
+                }
+            }
+            if terminal.subagents_revision() != subagents_revision_before {
+                self.subagent_changed_terminals.push(terminal_id.clone());
+            }
             terminal.reconcile_reported_resume();
             // Resume-only changes return no mutation but must still be saved.
             if terminal.reported_resume_revision() != resume_revision {
@@ -1790,6 +1826,56 @@ impl AppState {
             suppress_completion,
         };
         Some(update)
+    }
+
+    /// Apply a background subagent scan to its terminal. Returns whether the
+    /// subagent list changed. Stale scans (session moved on) are dropped.
+    pub(crate) fn apply_subagent_scan(
+        &mut self,
+        terminal_id: &crate::terminal::TerminalId,
+        transcript: &std::path::Path,
+        records: &[crate::subagents::SubagentRecord],
+        parents: &std::collections::HashMap<String, Option<String>>,
+    ) -> bool {
+        let Some(terminal) = self.terminals.get_mut(terminal_id) else {
+            return false;
+        };
+        let changed = terminal.apply_subagent_scan(transcript, records, parents, Instant::now());
+        if changed {
+            self.subagent_changed_terminals.push(terminal_id.clone());
+        }
+        changed
+    }
+
+    /// Stop tracking subagents for a terminal right away (no linger).
+    pub(crate) fn clear_subagent_tracking_for(
+        &mut self,
+        terminal_id: &crate::terminal::TerminalId,
+    ) {
+        if let Some(terminal) = self.terminals.get_mut(terminal_id) {
+            if terminal.clear_subagent_tracking() {
+                self.subagent_changed_terminals.push(terminal_id.clone());
+            }
+        }
+    }
+
+    /// Drop expired lingering `Done` subagents everywhere. Returns whether any changed.
+    pub(crate) fn prune_subagents_at(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+        for (terminal_id, terminal) in &mut self.terminals {
+            if terminal.prune_subagents(now) {
+                self.subagent_changed_terminals.push(terminal_id.clone());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn next_subagent_prune_deadline(&self) -> Option<Instant> {
+        self.terminals
+            .values()
+            .filter_map(crate::terminal::TerminalState::next_subagent_prune_deadline)
+            .min()
     }
 
     pub(crate) fn next_managed_agent_deadline(&self) -> Option<Instant> {
@@ -3000,6 +3086,350 @@ mod tests {
         assert_eq!(state.workspaces.len(), 1);
         state.assert_invariants_for_test();
     }
+
+    fn claude_session_report(pane_id: PaneId, sid: &str, transcript: &str) -> AppEvent {
+        AppEvent::AgentSessionReported {
+            pane_id,
+            source: "herdr:claude".into(),
+            agent_label: "claude".into(),
+            seq: Some(1),
+            session_ref: crate::agent_resume::AgentSessionRef::id(sid),
+            session_start_source: Some("startup".into()),
+            session_transcript: Some(std::path::PathBuf::from(transcript)),
+        }
+    }
+
+    fn subagent_record(id: &str, finished: bool) -> crate::subagents::SubagentRecord {
+        crate::subagents::SubagentRecord {
+            id: id.into(),
+            kind: "explore".into(),
+            description: "look around".into(),
+            tool_use_id: None,
+            spawn_depth: 1,
+            background: false,
+            finished,
+            created_at: None,
+        }
+    }
+
+    /// State with one pane running a live Claude session at `/t/<sid>.jsonl`.
+    fn state_with_live_claude(sid: &str) -> (AppState, PaneId, crate::terminal::TerminalId) {
+        let mut state = app_with_workspaces(&["test"]);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0]
+            .panes
+            .get(&pane_id)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        state.handle_app_event(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: Agent::Claude,
+            observed_at: std::time::Instant::now(),
+        });
+        state.handle_app_event(claude_session_report(
+            pane_id,
+            sid,
+            &format!("/t/{sid}.jsonl"),
+        ));
+        (state, pane_id, terminal_id)
+    }
+
+    fn scan_subagents(
+        state: &mut AppState,
+        terminal_id: &crate::terminal::TerminalId,
+        transcript: &str,
+        records: Vec<crate::subagents::SubagentRecord>,
+    ) -> bool {
+        state.apply_subagent_scan(
+            terminal_id,
+            std::path::Path::new(transcript),
+            &records,
+            &std::collections::HashMap::new(),
+        )
+    }
+
+    #[test]
+    fn claude_session_report_stores_transcript_and_scan_populates_list() {
+        let (mut state, _pane, terminal_id) = state_with_live_claude("s1");
+        let terminal = &state.terminals[&terminal_id];
+        assert_eq!(
+            terminal.agent_session_transcript(),
+            Some(std::path::Path::new("/t/s1.jsonl"))
+        );
+        assert!(terminal.subagents().is_empty());
+
+        let changed = scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        );
+        assert!(changed);
+        assert_eq!(state.terminals[&terminal_id].subagents().len(), 1);
+        assert_eq!(state.subagent_changed_terminals, vec![terminal_id.clone()]);
+        // Identical rescan is not a change.
+        state.subagent_changed_terminals.clear();
+        assert!(!scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        ));
+        assert!(state.subagent_changed_terminals.is_empty());
+    }
+
+    #[test]
+    fn non_claude_session_report_does_not_track_subagents() {
+        let mut state = app_with_workspaces(&["test"]);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.terminal_id_for_pane(0, pane_id).unwrap();
+        state.handle_app_event(AppEvent::AgentSessionReported {
+            pane_id,
+            source: "herdr:codex".into(),
+            agent_label: "codex".into(),
+            seq: Some(1),
+            session_ref: crate::agent_resume::AgentSessionRef::id("c1"),
+            session_start_source: Some("startup".into()),
+            session_transcript: Some("/t/c1.jsonl".into()),
+        });
+        assert!(state.terminals[&terminal_id]
+            .agent_session_transcript()
+            .is_none());
+    }
+
+    #[test]
+    fn session_change_empties_subagents_immediately() {
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        );
+        state.subagent_changed_terminals.clear();
+
+        let mut event = claude_session_report(pane_id, "s2", "/t/s2.jsonl");
+        if let AppEvent::AgentSessionReported {
+            seq,
+            session_start_source,
+            ..
+        } = &mut event
+        {
+            *seq = Some(2);
+            *session_start_source = Some("clear".into());
+        }
+        state.handle_app_event(event);
+
+        let terminal = &state.terminals[&terminal_id];
+        assert!(terminal.subagents().is_empty());
+        assert_eq!(
+            terminal.agent_session_transcript(),
+            Some(std::path::Path::new("/t/s2.jsonl"))
+        );
+        assert_eq!(state.subagent_changed_terminals, vec![terminal_id]);
+    }
+
+    #[test]
+    fn agent_exit_empties_subagents_and_stops_tracking() {
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        );
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Claude),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: true,
+            observed_at: std::time::Instant::now(),
+        });
+        let terminal = &state.terminals[&terminal_id];
+        assert!(terminal.subagents().is_empty());
+        assert!(terminal.agent_session_transcript().is_none());
+    }
+
+    #[test]
+    fn stale_scan_for_old_session_is_ignored() {
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        let mut event = claude_session_report(pane_id, "s2", "/t/s2.jsonl");
+        if let AppEvent::AgentSessionReported {
+            seq,
+            session_start_source,
+            ..
+        } = &mut event
+        {
+            *seq = Some(2);
+            *session_start_source = Some("clear".into());
+        }
+        state.handle_app_event(event);
+        state.subagent_changed_terminals.clear();
+
+        let changed = scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("old", false)],
+        );
+        assert!(!changed);
+        assert!(state.terminals[&terminal_id].subagents().is_empty());
+        assert!(state.subagent_changed_terminals.is_empty());
+    }
+
+    #[test]
+    fn scan_without_live_agent_leaves_list_empty() {
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Claude),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: true,
+            observed_at: std::time::Instant::now(),
+        });
+        // Even if a session is re-reported without a live process, nothing shows.
+        let mut event = claude_session_report(pane_id, "s1", "/t/s1.jsonl");
+        if let AppEvent::AgentSessionReported { seq, .. } = &mut event {
+            *seq = Some(3);
+        }
+        state.handle_app_event(event);
+        let changed = scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        );
+        assert!(!changed);
+        assert!(state.terminals[&terminal_id].subagents().is_empty());
+    }
+
+    #[test]
+    fn linger_pruning_removes_done_entries_and_queues_change() {
+        let (mut state, _pane, terminal_id) = state_with_live_claude("s1");
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false), subagent_record("b", false)],
+        );
+        // "a" finishes: running -> done, lingers.
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", true), subagent_record("b", false)],
+        );
+        state.subagent_changed_terminals.clear();
+        let deadline = state
+            .next_subagent_prune_deadline()
+            .expect("done entry schedules a prune");
+
+        assert!(!state.prune_subagents_at(deadline - std::time::Duration::from_millis(1)));
+        assert_eq!(state.terminals[&terminal_id].subagents().len(), 2);
+        assert!(state.subagent_changed_terminals.is_empty());
+
+        assert!(state.prune_subagents_at(deadline));
+        let remaining = state.terminals[&terminal_id].subagents();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "b");
+        assert_eq!(state.subagent_changed_terminals, vec![terminal_id]);
+        assert!(state.next_subagent_prune_deadline().is_none());
+    }
+
+    #[test]
+    fn history_keeps_finished_and_interrupted_but_current_hides_them() {
+        let (mut state, _pane, terminal_id) = state_with_live_claude("s1");
+        let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        let mut old = subagent_record("old", false);
+        old.created_at = Some(earlier);
+        let mut fin = subagent_record("fin", true);
+        fin.created_at = Some(earlier);
+        state.subagent_changed_terminals.clear();
+        let changed = scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![old, fin, subagent_record("live", false)],
+        );
+        // History changed even though only "live" shows in the current list.
+        assert!(changed);
+        assert_eq!(state.subagent_changed_terminals, vec![terminal_id.clone()]);
+        let terminal = &state.terminals[&terminal_id];
+        let current: Vec<_> = terminal.subagents().iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(current, vec!["live"]);
+        let history: Vec<_> = terminal
+            .subagent_history()
+            .iter()
+            .map(|s| (s.id.as_str(), s.state.clone()))
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                ("live", crate::subagents::SubagentState::Running),
+                ("fin", crate::subagents::SubagentState::Finished),
+                ("old", crate::subagents::SubagentState::Interrupted),
+            ]
+        );
+    }
+
+    #[test]
+    fn history_change_alone_queues_change_and_survives_linger_prune() {
+        let (mut state, _pane, terminal_id) = state_with_live_claude("s1");
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", false)],
+        );
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", true)],
+        );
+        let deadline = state.next_subagent_prune_deadline().expect("deadline");
+        assert!(state.prune_subagents_at(deadline));
+        let terminal = &state.terminals[&terminal_id];
+        assert!(terminal.subagents().is_empty());
+        assert_eq!(terminal.subagent_history().len(), 1);
+        assert_eq!(
+            terminal.subagent_history()[0].state,
+            crate::subagents::SubagentState::Finished
+        );
+
+        // A history-only change (new finished record) still reports a change.
+        state.subagent_changed_terminals.clear();
+        let changed = scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", true), subagent_record("b", true)],
+        );
+        assert!(changed);
+        assert!(state.terminals[&terminal_id].subagents().is_empty());
+        assert_eq!(state.subagent_changed_terminals, vec![terminal_id]);
+    }
+
+    #[test]
+    fn agent_exit_clears_history_too() {
+        let (mut state, _pane, terminal_id) = state_with_live_claude("s1");
+        scan_subagents(
+            &mut state,
+            &terminal_id,
+            "/t/s1.jsonl",
+            vec![subagent_record("a", true)],
+        );
+        assert_eq!(state.terminals[&terminal_id].subagent_history().len(), 1);
+        state.clear_subagent_tracking_for(&terminal_id);
+        assert!(state.terminals[&terminal_id].subagent_history().is_empty());
+        assert!(state.terminals[&terminal_id].subagents().is_empty());
+    }
+
     #[test]
     fn state_changed_updates_pane() {
         let mut state = app_with_workspaces(&["test"]);
@@ -3315,6 +3745,7 @@ mod tests {
                 seq: Some(seq),
                 session_ref: crate::agent_resume::AgentSessionRef::id(session),
                 session_start_source: Some(reason.into()),
+                session_transcript: None,
             });
             if seq == 1 {
                 for state in [AgentState::Working, AgentState::Idle] {

@@ -104,7 +104,7 @@ Raw socket method names use dot notation:
 | Pull requests | `pull_request.list` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.subagents`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
@@ -208,6 +208,12 @@ can make the next decision without private layout state.
 `pane.process_info` returns the pane's shell pid, foreground process group id
 when available, and foreground processes with pid, name, argv/cmdline, and cwd
 when the platform exposes them.
+
+`pane.subagents` returns a pane's subagents as `{"type":"pane_subagents","pane_id","scope","subagents":[...]}`. `scope` is `current` (default; the same list as `PaneInfo.subagents`) or `history` (every subagent of the pane's watched session, including finished ones that already aged out and, after a session resume, `interrupted` ones; history is never aged out and is cleared when the agent exits or the session changes). Entries use the `PaneInfo.subagents` shape. `pane_id` may be omitted to target the current pane.
+
+```json
+{"id":"req_subagents","method":"pane.subagents","params":{"pane_id":"w1:p1","scope":"history"}}
+```
 
 `layout.export` returns a portable tab layout tree. Omit `tab_id` and `pane_id`
 to export the active tab, pass `tab_id` to export that tab, or pass `pane_id` to
@@ -735,6 +741,25 @@ Both methods accept an optional `resume_argv` array with the command that resume
 
 If no native session reference is stored, the field is omitted.
 
+`PaneInfo` also exposes a read-only `subagents` list describing subagents the pane's agent is currently running, when Herdr can see them. The list is omitted when empty. Subagent tracking is display-only: it never affects `agent_status`, waits, notifications, or rollups. It is currently populated for Claude Code only. A subagent that finishes stays listed with `state: "done"` for about 30 seconds before it is removed.
+
+```json
+{
+  "subagents": [
+    {
+      "id": "a1b2c3",
+      "kind": "explore",
+      "description": "Find the config loader",
+      "parent_id": null,
+      "background": false,
+      "state": "running"
+    }
+  ]
+}
+```
+
+`parent_id` is the `id` of the parent subagent, or `null` for a direct child of the pane's agent. `state` is `running` or `done`; in the `history` scope it can also be `interrupted` (an unfinished subagent from an earlier run of a resumed session).
+
 `pane.get`, `pane.list`, `agent.get`, and `agent.list` also expose `foreground_cwd` when Herdr can resolve the cwd of the process currently controlling the pane PTY. The existing `cwd` field remains the pane/workspace cwd used for labels, follow-cwd behavior, and restored session state.
 
 `PaneInfo` and `AgentInfo` expose optional `terminal_title` and `terminal_title_stripped` fields. `terminal_title` is the latest OSC 0/2 title after safety normalization. `terminal_title_stripped` removes one recognized leading activity or spinner glyph and following whitespace. These server-owned values are ephemeral across a cold restart and are independent of the metadata `title` and semantic agent state.
@@ -840,10 +865,11 @@ Tab event subscriptions include `tab.created`, `tab.closed`, `tab.focused`,
 that workspace.
 Pane event subscriptions include `pane.created`, `pane.updated`, `pane.closed`, `pane.focused`,
 `pane.moved`, `pane.exited`, `pane.agent_detected`,
-`pane.output_matched`, `pane.agent_status_changed`, and `pane.scroll_changed`.
+`pane.output_matched`, `pane.agent_status_changed`, `pane.subagents_changed`, and `pane.scroll_changed`.
 `pane.focused` also reports manual pane selection changes from any client attached
 to this server. It does not move other clients' views, and its payload does not
 identify the client. Selecting an already-selected pane does not emit it again.
+`pane.subagents_changed` emits `pane_id`, `workspace_id`, and the full current `subagents` list (possibly empty) whenever a pane's tracked subagents change, including when a finished subagent ages out. It also fires when only the session history (see `pane.subagents`) changes; the payload still carries the current list.
 Terminal-title changes can emit `pane.updated`, but spinner-only raw-title changes do not emit it when `terminal_title_stripped` is unchanged.
 `pane.scroll_changed` is scoped to one `pane_id` and emits `pane_id`,
 `workspace_id`, and the current `scroll` metrics whenever Herdr observes a
