@@ -28,6 +28,10 @@ const SUBAGENT_SCOPES: &[Choice<PaneSubagentsScope>] = &[
     Choice::new("current", PaneSubagentsScope::Current),
     Choice::new("history", PaneSubagentsScope::History),
 ];
+const BACKGROUND_SHELL_SCOPES: &[Choice<PaneBackgroundShellsScope>] = &[
+    Choice::new("current", PaneBackgroundShellsScope::Current),
+    Choice::new("history", PaneBackgroundShellsScope::History),
+];
 const STATES: &[Choice<PaneAgentState>] = &[
     Choice::new("idle", PaneAgentState::Idle),
     Choice::new("working", PaneAgentState::Working),
@@ -160,6 +164,14 @@ pub(crate) fn subagents_scope() -> Input<PaneSubagentsScope> {
         Ok(())
     })
     .configure(|arg| choices(arg, SUBAGENT_SCOPES))
+}
+
+pub(crate) fn background_shells_scope() -> Input<PaneBackgroundShellsScope> {
+    Input::value("scope", "current|history", |slot, value| {
+        *slot = parse_choice(BACKGROUND_SHELL_SCOPES, "--scope", value)?;
+        Ok(())
+    })
+    .configure(|arg| choices(arg, BACKGROUND_SHELL_SCOPES))
 }
 
 pub(crate) fn environment() -> Input<HashMap<String, String>> {
@@ -558,6 +570,24 @@ pub(super) const LEAVES: &[Leaf] = &[
                 false,
             )?;
             Ok(Method::PaneSubagents(params))
+        },
+    },
+    Leaf {
+        name: "background-shells",
+        about: "Show pane background shells",
+        id: "cli:pane:background_shells",
+        output: Output::Json,
+        arguments: PaneBackgroundShellsProjection::arguments,
+        method: |matches| {
+            let mut params = PaneBackgroundShellsProjection::from_matches(matches)?;
+            params.pane_id = super::caller_target(
+                matches,
+                params.pane_id,
+                crate::cli::target::caller_pane_id().as_deref(),
+                false,
+                false,
+            )?;
+            Ok(Method::PaneBackgroundShells(params))
         },
     },
     leaf!(

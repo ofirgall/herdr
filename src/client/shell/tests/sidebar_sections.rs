@@ -12,6 +12,8 @@ fn snapshot_with_agent() -> ClientShellSnapshot {
     snapshot.agents.push(ClientShellAgent {
         subagents: Default::default(),
         subagent_history: Default::default(),
+        background_shells: Default::default(),
+        background_shell_history: Default::default(),
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

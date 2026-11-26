@@ -1229,6 +1229,13 @@ pub struct ClientShellAgent {
     /// Session history of subagents, including interrupted ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subagent_history: Vec<crate::api::schema::PaneSubagentInfo>,
+    /// Current Claude background shells of the agent (includes lingering
+    /// finished ones).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background_shells: Vec<crate::api::schema::PaneBackgroundShellInfo>,
+    /// Session history of background shells, including interrupted ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background_shell_history: Vec<crate::api::schema::PaneBackgroundShellInfo>,
     pub focused: bool,
 }
 
@@ -3983,6 +3990,8 @@ mod tests {
         let agent = ClientShellAgent {
             subagents: Default::default(),
             subagent_history: Default::default(),
+            background_shells: Default::default(),
+            background_shell_history: Default::default(),
             pane_id: "w1:p1".into(),
             workspace_id: "w1".into(),
             tab_id: "w1:t1".into(),
@@ -4028,6 +4037,8 @@ mod tests {
             token_links: Vec::new(),
             subagents: Vec::new(),
             subagent_history: Vec::new(),
+            background_shells: Vec::new(),
+            background_shell_history: Vec::new(),
             focused: false,
         };
         // Empty lists are omitted, and a payload without them (an older peer) decodes.
@@ -4049,6 +4060,55 @@ mod tests {
         let decoded: ClientShellAgent = serde_json::from_value(with.clone()).unwrap();
         assert_eq!(decoded.subagents.len(), 1);
         assert_eq!(decoded.subagent_history[0].parent_id.as_deref(), Some("a"));
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), with);
+    }
+
+    #[test]
+    fn client_shell_background_shells_are_optional_in_json() {
+        let agent = ClientShellAgent {
+            pane_id: "w1:p1".into(),
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            name: None,
+            display_agent: None,
+            agent: None,
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: crate::api::schema::AgentStatus::Idle,
+            state_change_seq: 0,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            token_links: Vec::new(),
+            subagents: Vec::new(),
+            subagent_history: Vec::new(),
+            background_shells: Vec::new(),
+            background_shell_history: Vec::new(),
+            focused: false,
+        };
+        // Empty lists are omitted; an older peer's payload still decodes.
+        let value = serde_json::to_value(&agent).unwrap();
+        assert!(value.get("background_shells").is_none());
+        assert!(value.get("background_shell_history").is_none());
+        let decoded: ClientShellAgent = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            decoded.background_shells.is_empty() && decoded.background_shell_history.is_empty()
+        );
+
+        let mut with = value;
+        with["background_shells"] = serde_json::json!([{
+            "id": "b1", "command": "sleep 9", "description": "nap", "state": "running",
+            "started_at_ms": 10,
+        }]);
+        with["background_shell_history"] = serde_json::json!([{
+            "id": "b2", "command": "false", "description": "x", "state": "interrupted",
+        }]);
+        let decoded: ClientShellAgent = serde_json::from_value(with.clone()).unwrap();
+        assert_eq!(decoded.background_shells.len(), 1);
+        assert_eq!(
+            decoded.background_shell_history[0].state,
+            crate::api::schema::BackgroundShellStatus::Interrupted
+        );
         assert_eq!(serde_json::to_value(&decoded).unwrap(), with);
     }
 }

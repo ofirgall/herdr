@@ -7,6 +7,7 @@
 
 mod attribution;
 mod claude;
+pub mod shells;
 pub mod watcher;
 
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 pub use attribution::attribute_parents;
 pub use claude::ClaudeSubagentSource;
+// ShellState/ShellStatus are public model types consumed by the API/wire layers.
+#[allow(unused_imports)]
+pub use shells::{
+    prune_done_shells, reconcile_shell_history, reconcile_shells, BackgroundShell, ShellLog,
+    ShellRecord, ShellState, ShellStatus,
+};
 pub use watcher::SubagentWatcher;
 
 /// How long a finished subagent stays listed after Herdr observed it finish.

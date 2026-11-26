@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use super::App;
 use crate::events::AppEvent;
-use crate::subagents::watcher::{ScanResult, WatcherConfig};
+use crate::subagents::watcher::{WatcherConfig, WatcherOutput};
 use crate::subagents::SubagentWatcher;
 
 impl App {
@@ -86,15 +86,21 @@ impl App {
     fn ensure_subagent_watcher(&mut self) -> bool {
         if self.subagent_watcher.is_none() {
             let event_tx = self.event_tx.clone();
-            let sink = move |scan: ScanResult| {
-                event_tx
-                    .blocking_send(AppEvent::SubagentsScanned {
+            let sink = move |output: WatcherOutput| {
+                let event = match output {
+                    WatcherOutput::Subagents(scan) => AppEvent::SubagentsScanned {
                         terminal_id: scan.terminal_id,
                         transcript: scan.transcript,
                         records: scan.records,
                         parents: scan.parents,
-                    })
-                    .is_ok()
+                    },
+                    WatcherOutput::Shells(scan) => AppEvent::BackgroundShellsScanned {
+                        terminal_id: scan.terminal_id,
+                        transcript: scan.transcript,
+                        shells: scan.shells,
+                    },
+                };
+                event_tx.blocking_send(event).is_ok()
             };
             match SubagentWatcher::spawn(sink, WatcherConfig::default()) {
                 Ok(watcher) => self.subagent_watcher = Some(watcher),
@@ -106,35 +112,21 @@ impl App {
         self.subagent_watcher.is_some()
     }
 
-    /// Single flush point for subagent-list changes. Every mutation of a
-    /// terminal's list (scan applied, cleared, pruned) queues the terminal in
-    /// `AppState::subagent_changed_terminals`; this drains the queue.
+    /// Single flush point for subagent-list and background-shell-list changes.
+    /// Every mutation (scan applied, cleared, pruned) queues the terminal in
+    /// `AppState::subagent_changed_terminals` (subagent lists) or
+    /// `AppState::background_shell_changed_terminals` (shell lists); this
+    /// drains both queues and emits the matching event per attached pane.
     pub(crate) fn flush_subagent_changes(&mut self) {
-        if self.state.subagent_changed_terminals.is_empty() {
+        if self.state.subagent_changed_terminals.is_empty()
+            && self.state.background_shell_changed_terminals.is_empty()
+        {
             return;
         }
-        let changed = std::mem::take(&mut self.state.subagent_changed_terminals);
-        for terminal_id in changed {
+        let subagent_changed = std::mem::take(&mut self.state.subagent_changed_terminals);
+        for terminal_id in subagent_changed {
             tracing::debug!(terminal = %terminal_id, "subagents changed");
-            let panes: Vec<(usize, crate::layout::PaneId)> = self
-                .state
-                .workspaces
-                .iter()
-                .enumerate()
-                .flat_map(|(ws_idx, ws)| {
-                    let terminal_id = &terminal_id;
-                    ws.tabs.iter().flat_map(move |tab| {
-                        tab.layout
-                            .pane_ids()
-                            .into_iter()
-                            .filter_map(move |pane_id| {
-                                (&tab.panes.get(&pane_id)?.attached_terminal_id == terminal_id)
-                                    .then_some((ws_idx, pane_id))
-                            })
-                    })
-                })
-                .collect();
-            for (ws_idx, pane_id) in panes {
+            for (ws_idx, pane_id) in self.panes_attached_to_terminal(&terminal_id) {
                 let Some(pane) = self.pane_info(ws_idx, pane_id) else {
                     continue;
                 };
@@ -148,6 +140,45 @@ impl App {
                 });
             }
         }
+        let shells_changed = std::mem::take(&mut self.state.background_shell_changed_terminals);
+        for terminal_id in shells_changed {
+            tracing::debug!(terminal = %terminal_id, "background shells changed");
+            for (ws_idx, pane_id) in self.panes_attached_to_terminal(&terminal_id) {
+                let Some(pane) = self.pane_info(ws_idx, pane_id) else {
+                    continue;
+                };
+                self.emit_event(crate::api::schema::EventEnvelope {
+                    event: crate::api::schema::EventKind::PaneBackgroundShellsChanged,
+                    data: crate::api::schema::EventData::PaneBackgroundShellsChanged {
+                        pane_id: pane.pane_id,
+                        workspace_id: pane.workspace_id,
+                        background_shells: pane.background_shells,
+                    },
+                });
+            }
+        }
+    }
+
+    fn panes_attached_to_terminal(
+        &self,
+        terminal_id: &crate::terminal::TerminalId,
+    ) -> Vec<(usize, crate::layout::PaneId)> {
+        self.state
+            .workspaces
+            .iter()
+            .enumerate()
+            .flat_map(|(ws_idx, ws)| {
+                ws.tabs.iter().flat_map(move |tab| {
+                    tab.layout
+                        .pane_ids()
+                        .into_iter()
+                        .filter_map(move |pane_id| {
+                            (&tab.panes.get(&pane_id)?.attached_terminal_id == terminal_id)
+                                .then_some((ws_idx, pane_id))
+                        })
+                })
+            })
+            .collect()
     }
 }
 
@@ -367,6 +398,113 @@ mod tests {
                  "parent_id": "root_child", "background": true, "state": "done"},
             ])
         );
+    }
+
+    fn sample_shell(
+        id: &str,
+        state: crate::subagents::ShellState,
+    ) -> crate::subagents::BackgroundShell {
+        crate::subagents::BackgroundShell {
+            id: id.into(),
+            command: "sleep 9".into(),
+            description: "nap".into(),
+            state,
+            started_at: None,
+            ended_at: None,
+            done_at: None,
+        }
+    }
+
+    #[test]
+    fn pane_info_exposes_background_shells_and_omits_empty_list() {
+        let (mut app, pane_id, terminal_id) = test_app();
+        let empty = app.pane_info(0, pane_id).expect("pane info");
+        assert!(empty.background_shells.is_empty());
+        let json = serde_json::to_value(&empty).expect("json");
+        assert!(json.get("background_shells").is_none());
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .set_background_shells(
+                vec![sample_shell("b1", crate::subagents::ShellState::Running)],
+                Vec::new(),
+            );
+        let info = app.pane_info(0, pane_id).expect("pane info");
+        let json = serde_json::to_value(&info).expect("json");
+        assert_eq!(
+            json["background_shells"],
+            serde_json::json!([
+                {"id": "b1", "command": "sleep 9", "description": "nap", "state": "running"},
+            ])
+        );
+    }
+
+    #[test]
+    fn shell_change_emits_only_background_shells_changed_and_vice_versa() {
+        use crate::api::schema::EventData;
+        let (mut app, pane_id, terminal_id) = test_app();
+        let public_pane = app.public_pane_id(0, pane_id).expect("public id");
+
+        // Shell-only change.
+        let before = app.event_hub.current_sequence();
+        let terminal = app.state.terminals.get_mut(&terminal_id).expect("terminal");
+        assert!(terminal.set_background_shells(
+            vec![sample_shell("b1", crate::subagents::ShellState::Running)],
+            Vec::new(),
+        ));
+        assert_eq!(terminal.subagents_revision(), 0);
+        app.state
+            .background_shell_changed_terminals
+            .push(terminal_id.clone());
+        app.flush_subagent_changes();
+        let events = app.event_hub.events_after(before);
+        assert!(events
+            .iter()
+            .all(|(_, e)| !matches!(e.data, EventData::PaneSubagentsChanged { .. })));
+        let shells: Vec<_> = events
+            .iter()
+            .filter_map(|(_, e)| match &e.data {
+                EventData::PaneBackgroundShellsChanged {
+                    pane_id,
+                    background_shells,
+                    ..
+                } => Some((e.event, pane_id.clone(), background_shells.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shells.len(), 1);
+        assert_eq!(
+            shells[0].0,
+            crate::api::schema::EventKind::PaneBackgroundShellsChanged
+        );
+        assert_eq!(shells[0].1, public_pane);
+        assert_eq!(shells[0].2.len(), 1);
+        assert_eq!(
+            shells[0].2[0].state,
+            crate::api::schema::BackgroundShellStatus::Running
+        );
+
+        // Subagent-only change.
+        let before = app.event_hub.current_sequence();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .set_subagents(vec![sample_subagent(
+                "a1",
+                crate::subagents::SubagentState::Running,
+            )]);
+        app.state.subagent_changed_terminals.push(terminal_id);
+        app.flush_subagent_changes();
+        let events = app.event_hub.events_after(before);
+        assert!(events
+            .iter()
+            .any(|(_, e)| matches!(e.data, EventData::PaneSubagentsChanged { .. })));
+        assert!(events
+            .iter()
+            .all(|(_, e)| !matches!(e.data, EventData::PaneBackgroundShellsChanged { .. })));
     }
 
     #[test]

@@ -160,3 +160,31 @@ The JSON API SHALL provide a pane subagents request with a scope of `current` (d
 #### Scenario: Default scope
 - **WHEN** a client requests a pane's subagents without a scope
 - **THEN** the response SHALL equal the pane info's `subagents` field
+
+### Requirement: Background shells tracked from the session transcript
+
+For a pane whose Claude Code session has a reported transcript path, Herdr SHALL track the session's background shells (shell commands started to run in the background) from the transcript, with id, command, description, state (`running`, `done`, `failed`, `killed`, or, in history, `interrupted`), and start and end times. Tracking SHALL read only new transcript content after the first read, SHALL NOT perform filesystem I/O during view computation or rendering, and SHALL follow the same liveness, session-run, linger, and history rules as subagents.
+
+#### Scenario: Background shell starts
+- **WHEN** Claude Code starts a background shell in a tracked session
+- **THEN** the pane's current background shell list SHALL contain it as `running`
+
+#### Scenario: Background shell ends
+- **WHEN** the transcript records that a running background shell completed or failed
+- **THEN** its state SHALL become `done` or `failed`, it SHALL linger in the current list for about 30 seconds, and it SHALL remain in the history
+
+#### Scenario: Resume leftover shell
+- **WHEN** a resumed session's transcript holds a background shell that never ended in an earlier run
+- **THEN** it SHALL appear in the history as `interrupted` and SHALL NOT appear in the current list
+
+#### Scenario: Parent exits
+- **WHEN** the pane's agent exits or its session changes
+- **THEN** both background shell lists SHALL become empty right away
+
+### Requirement: Background shells exposed through the JSON API
+
+Pane information SHALL include the pane's current background shells. A pane background shells request SHALL return the `current` (default) or `history` list. Herdr SHALL emit a background shells change event when either list changes.
+
+#### Scenario: Request background shell history
+- **WHEN** a client requests a pane's background shells with scope `history`
+- **THEN** the response SHALL include every recorded background shell of the session with its state

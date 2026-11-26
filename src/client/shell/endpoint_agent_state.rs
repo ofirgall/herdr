@@ -211,6 +211,8 @@ mod tests {
         ClientShellAgent {
             subagents: Default::default(),
             subagent_history: Default::default(),
+            background_shells: Default::default(),
+            background_shell_history: Default::default(),
             pane_id: "agent-pane".into(),
             workspace_id: "workspace".into(),
             tab_id: "tab".into(),

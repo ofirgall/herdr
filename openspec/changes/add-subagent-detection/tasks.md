@@ -63,3 +63,11 @@
 - [x] 10.3 Add `subagent` / `subagent_focused` theme tokens defaulting to `tab` / `tab_focused`; verify theme parsing and render style tests, update configuration docs
 - [x] 10.4 Add the `toggle_subagents` keybinding (bound by default to a free prefix key) and context-menu items; verify keybind parsing/default tests and toggle tests, update keybinding docs
 - [x] 10.5 Live client check of 9.1 and 10.x and full test/clippy comparison
+
+## 11. Background shells
+
+- [x] 11.1 Incremental transcript parser for background shells (start from `backgroundTaskId` tool results + `run_in_background` Bash tool uses, end from `<task-notification>` status; prefilter, partial lines, rewrite reset) and the pure current/history reconcile per D10; verify unit tests with fixture lines (start, completed, failed, killed, unknown status, subagent notification ignored, split line across reads, resume leftover interrupted, linger, parent dead)
+- [x] 11.2 Watch the transcript in the subagent watcher thread (ref-counted dir watch, path-filtered, debounced incremental tail) and deliver `AppEvent::BackgroundShellsScanned`; store current/history lists on `TerminalState` (cleared with subagents) with change detection; verify watcher temp-dir test (append start then end lines) and app tests
+- [x] 11.3 API: `PaneInfo.background_shells`, `pane.background_shells` (scope), CLI `herdr pane background-shells`, event `pane.background_shells_changed`; schema + `docs/next` socket API/CLI docs; verify API tests for both scopes and the event
+- [x] 11.4 Wire `ClientShellAgent.background_shells` / `background_shell_history` (optional serde) and client-shell projection, refreshing the snapshot on change; verify wire round-trip and projection tests
+- [x] 11.5 Spaces sidebar `shells` group (header + rows, icons, timing, fold, count, collapse/history/keybinding/context menu, click focuses parent); verify render/click tests and a live client check with a real background shell

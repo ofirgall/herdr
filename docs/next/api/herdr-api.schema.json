@@ -79,6 +79,24 @@
           ],
           "type": "string"
         },
+        "BackgroundShellStatus": {
+          "oneOf": [
+            {
+              "enum": [
+                "running",
+                "done",
+                "failed",
+                "killed"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "History scope only: unfinished shell of an earlier run of a resumed\nsession.",
+              "type": "string"
+            }
+          ]
+        },
         "EventData": {
           "oneOf": [
             {
@@ -737,6 +755,33 @@
             },
             {
               "properties": {
+                "background_shells": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/PaneBackgroundShellInfo"
+                  },
+                  "type": "array"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane_background_shells_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "background_shells"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "layout": {
                   "$ref": "#/schemas/event/$defs/PaneLayoutSnapshot"
                 },
@@ -801,10 +846,52 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "pane_subagents_changed",
+            "pane_background_shells_changed",
             "layout_updated",
             "pull_requests_updated"
           ],
           "type": "string"
+        },
+        "PaneBackgroundShellInfo": {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "ended_at_ms": {
+              "description": "Unix milliseconds when the shell ended. Omitted while running.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "started_at_ms": {
+              "description": "Unix milliseconds when the shell started, when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/event/$defs/BackgroundShellStatus"
+            }
+          },
+          "required": [
+            "id",
+            "command",
+            "description",
+            "state"
+          ],
+          "type": "object"
         },
         "PaneInfo": {
           "properties": {
@@ -826,6 +913,13 @@
             },
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
+            },
+            "background_shells": {
+              "description": "Claude background shells currently tracked for this pane's agent.\nDisplay-only; omitted when empty.",
+              "items": {
+                "$ref": "#/schemas/event/$defs/PaneBackgroundShellInfo"
+              },
+              "type": "array"
             },
             "cwd": {
               "type": [
@@ -2791,6 +2885,28 @@
           ],
           "type": "string"
         },
+        "PaneBackgroundShellsParams": {
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "$ref": "#/schemas/request/$defs/PaneBackgroundShellsScope",
+              "default": "current"
+            }
+          },
+          "type": "object"
+        },
+        "PaneBackgroundShellsScope": {
+          "enum": [
+            "current",
+            "history"
+          ],
+          "type": "string"
+        },
         "PaneClearAgentAuthorityParams": {
           "properties": {
             "pane_id": {
@@ -4655,6 +4771,18 @@
             },
             {
               "properties": {
+                "type": {
+                  "const": "pane.background_shells_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "pane_id": {
                   "type": "string"
                 },
@@ -5990,6 +6118,22 @@
         {
           "properties": {
             "method": {
+              "const": "pane.background_shells",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneBackgroundShellsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "layout.export",
               "type": "string"
             },
@@ -7278,6 +7422,24 @@
           ],
           "type": "string"
         },
+        "BackgroundShellStatus": {
+          "oneOf": [
+            {
+              "enum": [
+                "running",
+                "done",
+                "failed",
+                "killed"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "History scope only: unfinished shell of an earlier run of a resumed\nsession.",
+              "type": "string"
+            }
+          ]
+        },
         "ClientWindowTitleReason": {
           "enum": [
             "set",
@@ -7952,6 +8114,33 @@
             },
             {
               "properties": {
+                "background_shells": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneBackgroundShellInfo"
+                  },
+                  "type": "array"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane_background_shells_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "background_shells"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "layout": {
                   "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
                 },
@@ -8031,6 +8220,7 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "pane_subagents_changed",
+            "pane_background_shells_changed",
             "layout_updated",
             "pull_requests_updated"
           ],
@@ -8335,6 +8525,54 @@
           ],
           "type": "string"
         },
+        "PaneBackgroundShellInfo": {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "ended_at_ms": {
+              "description": "Unix milliseconds when the shell ended. Omitted while running.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "started_at_ms": {
+              "description": "Unix milliseconds when the shell started, when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/BackgroundShellStatus"
+            }
+          },
+          "required": [
+            "id",
+            "command",
+            "description",
+            "state"
+          ],
+          "type": "object"
+        },
+        "PaneBackgroundShellsScope": {
+          "enum": [
+            "current",
+            "history"
+          ],
+          "type": "string"
+        },
         "PaneDirection": {
           "enum": [
             "left",
@@ -8436,6 +8674,13 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "background_shells": {
+              "description": "Claude background shells currently tracked for this pane's agent.\nDisplay-only; omitted when empty.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PaneBackgroundShellInfo"
+              },
+              "type": "array"
             },
             "cwd": {
               "type": [
@@ -10544,6 +10789,33 @@
                 "pane_id",
                 "scope",
                 "subagents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "background_shells": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneBackgroundShellInfo"
+                  },
+                  "type": "array"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "scope": {
+                  "$ref": "#/schemas/success_response/$defs/PaneBackgroundShellsScope"
+                },
+                "type": {
+                  "const": "pane_background_shells",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "scope",
+                "background_shells"
               ],
               "type": "object"
             },

@@ -206,6 +206,7 @@ fn pane_scroll_result(
                 viewport_rows,
             }),
             subagents: Vec::new(),
+            background_shells: Vec::new(),
             revision: 0,
         },
     }

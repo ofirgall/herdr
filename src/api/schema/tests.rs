@@ -584,6 +584,68 @@ fn pane_subagents_response_round_trips() {
 }
 
 #[test]
+fn pane_background_shells_request_round_trips_and_defaults_to_current() {
+    let request = Request {
+        id: "req_shells".into(),
+        method: Method::PaneBackgroundShells(PaneBackgroundShellsParams {
+            pane_id: Some("w1-1".into()),
+            scope: PaneBackgroundShellsScope::History,
+        }),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "pane.background_shells");
+    assert_eq!(json["params"]["scope"], "history");
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, request);
+
+    let defaulted: Request = serde_json::from_value(serde_json::json!({
+        "id": "r", "method": "pane.background_shells", "params": {"pane_id": "w1-1"}
+    }))
+    .unwrap();
+    assert_eq!(
+        defaulted.method,
+        Method::PaneBackgroundShells(PaneBackgroundShellsParams {
+            pane_id: Some("w1-1".into()),
+            scope: PaneBackgroundShellsScope::Current,
+        })
+    );
+}
+
+#[test]
+fn pane_background_shells_response_round_trips() {
+    let result = ResponseResult::PaneBackgroundShells {
+        pane_id: "w1-1".into(),
+        scope: PaneBackgroundShellsScope::History,
+        background_shells: vec![
+            PaneBackgroundShellInfo {
+                id: "b1".into(),
+                command: "sleep 9".into(),
+                description: "nap".into(),
+                state: BackgroundShellStatus::Killed,
+                started_at_ms: Some(1_000),
+                ended_at_ms: Some(5_000),
+            },
+            PaneBackgroundShellInfo {
+                id: "b2".into(),
+                command: "tail -f x".into(),
+                description: "tail".into(),
+                state: BackgroundShellStatus::Running,
+                started_at_ms: None,
+                ended_at_ms: None,
+            },
+        ],
+    };
+    let json = serde_json::to_value(&result).unwrap();
+    assert_eq!(json["type"], "pane_background_shells");
+    assert_eq!(json["scope"], "history");
+    assert_eq!(json["background_shells"][0]["state"], "killed");
+    assert!(json["background_shells"][1].get("started_at_ms").is_none());
+    assert!(json["background_shells"][1].get("ended_at_ms").is_none());
+    let restored: ResponseResult = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, result);
+}
+
+#[test]
 fn event_envelope_round_trips() {
     let events = [
         EventEnvelope {
@@ -895,6 +957,7 @@ fn worktree_request_and_response_round_trip() {
                 agent_session: None,
                 scroll: None,
                 subagents: Vec::new(),
+                background_shells: Vec::new(),
                 revision: 0,
             },
             worktree: WorktreeInfo {
@@ -1328,6 +1391,7 @@ fn create_response_round_trips_with_root_pane() {
                 agent_session: None,
                 scroll: None,
                 subagents: Vec::new(),
+                background_shells: Vec::new(),
                 revision: 0,
             },
         },

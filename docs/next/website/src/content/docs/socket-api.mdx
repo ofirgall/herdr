@@ -104,7 +104,7 @@ Raw socket method names use dot notation:
 | Pull requests | `pull_request.list` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.subagents`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.subagents`, `pane.background_shells`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
@@ -213,6 +213,12 @@ when the platform exposes them.
 
 ```json
 {"id":"req_subagents","method":"pane.subagents","params":{"pane_id":"w1:p1","scope":"history"}}
+```
+
+`pane.background_shells` returns a pane's Claude Code background shells (Bash commands started with `run_in_background`) as `{"type":"pane_background_shells","pane_id","scope","background_shells":[...]}`. `scope` is `current` (default; the same list as `PaneInfo.background_shells`, where finished shells linger for about 30 seconds) or `history` (every background shell of the pane's watched session, including `interrupted` ones left over from before a session resume; cleared when the agent exits or the session changes). Each entry has `id`, `command`, `description`, `state` (`running`, `done`, `failed`, `killed`, or `interrupted`), and optional `started_at_ms` and `ended_at_ms` Unix-millisecond timestamps, omitted when unknown (`ended_at_ms` is also omitted while running). `PaneInfo.background_shells` is omitted when empty. `pane_id` may be omitted to target the current pane. Shells are tracked separately from subagents.
+
+```json
+{"id":"req_shells","method":"pane.background_shells","params":{"pane_id":"w1:p1","scope":"current"}}
 ```
 
 `layout.export` returns a portable tab layout tree. Omit `tab_id` and `pane_id`
@@ -868,11 +874,12 @@ Tab event subscriptions include `tab.created`, `tab.closed`, `tab.focused`,
 that workspace.
 Pane event subscriptions include `pane.created`, `pane.updated`, `pane.closed`, `pane.focused`,
 `pane.moved`, `pane.exited`, `pane.agent_detected`,
-`pane.output_matched`, `pane.agent_status_changed`, `pane.subagents_changed`, and `pane.scroll_changed`.
+`pane.output_matched`, `pane.agent_status_changed`, `pane.subagents_changed`, `pane.background_shells_changed`, and `pane.scroll_changed`.
 `pane.focused` also reports manual pane selection changes from any client attached
 to this server. It does not move other clients' views, and its payload does not
 identify the client. Selecting an already-selected pane does not emit it again.
 `pane.subagents_changed` emits `pane_id`, `workspace_id`, and the full current `subagents` list (possibly empty) whenever a pane's tracked subagents change, including when a finished subagent ages out. It also fires when only the session history (see `pane.subagents`) changes; the payload still carries the current list.
+`pane.background_shells_changed` emits `pane_id`, `workspace_id`, and the full current `background_shells` list (possibly empty) whenever a pane's tracked background shells change, including when a finished shell ages out or only the history (see `pane.background_shells`) changes. It does not fire for subagent changes, and `pane.subagents_changed` does not fire for shell changes.
 Terminal-title changes can emit `pane.updated`, but spinner-only raw-title changes do not emit it when `terminal_title_stripped` is unchanged.
 `pane.scroll_changed` is scoped to one `pane_id` and emits `pane_id`,
 `workspace_id`, and the current `scroll` metrics whenever Herdr observes a

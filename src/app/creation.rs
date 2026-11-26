@@ -337,6 +337,39 @@ impl App {
         }
     }
 
+    /// Current and history background-shell lists of a pane's terminal, for
+    /// the client-shell projection. Empty vectors for panes without shells.
+    pub(crate) fn pane_background_shell_lists(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> (
+        Vec<crate::api::schema::PaneBackgroundShellInfo>,
+        Vec<crate::api::schema::PaneBackgroundShellInfo>,
+    ) {
+        let terminal = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id));
+        match terminal {
+            Some(terminal) => (
+                terminal
+                    .background_shells()
+                    .iter()
+                    .map(pane_background_shell_info)
+                    .collect(),
+                terminal
+                    .background_shell_history()
+                    .iter()
+                    .map(pane_background_shell_info)
+                    .collect(),
+            ),
+            None => Default::default(),
+        }
+    }
+
     pub(super) fn pane_info(
         &self,
         ws_idx: usize,
@@ -399,6 +432,11 @@ impl App {
                 .subagents()
                 .iter()
                 .map(pane_subagent_info)
+                .collect(),
+            background_shells: terminal
+                .background_shells()
+                .iter()
+                .map(pane_background_shell_info)
                 .collect(),
             revision: terminal.revision,
         })
@@ -475,6 +513,30 @@ pub(crate) fn pane_subagent_info(
         ended_at_ms: match subagent.state {
             crate::subagents::SubagentState::Running => None,
             _ => subagent.ended_at.and_then(unix_millis),
+        },
+    }
+}
+
+pub(crate) fn pane_background_shell_info(
+    shell: &crate::subagents::BackgroundShell,
+) -> crate::api::schema::PaneBackgroundShellInfo {
+    use crate::api::schema::BackgroundShellStatus;
+    use crate::subagents::ShellState;
+    crate::api::schema::PaneBackgroundShellInfo {
+        id: shell.id.clone(),
+        command: shell.command.clone(),
+        description: shell.description.clone(),
+        state: match shell.state {
+            ShellState::Running => BackgroundShellStatus::Running,
+            ShellState::Done => BackgroundShellStatus::Done,
+            ShellState::Failed => BackgroundShellStatus::Failed,
+            ShellState::Killed => BackgroundShellStatus::Killed,
+            ShellState::Interrupted => BackgroundShellStatus::Interrupted,
+        },
+        started_at_ms: shell.started_at.and_then(unix_millis),
+        ended_at_ms: match shell.state {
+            ShellState::Running => None,
+            _ => shell.ended_at.and_then(unix_millis),
         },
     }
 }

@@ -79,11 +79,16 @@ pub(super) struct SubagentViewState {
     pub(super) collapsed: HashSet<String>,
     pub(super) history: HashSet<String>,
     pub(super) show_all: HashSet<String>,
+    /// Panes showing every background shell row instead of the newest.
+    pub(super) show_all_shells: HashSet<String>,
 }
 
 impl SubagentViewState {
     pub(super) fn is_empty(&self) -> bool {
-        self.collapsed.is_empty() && self.history.is_empty() && self.show_all.is_empty()
+        self.collapsed.is_empty()
+            && self.history.is_empty()
+            && self.show_all.is_empty()
+            && self.show_all_shells.is_empty()
     }
 
     fn toggle(set: &mut HashSet<String>, pane_id: &str) {
@@ -103,6 +108,7 @@ impl SubagentViewState {
         self.collapsed.retain(present);
         self.history.retain(present);
         self.show_all.retain(present);
+        self.show_all_shells.retain(present);
     }
 }
 
@@ -135,21 +141,41 @@ pub(super) struct SubagentSection<'a> {
     pub(super) hidden: usize,
     /// Whether a fold row (`+N earlier` or `show fewer`) leads the rows.
     pub(super) fold_row: bool,
+    /// Whether a `shells` group (header, optional fold row, rows) follows the
+    /// subagent rows; only when expanded with shells in the active list.
+    pub(super) shells_group: bool,
+    /// Shown part of the active background shell list, oldest first.
+    pub(super) shells: Vec<&'a crate::api::schema::PaneBackgroundShellInfo>,
+    /// Older shell rows folded away (shown as `+N earlier`).
+    pub(super) shells_hidden: usize,
+    /// Whether a fold row leads the shell rows.
+    pub(super) shells_fold_row: bool,
 }
 
 impl<'a> SubagentSection<'a> {
     fn new(agent: &'a ClientShellAgent, view: Option<&SubagentViewState>) -> Option<Self> {
-        if agent.subagent_history.is_empty() && agent.subagents.is_empty() {
+        if agent.subagent_history.is_empty()
+            && agent.subagents.is_empty()
+            && agent.background_shells.is_empty()
+            && agent.background_shell_history.is_empty()
+        {
             return None;
         }
         let expanded = !view.is_some_and(|view| view.collapsed.contains(&agent.pane_id));
         let history_mode = view.is_some_and(|view| view.history.contains(&agent.pane_id));
         let show_all = view.is_some_and(|view| view.show_all.contains(&agent.pane_id));
+        let show_all_shells =
+            view.is_some_and(|view| view.show_all_shells.contains(&agent.pane_id));
         let running = agent
             .subagents
             .iter()
             .filter(|subagent| subagent.state == crate::api::schema::SubagentStatus::Running)
-            .count();
+            .count()
+            + agent
+                .background_shells
+                .iter()
+                .filter(|shell| shell.state == crate::api::schema::BackgroundShellStatus::Running)
+                .count();
         let mut rows = if expanded {
             subagent_tree_rows(if history_mode {
                 &agent.subagent_history
@@ -166,7 +192,30 @@ impl<'a> SubagentSection<'a> {
             0
         };
         rows.drain(..hidden);
+        let mut shells: Vec<&crate::api::schema::PaneBackgroundShellInfo> = if expanded {
+            if history_mode {
+                &agent.background_shell_history
+            } else {
+                &agent.background_shells
+            }
+            .iter()
+            .collect()
+        } else {
+            Vec::new()
+        };
+        let shells_group = !shells.is_empty();
+        let shells_fold_row = shells.len() > SUBAGENT_ROWS_MAX;
+        let shells_hidden = if shells_fold_row && !show_all_shells {
+            shells.len() - SUBAGENT_ROWS_MAX
+        } else {
+            0
+        };
+        shells.drain(..shells_hidden);
         Some(Self {
+            shells_group,
+            shells,
+            shells_hidden,
+            shells_fold_row,
             running,
             expanded,
             history_mode,
@@ -176,10 +225,15 @@ impl<'a> SubagentSection<'a> {
         })
     }
 
-    /// Rows drawn beneath the agent's own rows: the fold row, then the shown
-    /// part of the active list.
+    /// Rows drawn beneath the agent's own rows: the fold row, the shown part
+    /// of the active list, then the `shells` group (header, fold row, rows).
     fn extra_height(&self) -> usize {
-        usize::from(self.fold_row) + self.rows.len()
+        let shells = if self.shells_group {
+            1 + usize::from(self.shells_fold_row) + self.shells.len()
+        } else {
+            0
+        };
+        usize::from(self.fold_row) + self.rows.len() + shells
     }
 }
 
@@ -708,9 +762,13 @@ fn render_subagent_rows(
     let dim_style = Style::default().fg(color).add_modifier(Modifier::DIM);
     let right = area.x + area.width;
     let connector_width = |x: u16| (right - x).min(2);
-    let text_width = |x: u16| right.saturating_sub(x);
 
     let connector_x = area.x + base;
+
+    // A `shells` group after the subagent rows turns their last connector
+    // into a branch and keeps the trunk running through the last root's
+    // descendants.
+    let shells_follow = section.shells_group;
 
     // The fold row leads the rows: older subagents fold away above the newest.
     let mut top = top;
@@ -725,7 +783,9 @@ fn render_subagent_rows(
             connector_x,
             top,
             connector_width(connector_x),
-            config.tree_agents.connector(section.rows.is_empty()),
+            config
+                .tree_agents
+                .connector(section.rows.is_empty() && !shells_follow),
             tree_style,
         );
         let label_x = connector_x + SUBAGENT_LEVEL_WIDTH;
@@ -744,8 +804,14 @@ fn render_subagent_rows(
             break;
         }
         let level = row.depth.min(SUBAGENT_MAX_DEPTH);
+        let rails = if shells_follow && row.depth > 0 {
+            row.rails | 1
+        } else {
+            row.rails
+        };
+        let last = row.last && !(shells_follow && row.depth == 0);
         for rail_level in 0..level {
-            if row.rails & (1 << rail_level) != 0 {
+            if rails & (1 << rail_level) != 0 {
                 let x = connector_x + SUBAGENT_LEVEL_WIDTH * rail_level as u16;
                 if x < right {
                     super::render::put_text(buffer, x, y, 1, &config.tree_agents.rail, tree_style);
@@ -761,38 +827,11 @@ fn render_subagent_rows(
             row_x,
             y,
             connector_width(row_x),
-            config.tree_agents.connector(row.last),
+            config.tree_agents.connector(last),
             tree_style,
         );
         let content_x = row_x + SUBAGENT_LEVEL_WIDTH;
-        let full_width = usize::from(text_width(content_x));
-        if full_width == 0 {
-            continue;
-        }
-        // Right-aligned timing; the description truncates first and the kind
-        // is dropped before the timing. Too narrow for any description: no timing.
         let subagent = row.subagent;
-        let timing = super::subagent_timing::row_timing(
-            subagent.state,
-            subagent.started_at_ms,
-            subagent.ended_at_ms,
-            config.subagent_clock.now_ms,
-        )
-        .filter(|timing| {
-            full_width >= usize::from(super::render::display_width(timing)) + 1 + SUBAGENT_MIN_TEXT
-        });
-        let timing_width = timing.as_ref().map_or(0, |timing| {
-            usize::from(super::render::display_width(timing))
-        });
-        if timing.is_some() && subagent.state == crate::api::schema::SubagentStatus::Running {
-            config.subagent_clock.mark_running_drawn();
-        }
-        let width = if timing.is_some() {
-            full_width - timing_width - 1
-        } else {
-            full_width
-        };
-        let (icon, icon_style) = subagent_icon(subagent.state, config);
         // The description leads because the sidebar is narrow and it tells
         // subagents apart; the kind follows dimmed when space remains.
         let (primary, secondary) = if subagent.description.is_empty() {
@@ -800,37 +839,231 @@ fn render_subagent_rows(
         } else {
             (subagent.description.as_str(), subagent.kind.as_str())
         };
-        let primary = crate::ui::truncate_end(primary, width.saturating_sub(2));
-        let remaining = width
-            .saturating_sub(2)
-            .saturating_sub(usize::from(super::render::display_width(&primary)) + 1);
-        let mut spans = vec![
-            Span::styled(icon, icon_style),
-            Span::raw(" "),
-            Span::styled(primary, text_style),
-        ];
-        if remaining > 0 && !secondary.is_empty() {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                crate::ui::truncate_end(secondary, remaining),
-                dim_style,
-            ));
-        }
-        Paragraph::new(Line::from(spans)).render(
-            Rect::new(content_x, y, u16::try_from(width).unwrap_or(u16::MAX), 1),
+        let (icon, icon_style) = subagent_icon(subagent.state, config);
+        render_row_content(
             buffer,
+            config,
+            RowContent {
+                x: content_x,
+                y,
+                right,
+                icon,
+                icon_style,
+                primary,
+                secondary,
+                timing_state: subagent.state,
+                started_at_ms: subagent.started_at_ms,
+                ended_at_ms: subagent.ended_at_ms,
+                text_style,
+                dim_style,
+            },
         );
-        if let Some(timing) = timing {
-            let timing_width = u16::try_from(timing_width).unwrap_or(u16::MAX);
+    }
+    top += section.rows.len().min(usize::from(bottom - top)) as u16;
+
+    if !shells_follow || top >= bottom {
+        return;
+    }
+    // The `shells` header is the last connector at the subagent level; its
+    // rows hang one level deeper.
+    super::render::put_text(
+        buffer,
+        connector_x,
+        top,
+        connector_width(connector_x),
+        config.tree_agents.connector(true),
+        tree_style,
+    );
+    let label_x = connector_x + SUBAGENT_LEVEL_WIDTH;
+    if label_x < right {
+        let width = super::render::display_width(SHELLS_LABEL).min(right - label_x);
+        super::render::put_text(buffer, label_x, top, width, SHELLS_LABEL, dim_style);
+    }
+    top += 1;
+
+    let shell_x = connector_x + SUBAGENT_LEVEL_WIDTH;
+    if section.shells_fold_row && top < bottom {
+        let label = if section.shells_hidden > 0 {
+            format!("+{} earlier", section.shells_hidden)
+        } else {
+            "show fewer".to_owned()
+        };
+        if shell_x < right {
             super::render::put_text(
                 buffer,
-                right - timing_width,
-                y,
-                timing_width,
-                &timing,
-                dim_style,
+                shell_x,
+                top,
+                connector_width(shell_x),
+                config.tree_agents.connector(section.shells.is_empty()),
+                tree_style,
             );
         }
+        let label_x = shell_x + SUBAGENT_LEVEL_WIDTH;
+        if label_x < right {
+            let width = super::render::display_width(&label).min(right - label_x);
+            super::render::put_text(buffer, label_x, top, width, &label, dim_style);
+            hits.shell_folds
+                .push((Rect::new(label_x, top, width, 1), child.pane_id.clone()));
+        }
+        top += 1;
+    }
+
+    for (index, shell) in section.shells.iter().enumerate() {
+        let y = top + index as u16;
+        if y >= bottom {
+            break;
+        }
+        if shell_x >= right {
+            continue;
+        }
+        super::render::put_text(
+            buffer,
+            shell_x,
+            y,
+            connector_width(shell_x),
+            config
+                .tree_agents
+                .connector(index + 1 == section.shells.len()),
+            tree_style,
+        );
+        let first_line = shell.command.lines().next().unwrap_or("");
+        let primary = if shell.description.is_empty() {
+            first_line
+        } else {
+            shell.description.as_str()
+        };
+        let (icon, icon_style) = shell_icon(shell.state, config);
+        render_row_content(
+            buffer,
+            config,
+            RowContent {
+                x: shell_x + SUBAGENT_LEVEL_WIDTH,
+                y,
+                right,
+                icon,
+                icon_style,
+                primary,
+                secondary: "",
+                timing_state: shell_timing_state(shell.state),
+                started_at_ms: shell.started_at_ms,
+                ended_at_ms: shell.ended_at_ms,
+                text_style,
+                dim_style,
+            },
+        );
+    }
+}
+
+const SHELLS_LABEL: &str = "shells";
+
+/// One subagent or shell row's content, drawn from `x` to `right`.
+struct RowContent<'a> {
+    x: u16,
+    y: u16,
+    right: u16,
+    icon: String,
+    icon_style: Style,
+    primary: &'a str,
+    secondary: &'a str,
+    timing_state: crate::api::schema::SubagentStatus,
+    started_at_ms: Option<u64>,
+    ended_at_ms: Option<u64>,
+    text_style: Style,
+    dim_style: Style,
+}
+
+/// Draws icon, description, optional dimmed secondary text and right-aligned
+/// timing. The timing is dropped when the row is too narrow for it.
+fn render_row_content(buffer: &mut Buffer, config: &ClientShellConfig, row: RowContent<'_>) {
+    let full_width = usize::from(row.right.saturating_sub(row.x));
+    if full_width == 0 {
+        return;
+    }
+    let timing = super::subagent_timing::row_timing(
+        row.timing_state,
+        row.started_at_ms,
+        row.ended_at_ms,
+        config.subagent_clock.now_ms,
+    )
+    .filter(|timing| {
+        full_width >= usize::from(super::render::display_width(timing)) + 1 + SUBAGENT_MIN_TEXT
+    });
+    let timing_width = timing.as_ref().map_or(0, |timing| {
+        usize::from(super::render::display_width(timing))
+    });
+    if timing.is_some() && row.timing_state == crate::api::schema::SubagentStatus::Running {
+        config.subagent_clock.mark_running_drawn();
+    }
+    let width = if timing.is_some() {
+        full_width - timing_width - 1
+    } else {
+        full_width
+    };
+    let primary = crate::ui::truncate_end(row.primary, width.saturating_sub(2));
+    let remaining = width
+        .saturating_sub(2)
+        .saturating_sub(usize::from(super::render::display_width(&primary)) + 1);
+    let mut spans = vec![
+        Span::styled(row.icon, row.icon_style),
+        Span::raw(" "),
+        Span::styled(primary, row.text_style),
+    ];
+    if remaining > 0 && !row.secondary.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            crate::ui::truncate_end(row.secondary, remaining),
+            row.dim_style,
+        ));
+    }
+    Paragraph::new(Line::from(spans)).render(
+        Rect::new(row.x, row.y, u16::try_from(width).unwrap_or(u16::MAX), 1),
+        buffer,
+    );
+    if let Some(timing) = timing {
+        let timing_width = u16::try_from(timing_width).unwrap_or(u16::MAX);
+        super::render::put_text(
+            buffer,
+            row.right - timing_width,
+            row.y,
+            timing_width,
+            &timing,
+            row.dim_style,
+        );
+    }
+}
+
+/// Timing rules of a shell row: finished shells read like done subagents.
+fn shell_timing_state(
+    state: crate::api::schema::BackgroundShellStatus,
+) -> crate::api::schema::SubagentStatus {
+    use crate::api::schema::{BackgroundShellStatus, SubagentStatus};
+    match state {
+        BackgroundShellStatus::Running => SubagentStatus::Running,
+        BackgroundShellStatus::Done
+        | BackgroundShellStatus::Failed
+        | BackgroundShellStatus::Killed => SubagentStatus::Done,
+        BackgroundShellStatus::Interrupted => SubagentStatus::Interrupted,
+    }
+}
+
+/// State icon and style of a shell row: `$` while running, the done icon,
+/// `✗` for failed or killed, `!` for interrupted.
+fn shell_icon(
+    state: crate::api::schema::BackgroundShellStatus,
+    config: &ClientShellConfig,
+) -> (String, Style) {
+    use crate::api::schema::{AgentStatus, BackgroundShellStatus, SubagentStatus};
+    let palette = &config.palette;
+    match state {
+        BackgroundShellStatus::Running => (
+            "$".to_owned(),
+            Style::default().fg(status_color(AgentStatus::Working, palette)),
+        ),
+        BackgroundShellStatus::Done => subagent_icon(SubagentStatus::Done, config),
+        BackgroundShellStatus::Failed | BackgroundShellStatus::Killed => {
+            ("\u{2717}".to_owned(), Style::default().fg(palette.red))
+        }
+        BackgroundShellStatus::Interrupted => subagent_icon(SubagentStatus::Interrupted, config),
     }
 }
 
@@ -1153,7 +1386,10 @@ impl ClientShellState {
         self.snapshot.as_deref().is_some_and(|snapshot| {
             snapshot.agents.iter().any(|agent| {
                 agent.pane_id == pane_id
-                    && (!agent.subagents.is_empty() || !agent.subagent_history.is_empty())
+                    && (!agent.subagents.is_empty()
+                        || !agent.subagent_history.is_empty()
+                        || !agent.background_shells.is_empty()
+                        || !agent.background_shell_history.is_empty())
             })
         })
     }
@@ -1203,6 +1439,12 @@ impl ClientShellState {
     ) {
         let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
         SubagentViewState::toggle(&mut view.show_all, pane_id);
+    }
+
+    /// Flips `pane_id` between its newest background shell rows and every row.
+    pub(super) fn toggle_shell_show_all(&mut self, endpoint_id: &ClientEndpointId, pane_id: &str) {
+        let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
+        SubagentViewState::toggle(&mut view.show_all_shells, pane_id);
     }
 
     /// Whether `workspace_id` has agents that the toggle could show or hide.

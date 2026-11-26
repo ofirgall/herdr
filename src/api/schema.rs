@@ -99,6 +99,7 @@ operations::define_operations! {
     PaneLayout(PaneLayoutParams) => "pane.layout", false, false;
     PaneProcessInfo(PaneProcessInfoParams) => "pane.process_info", false, false;
     PaneSubagents(PaneSubagentsParams) => "pane.subagents", false, false;
+    PaneBackgroundShells(PaneBackgroundShellsParams) => "pane.background_shells", false, false;
     LayoutExport(LayoutExportParams) => "layout.export", false, false;
     LayoutApply(LayoutApplyParams) => "layout.apply", true, false;
     LayoutSetSplitRatio(LayoutSetSplitRatioParams) => "layout.set_split_ratio", true, true;

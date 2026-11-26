@@ -191,6 +191,8 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
     projected.agents.push(ClientShellAgent {
         subagents: Default::default(),
         subagent_history: Default::default(),
+        background_shells: Default::default(),
+        background_shell_history: Default::default(),
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

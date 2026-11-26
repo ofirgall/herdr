@@ -5,6 +5,8 @@ fn agent(pane: &str, workspace: &str, tab: &str, status: AgentStatus) -> ClientS
     ClientShellAgent {
         subagents: Default::default(),
         subagent_history: Default::default(),
+        background_shells: Default::default(),
+        background_shell_history: Default::default(),
         pane_id: pane.into(),
         workspace_id: workspace.into(),
         tab_id: tab.into(),
@@ -2754,4 +2756,334 @@ fn overflowing_spaces_list_draws_no_scrollbar_and_keeps_full_width_rows() {
     assert_eq!(chevron.x, body.right() - 1);
     assert_eq!(buffer[(chevron.x, chevron.y)].symbol(), "▾");
     assert!((body.y..body.bottom()).all(|y| buffer[(body.right() - 1, y)].symbol() != "▕"));
+}
+
+use crate::api::schema::BackgroundShellStatus as Shell;
+
+fn shell(
+    id: &str,
+    state: Shell,
+    description: &str,
+    started_s: Option<u64>,
+    ended_s: Option<u64>,
+) -> crate::api::schema::PaneBackgroundShellInfo {
+    crate::api::schema::PaneBackgroundShellInfo {
+        id: id.into(),
+        command: format!("cmd-{id}\nsecond line"),
+        description: description.into(),
+        state,
+        started_at_ms: started_s.map(|s| s * 1000),
+        ended_at_ms: ended_s.map(|s| s * 1000),
+    }
+}
+
+fn set_shells(
+    snapshot: &mut ClientShellSnapshot,
+    pane: &str,
+    current: Vec<crate::api::schema::PaneBackgroundShellInfo>,
+    history: Vec<crate::api::schema::PaneBackgroundShellInfo>,
+) {
+    let agent = snapshot
+        .agents
+        .iter_mut()
+        .find(|agent| agent.pane_id == pane)
+        .expect("agent");
+    agent.background_shells = current;
+    agent.background_shell_history = history;
+}
+
+fn shells_only_state() -> ClientShellState {
+    let mut snapshot = agents_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![
+            shell("a", Shell::Running, "server", Some(1_000), None),
+            shell("b", Shell::Done, "build", Some(1_100), Some(1_112)),
+        ],
+        vec![shell(
+            "h",
+            Shell::Interrupted,
+            "stale",
+            Some(500),
+            Some(560),
+        )],
+    );
+    let mut state = subagent_state(snapshot);
+    state.config.subagent_clock.fixed_ms = Some(1_134_000);
+    state
+}
+
+#[test]
+fn shells_only_agent_shows_chevron_count_header_and_rows() {
+    let mut state = shells_only_state();
+    let rows = compose_rows(&mut state);
+    let agent = row_index(&rows, "↺");
+    assert!(
+        rows[agent].contains('1') && rows[agent].contains('▾'),
+        "{rows:#?}"
+    );
+    let header = &rows[agent + 1];
+    assert!(body(header).ends_with("shells"), "{rows:#?}");
+    assert!(header.contains('└') || header.contains("╰"), "{rows:#?}");
+    assert!(body(&rows[agent + 2]).contains("$ server"), "{rows:#?}");
+    assert!(body(&rows[agent + 2]).ends_with("2m14s"), "{rows:#?}");
+    assert!(body(&rows[agent + 3]).contains("build"), "{rows:#?}");
+    // Shell rows hang one level deeper than the header's connector.
+    assert_eq!(
+        col(&rows[agent + 2], "$") - col(&rows[agent + 1], "shells"),
+        3,
+        "{rows:#?}"
+    );
+    // Header and shell rows focus the parent pane.
+    let y = (agent + 1) as u16;
+    let click = left_click(&mut state, 12, y);
+    assert!(matches!(
+        &click.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method,
+                crate::api::schema::Method::PaneFocus(t) if t.pane_id == "pane_a")
+    ));
+    let click = left_click(&mut state, 12, (agent + 2) as u16);
+    assert!(matches!(
+        &click.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method,
+                crate::api::schema::Method::PaneFocus(t) if t.pane_id == "pane_a")
+    ));
+}
+
+#[test]
+fn shells_follow_subagents_with_branch_connectors_and_count_both() {
+    let mut snapshot = mixed_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![shell("a", Shell::Running, "dev", Some(1_000), None)],
+        vec![],
+    );
+    let mut state = subagent_state(snapshot);
+    state.config.subagent_clock.fixed_ms = Some(1_134_000);
+    let rows = compose_rows(&mut state);
+    let agent = row_index(&rows, "↺");
+    // 2 running subagents + 1 running shell.
+    assert!(body(&rows[agent]).contains("3 ↺ ▾"), "{rows:#?}");
+    let branch = |row: &str| row.contains('├');
+    let last = |row: &str| row.contains('└');
+    assert!(branch(&rows[agent + 1]) && body(&rows[agent + 1]).contains("find auth code"));
+    assert!(branch(&rows[agent + 2]) && body(&rows[agent + 2]).contains("outline"));
+    // The subagent group's last row is a branch because shells follow.
+    assert!(branch(&rows[agent + 3]) && body(&rows[agent + 3]).contains("run tests"));
+    assert!(last(&rows[agent + 4]) && body(&rows[agent + 4]).ends_with("shells"));
+    assert!(body(&rows[agent + 5]).contains("$ dev"), "{rows:#?}");
+    assert_eq!(
+        col(&rows[agent + 3], "├"),
+        col(&rows[agent + 4], "└"),
+        "{rows:#?}"
+    );
+    eprintln!("{}", rows[agent..=agent + 5].join("\n"));
+}
+
+#[test]
+fn nested_subagent_trunk_continues_through_the_shells_group() {
+    let mut snapshot = agents_snapshot();
+    set_subagents(
+        &mut snapshot,
+        "pane_a",
+        vec![
+            sub("p", None, Sub::Running, "Explore", "parent"),
+            sub("c", Some("p"), Sub::Running, "Explore", "child"),
+        ],
+        vec![],
+    );
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![shell("a", Shell::Running, "srv", None, None)],
+        vec![],
+    );
+    let mut state = subagent_state(snapshot);
+    let rows = compose_rows(&mut state);
+    let agent = row_index(&rows, "↺");
+    let parent = col(&rows[agent + 1], "├");
+    assert!(
+        rows[agent + 2].chars().nth(parent) == Some('│'),
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn shell_icons_colors_and_timing_per_state() {
+    let mut snapshot = agents_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![
+            shell("a", Shell::Running, "runs", Some(1_000), None),
+            shell("b", Shell::Done, "ok", Some(1_100), Some(1_112)),
+            shell("c", Shell::Failed, "fail", None, None),
+            shell("d", Shell::Killed, "kill", None, None),
+            shell("e", Shell::Interrupted, "stale", Some(500), Some(560)),
+            shell("f", Shell::Done, "", None, None),
+        ],
+        vec![],
+    );
+    let mut state = subagent_state(snapshot);
+    state.config.subagent_clock.fixed_ms = Some((1_112 + 180) * 1000);
+    let rows = compose_rows(&mut state);
+    let palette = state.config.palette.clone();
+    let agent = row_index(&rows, "↺");
+    let icon_color = |state: &mut ClientShellState, y: usize, glyph: &str| {
+        let x = col(&rows[y], glyph);
+        style_of(state, y as u16, x as u16).fg
+    };
+    assert!(body(&rows[agent + 2]).contains("$ runs"), "{rows:#?}");
+    assert_eq!(
+        icon_color(&mut state, agent + 2, "$"),
+        Some(super::super::status_color(
+            crate::api::schema::AgentStatus::Working,
+            &palette
+        ))
+    );
+    assert!(body(&rows[agent + 2]).ends_with("4m52s"), "{rows:#?}");
+    assert!(body(&rows[agent + 3]).ends_with("12s·3m ago"), "{rows:#?}");
+    for (offset, text) in [(4, "fail"), (5, "kill")] {
+        assert!(body(&rows[agent + offset]).contains(&format!("\u{2717} {text}")));
+        assert_eq!(
+            icon_color(&mut state, agent + offset, "\u{2717}"),
+            Some(palette.red)
+        );
+    }
+    assert!(body(&rows[agent + 6]).contains("! stale"), "{rows:#?}");
+    assert_eq!(icon_color(&mut state, agent + 6, "!"), Some(palette.peach));
+    // An empty description falls back to the command's first line.
+    assert!(body(&rows[agent + 7]).contains("cmd-f"), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("second line")));
+}
+
+#[test]
+fn history_mode_switches_both_groups_and_collapse_hides_both() {
+    let mut snapshot = mixed_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![shell("a", Shell::Running, "live shell", None, None)],
+        vec![shell("h", Shell::Interrupted, "old shell", None, None)],
+    );
+    let mut state = subagent_state(snapshot);
+    let rows = compose_rows(&mut state);
+    assert!(rows.iter().any(|r| r.contains("live shell")));
+    assert!(rows.iter().any(|r| r.contains("run tests")));
+
+    let mode = mode_for(&state, "pane_a");
+    click_hit(&mut state, mode);
+    let rows = compose_rows(&mut state);
+    assert!(rows.iter().any(|r| r.contains("old shell")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.contains("stale task")), "{rows:#?}");
+    assert!(!rows.iter().any(|r| r.contains("live shell")));
+    assert!(!rows.iter().any(|r| r.contains("run tests")));
+
+    let toggle = toggle_for(&state, "pane_a");
+    click_hit(&mut state, toggle);
+    let rows = compose_rows(&mut state);
+    assert!(!rows
+        .iter()
+        .any(|r| r.contains("old shell") || r.contains("shells")));
+    assert!(!rows.iter().any(|r| r.contains("stale task")));
+}
+
+#[test]
+fn shell_fold_is_independent_from_the_subagent_fold() {
+    let max = super::super::space_agents::SUBAGENT_ROWS_MAX;
+    let mut snapshot = long_history_snapshot(max + 3);
+    let shells = (0..max + 2)
+        .map(|i| {
+            shell(
+                &format!("s{i}"),
+                Shell::Done,
+                &format!("task {i:02}"),
+                None,
+                None,
+            )
+        })
+        .collect::<Vec<_>>();
+    set_shells(&mut snapshot, "pane_a", vec![], shells);
+    let mut state = subagent_state(snapshot);
+    let endpoint = state.active_endpoint_id.clone();
+    state.toggle_subagent_history(&endpoint, "pane_a");
+    let rows = tall_rows(&mut state);
+    let agent = row_index(&rows, "↺");
+    assert!(rows[agent + 1].contains("+3 earlier"), "{rows:#?}");
+    let header = row_index(&rows, "shells");
+    assert!(rows[header + 1].contains("+2 earlier"), "{rows:#?}");
+    assert!(rows[header + 2].contains("task 02"), "{rows:#?}");
+    assert_eq!(state.hits.shell_folds.len(), 1);
+    assert_eq!(state.hits.subagent_folds.len(), 1);
+    assert_eq!(
+        usize::from(state.hits.workspaces[0].child_rows),
+        3 + 1 + max + 1 + 1 + max
+    );
+
+    // The shell fold shows every shell row and leaves the subagent fold alone.
+    let fold = state.hits.shell_folds[0].0;
+    let outcome = click_hit(&mut state, fold);
+    assert!(outcome.actions.is_empty());
+    let rows = tall_rows(&mut state);
+    assert!(rows.iter().any(|r| r.contains("+3 earlier")), "{rows:#?}");
+    let header = row_index(&rows, "shells");
+    assert!(rows[header + 1].contains("show fewer"), "{rows:#?}");
+    assert!(rows[header + 2].contains("task 00"), "{rows:#?}");
+
+    // The subagent fold flips independently.
+    let fold = state.hits.subagent_folds[0].0;
+    click_hit(&mut state, fold);
+    let rows = tall_rows(&mut state);
+    assert!(!rows.iter().any(|r| r.contains("+3 earlier")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.contains("show fewer")));
+    let view = &state.subagent_views[&state.active_endpoint_id];
+    assert!(view.show_all.contains("pane_a") && view.show_all_shells.contains("pane_a"));
+}
+
+#[test]
+fn toggle_key_covers_an_agent_that_only_has_shells() {
+    let mut snapshot = agents_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![shell("a", Shell::Running, "only shell", None, None)],
+        vec![],
+    );
+    snapshot.focused_pane_id = Some("pane_a".into());
+    let mut state = subagent_state(snapshot);
+    assert!(compose_rows(&mut state)
+        .iter()
+        .any(|r| r.contains("only shell")));
+    let outcome = press_toggle_subagents(&mut state);
+    assert!(outcome.repaint);
+    let rows = compose_rows(&mut state);
+    assert!(!rows.iter().any(|r| r.contains("only shell")), "{rows:#?}");
+    press_toggle_subagents(&mut state);
+    assert!(compose_rows(&mut state)
+        .iter()
+        .any(|r| r.contains("only shell")));
+}
+
+#[test]
+fn running_shell_rows_keep_the_timer_ticking() {
+    let mut state = shells_only_state();
+    compose_rows(&mut state);
+    assert!(state
+        .config
+        .subagent_clock
+        .next_deadline(std::time::Instant::now())
+        .is_some());
+}
+
+#[test]
+fn agents_without_subagents_or_shells_are_unchanged_by_the_shells_group() {
+    let mut state = subagent_state(agents_snapshot());
+    let rows = compose_rows(&mut state);
+    assert!(!rows.iter().any(|r| r.contains("shells")));
+    assert!(state.hits.subagent_toggles.is_empty());
+    assert!(state.hits.shell_folds.is_empty());
 }

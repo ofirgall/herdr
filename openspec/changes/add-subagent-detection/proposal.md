@@ -14,6 +14,7 @@ Coding agents increasingly fan work out to subagents (Claude Code's Task/Agent t
 - The sidebar agents panel shows a count and expand/collapse chevron on agent rows that have subagents. Expanding shows nested subagent rows (type, description, running/done indicator). Clicking a subagent row focuses the parent pane. Expand/collapse state is TUI-only.
 - A per-agent sidebar toggle switches the subagent list between the current view (default) and the full history of the session (including subagents finished before Herdr saw them and `interrupted` leftovers of earlier runs). History is also available through a `pane.subagents` API request with `scope: "history"`.
 - Subagents are display-only. They never change the parent pane's detected agent state, which remains screen-detected.
+- Claude Code's background shells (Bash tool calls with `run_in_background`) are tracked the same way, from the session transcript: running, done, failed, killed, or `interrupted`, with current and history lists, a separate API field and event, and their own "shells" group under the agent in the spaces sidebar.
 
 ## Capabilities
 

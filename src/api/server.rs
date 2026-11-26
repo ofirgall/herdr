@@ -1157,6 +1157,7 @@ mod tests {
             agent_session: None,
             scroll: None,
             subagents: Vec::new(),
+            background_shells: Vec::new(),
             revision: 0,
         }
     }

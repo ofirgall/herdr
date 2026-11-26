@@ -143,3 +143,15 @@ A `toggle_subagents` key binding, bound by default, SHALL collapse or expand the
 #### Scenario: Toggle with the keyboard
 - **WHEN** the focused agent's subagent rows are expanded and the user presses the `toggle_subagents` binding
 - **THEN** they SHALL collapse
+
+### Requirement: Background shells shown as a separate group
+
+An expanded agent row SHALL show its background shells (of the active list mode) as a separate group after its subagent rows: a `shells` header row followed by one row per shell with a state indicator, the description or command, and right-aligned timing. The chevron and history-mode icon SHALL appear when an agent has subagents or background shells, and the running count SHALL include running shells. Collapse, history mode, folding, and clicking SHALL behave as for subagent rows.
+
+#### Scenario: Running background shell
+- **WHEN** an expanded agent has a running background shell described as "herdr server"
+- **THEN** a `shells` header row and a row showing "herdr server" with a running indicator and elapsed time SHALL appear beneath its subagent rows
+
+#### Scenario: No background shells
+- **WHEN** an agent has no background shells in the active list
+- **THEN** no `shells` header row SHALL be shown

@@ -168,8 +168,15 @@ pub struct TerminalState {
     /// Every parseable subagent of the watched session (history view). Same
     /// lifecycle as `subagents` but never linger-pruned.
     subagent_history: Vec<crate::subagents::Subagent>,
+    /// Background shells of the current Claude session (design D10). Same
+    /// lifecycle as `subagents`; cleared exactly when they are.
+    background_shells: Vec<crate::subagents::BackgroundShell>,
+    /// Every background shell of the watched session (history view).
+    background_shell_history: Vec<crate::subagents::BackgroundShell>,
     /// Bumped on every `set_subagent_lists` change so callers can detect mutations.
     subagents_revision: u64,
+    /// Bumped on every background-shell list change (set or pruned).
+    background_shells_revision: u64,
     /// When Herdr received the current `SessionStart` report (resume-leftover filter).
     session_observed_at: Option<SystemTime>,
     /// Transcript path from the latest Claude session report; the watch target.
@@ -216,7 +223,10 @@ impl TerminalState {
             restore_error: None,
             subagents: Vec::new(),
             subagent_history: Vec::new(),
+            background_shells: Vec::new(),
+            background_shell_history: Vec::new(),
             subagents_revision: 0,
+            background_shells_revision: 0,
             session_observed_at: None,
             agent_session_transcript: None,
         }
@@ -232,9 +242,39 @@ impl TerminalState {
         &self.subagent_history
     }
 
+    /// Background shells currently shown for this terminal's agent.
+    pub fn background_shells(&self) -> &[crate::subagents::BackgroundShell] {
+        &self.background_shells
+    }
+
+    /// Full session history of background shells.
+    pub fn background_shell_history(&self) -> &[crate::subagents::BackgroundShell] {
+        &self.background_shell_history
+    }
+
+    /// Single place where the shell lists are replaced. Returns whether either changed.
+    pub(crate) fn set_background_shells(
+        &mut self,
+        current: Vec<crate::subagents::BackgroundShell>,
+        history: Vec<crate::subagents::BackgroundShell>,
+    ) -> bool {
+        if self.background_shells == current && self.background_shell_history == history {
+            return false;
+        }
+        self.background_shells = current;
+        self.background_shell_history = history;
+        self.background_shells_revision = self.background_shells_revision.wrapping_add(1);
+        true
+    }
+
     /// Monotonic counter bumped whenever either subagent list changes.
     pub(crate) fn subagents_revision(&self) -> u64 {
         self.subagents_revision
+    }
+
+    /// Monotonic counter bumped whenever either background-shell list changes.
+    pub(crate) fn background_shells_revision(&self) -> u64 {
+        self.background_shells_revision
     }
 
     /// Transcript path of the tracked Claude session, if any.
@@ -265,9 +305,11 @@ impl TerminalState {
         self.set_subagent_lists(list, history)
     }
 
-    /// Drop both lists immediately (no linger). Returns whether either was non-empty.
+    /// Drop all lists (subagents and background shells) immediately, no
+    /// linger. Returns whether any was non-empty.
     pub(crate) fn clear_subagents(&mut self) -> bool {
-        self.set_subagent_lists(Vec::new(), Vec::new())
+        let shells = self.set_background_shells(Vec::new(), Vec::new());
+        self.set_subagent_lists(Vec::new(), Vec::new()) || shells
     }
 
     /// Drop the list and stop tracking the session (agent released or exited).
@@ -328,13 +370,56 @@ impl TerminalState {
         self.set_subagent_lists(list, history)
     }
 
-    /// Remove lingering `Done` entries older than the linger window.
+    /// Fold a finished transcript tail into the shell lists. Stale results
+    /// (the session moved on) are dropped. Returns whether either list changed.
+    pub(crate) fn apply_background_shells_scan(
+        &mut self,
+        transcript: &Path,
+        records: &[crate::subagents::ShellRecord],
+        now: Instant,
+    ) -> bool {
+        if self.agent_session_transcript.as_deref() != Some(transcript) {
+            return false;
+        }
+        let live = self.subagent_parent_live();
+        let list = crate::subagents::reconcile_shells(
+            &self.background_shells,
+            records,
+            live,
+            self.session_observed_at,
+            now,
+            std::time::SystemTime::now(),
+        );
+        let history =
+            crate::subagents::reconcile_shell_history(records, live, self.session_observed_at);
+        self.set_background_shells(list, history)
+    }
+
+    /// Remove lingering `Done` subagents and shells older than the linger window.
     pub(crate) fn prune_subagents(&mut self, now: Instant) -> bool {
-        crate::subagents::prune_done(&mut self.subagents, now, crate::subagents::DONE_LINGER)
+        let shells = crate::subagents::prune_done_shells(
+            &mut self.background_shells,
+            now,
+            crate::subagents::DONE_LINGER,
+        );
+        if shells {
+            self.background_shells_revision = self.background_shells_revision.wrapping_add(1);
+        }
+        let subagents =
+            crate::subagents::prune_done(&mut self.subagents, now, crate::subagents::DONE_LINGER);
+        if subagents {
+            self.subagents_revision = self.subagents_revision.wrapping_add(1);
+        }
+        subagents || shells
     }
 
     /// When the earliest lingering `Done` entry expires.
     pub(crate) fn next_subagent_prune_deadline(&self) -> Option<Instant> {
+        let shells = self
+            .background_shells
+            .iter()
+            .filter_map(|shell| shell.done_at)
+            .map(|done_at| done_at + crate::subagents::DONE_LINGER);
         self.subagents
             .iter()
             .filter_map(|subagent| match subagent.state {
@@ -343,6 +428,7 @@ impl TerminalState {
                 }
                 _ => None,
             })
+            .chain(shells)
             .min()
     }
 

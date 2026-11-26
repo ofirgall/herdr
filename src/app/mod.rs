@@ -537,6 +537,7 @@ impl App {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             subagent_changed_terminals: Vec::new(),
+            background_shell_changed_terminals: Vec::new(),
             outer_terminal_focus: None,
             prefix_keys,
             headless_size: config.headless_size(),

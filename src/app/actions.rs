@@ -1582,6 +1582,14 @@ impl AppState {
                 self.apply_subagent_scan(&terminal_id, &transcript, &records, &parents);
                 Vec::new()
             }
+            AppEvent::BackgroundShellsScanned {
+                terminal_id,
+                transcript,
+                shells,
+            } => {
+                self.apply_background_shells_scan(&terminal_id, &transcript, &shells);
+                Vec::new()
+            }
             AppEvent::HookMetadataReported {
                 pane_id,
                 source,
@@ -1735,6 +1743,7 @@ impl AppState {
             let had_completion = terminal.last_agent_completion_seq.is_some() || !previous_seen;
             let resume_revision = terminal.reported_resume_revision();
             let subagents_revision_before = terminal.subagents_revision();
+            let shells_revision_before = terminal.background_shells_revision();
             let mutation = update(terminal);
             // Subagents die with their agent: release/exit clears them (and stops
             // tracking) at once; a session change or lost live process clears the list.
@@ -1747,6 +1756,10 @@ impl AppState {
             }
             if terminal.subagents_revision() != subagents_revision_before {
                 self.subagent_changed_terminals.push(terminal_id.clone());
+            }
+            if terminal.background_shells_revision() != shells_revision_before {
+                self.background_shell_changed_terminals
+                    .push(terminal_id.clone());
             }
             terminal.reconcile_reported_resume();
             // Resume-only changes return no mutation but must still be saved.
@@ -1847,14 +1860,40 @@ impl AppState {
         changed
     }
 
+    /// Apply a background transcript tail to its terminal. Returns whether the
+    /// shell lists changed. Stale results (session moved on) are dropped.
+    pub(crate) fn apply_background_shells_scan(
+        &mut self,
+        terminal_id: &crate::terminal::TerminalId,
+        transcript: &std::path::Path,
+        shells: &[crate::subagents::ShellRecord],
+    ) -> bool {
+        let Some(terminal) = self.terminals.get_mut(terminal_id) else {
+            return false;
+        };
+        let changed = terminal.apply_background_shells_scan(transcript, shells, Instant::now());
+        if changed {
+            self.background_shell_changed_terminals
+                .push(terminal_id.clone());
+        }
+        changed
+    }
+
     /// Stop tracking subagents for a terminal right away (no linger).
     pub(crate) fn clear_subagent_tracking_for(
         &mut self,
         terminal_id: &crate::terminal::TerminalId,
     ) {
         if let Some(terminal) = self.terminals.get_mut(terminal_id) {
-            if terminal.clear_subagent_tracking() {
+            let subagents_before = terminal.subagents_revision();
+            let shells_before = terminal.background_shells_revision();
+            terminal.clear_subagent_tracking();
+            if terminal.subagents_revision() != subagents_before {
                 self.subagent_changed_terminals.push(terminal_id.clone());
+            }
+            if terminal.background_shells_revision() != shells_before {
+                self.background_shell_changed_terminals
+                    .push(terminal_id.clone());
             }
         }
     }
@@ -1863,8 +1902,16 @@ impl AppState {
     pub(crate) fn prune_subagents_at(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for (terminal_id, terminal) in &mut self.terminals {
+            let subagents_before = terminal.subagents_revision();
+            let shells_before = terminal.background_shells_revision();
             if terminal.prune_subagents(now) {
-                self.subagent_changed_terminals.push(terminal_id.clone());
+                if terminal.subagents_revision() != subagents_before {
+                    self.subagent_changed_terminals.push(terminal_id.clone());
+                }
+                if terminal.background_shells_revision() != shells_before {
+                    self.background_shell_changed_terminals
+                        .push(terminal_id.clone());
+                }
                 changed = true;
             }
         }
@@ -3230,6 +3277,124 @@ mod tests {
             Some(std::path::Path::new("/t/s2.jsonl"))
         );
         assert_eq!(state.subagent_changed_terminals, vec![terminal_id]);
+    }
+
+    fn shell_record(
+        id: &str,
+        status: crate::subagents::ShellStatus,
+    ) -> crate::subagents::ShellRecord {
+        crate::subagents::ShellRecord {
+            id: id.into(),
+            command: "sleep 9".into(),
+            description: "nap".into(),
+            // Far future: after the observed session start.
+            started_at: Some(std::time::SystemTime::now() + std::time::Duration::from_secs(3600)),
+            ended_at: None,
+            status,
+        }
+    }
+
+    #[test]
+    fn background_shells_follow_scan_stale_drop_and_session_change() {
+        use crate::subagents::ShellStatus;
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        state.background_shell_changed_terminals.clear();
+        let running = shell_record("b1", ShellStatus::Running);
+
+        // Stale transcript is dropped.
+        assert!(!state.apply_background_shells_scan(
+            &terminal_id,
+            std::path::Path::new("/t/other.jsonl"),
+            std::slice::from_ref(&running),
+        ));
+        assert!(state.background_shell_changed_terminals.is_empty());
+
+        assert!(state.apply_background_shells_scan(
+            &terminal_id,
+            std::path::Path::new("/t/s1.jsonl"),
+            std::slice::from_ref(&running),
+        ));
+        let terminal = &state.terminals[&terminal_id];
+        assert_eq!(terminal.background_shells().len(), 1);
+        assert_eq!(terminal.background_shell_history().len(), 1);
+        assert_eq!(
+            state.background_shell_changed_terminals,
+            vec![terminal_id.clone()]
+        );
+
+        // Unchanged rescan queues nothing.
+        state.background_shell_changed_terminals.clear();
+        assert!(!state.apply_background_shells_scan(
+            &terminal_id,
+            std::path::Path::new("/t/s1.jsonl"),
+            std::slice::from_ref(&running),
+        ));
+        assert!(state.background_shell_changed_terminals.is_empty());
+
+        // Session change clears shells at once and queues the change.
+        let mut event = claude_session_report(pane_id, "s2", "/t/s2.jsonl");
+        if let AppEvent::AgentSessionReported {
+            seq,
+            session_start_source,
+            ..
+        } = &mut event
+        {
+            *seq = Some(2);
+            *session_start_source = Some("clear".into());
+        }
+        state.handle_app_event(event);
+        let terminal = &state.terminals[&terminal_id];
+        assert!(terminal.background_shells().is_empty());
+        assert!(terminal.background_shell_history().is_empty());
+        assert_eq!(state.background_shell_changed_terminals, vec![terminal_id]);
+    }
+
+    #[test]
+    fn background_shell_linger_prunes_and_exit_clears() {
+        use crate::subagents::{ShellState, ShellStatus};
+        let (mut state, pane_id, terminal_id) = state_with_live_claude("s1");
+        let path = std::path::Path::new("/t/s1.jsonl");
+        state.apply_background_shells_scan(
+            &terminal_id,
+            path,
+            &[shell_record("b1", ShellStatus::Running)],
+        );
+        state.apply_background_shells_scan(
+            &terminal_id,
+            path,
+            &[shell_record("b1", ShellStatus::Killed)],
+        );
+        assert_eq!(
+            state.terminals[&terminal_id].background_shells()[0].state,
+            ShellState::Killed
+        );
+        state.background_shell_changed_terminals.clear();
+        let deadline = state.next_subagent_prune_deadline().expect("deadline");
+        assert!(state.prune_subagents_at(deadline));
+        assert!(state.terminals[&terminal_id].background_shells().is_empty());
+        assert_eq!(
+            state.terminals[&terminal_id]
+                .background_shell_history()
+                .len(),
+            1
+        );
+        assert_eq!(
+            state.background_shell_changed_terminals,
+            vec![terminal_id.clone()]
+        );
+
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Claude),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: true,
+            observed_at: std::time::Instant::now(),
+        });
+        assert!(state.terminals[&terminal_id]
+            .background_shell_history()
+            .is_empty());
     }
 
     #[test]

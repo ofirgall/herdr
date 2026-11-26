@@ -162,6 +162,10 @@ pub(super) fn snapshot_with_completions(
                 .parse_pane_id(&pane_id)
                 .map(|(ws_idx, pane)| app.pane_subagent_lists(ws_idx, pane))
                 .unwrap_or_default();
+            let (background_shells, background_shell_history) = app
+                .parse_pane_id(&pane_id)
+                .map(|(ws_idx, pane)| app.pane_background_shell_lists(ws_idx, pane))
+                .unwrap_or_default();
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
@@ -185,6 +189,8 @@ pub(super) fn snapshot_with_completions(
                 token_links,
                 subagents,
                 subagent_history,
+                background_shells,
+                background_shell_history,
                 focused,
             }
         })
@@ -905,6 +911,73 @@ mod tests {
         assert_eq!(
             agent.subagent_history[2].state,
             crate::api::schema::SubagentStatus::Done
+        );
+    }
+
+    #[test]
+    fn snapshot_projects_background_shells_and_history_per_agent() {
+        use crate::subagents::{BackgroundShell, ShellState};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let workspace = crate::workspace::Workspace::test_new("shells");
+        let pane = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let terminal_id = app.state.terminal_id_for_pane(0, pane).expect("terminal");
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal state")
+            .agent_name = Some("claude".into());
+
+        let shell = |id: &str, state: ShellState| BackgroundShell {
+            id: id.into(),
+            command: format!("cmd {id}"),
+            description: format!("task {id}"),
+            state,
+            started_at: None,
+            ended_at: None,
+            done_at: None,
+        };
+        let before = snapshot(&app, "boot", 1, None, None);
+        assert!(before.agents[0].background_shells.is_empty());
+        assert!(before.agents[0].background_shell_history.is_empty());
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal state")
+            .set_background_shells(
+                vec![shell("a", ShellState::Running)],
+                vec![
+                    shell("a", ShellState::Running),
+                    shell("b", ShellState::Interrupted),
+                    shell("c", ShellState::Killed),
+                ],
+            );
+        let after = snapshot(&app, "boot", 2, None, None);
+        let agent = &after.agents[0];
+        assert_ne!(before.agents, after.agents);
+        assert_eq!(agent.background_shells.len(), 1);
+        assert_eq!(
+            agent.background_shells[0].state,
+            crate::api::schema::BackgroundShellStatus::Running
+        );
+        assert_eq!(agent.background_shell_history.len(), 3);
+        assert_eq!(
+            agent.background_shell_history[1].state,
+            crate::api::schema::BackgroundShellStatus::Interrupted
+        );
+        assert_eq!(
+            agent.background_shell_history[2].state,
+            crate::api::schema::BackgroundShellStatus::Killed
         );
     }
 

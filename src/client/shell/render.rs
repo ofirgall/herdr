@@ -346,6 +346,7 @@ pub(super) fn render_shell(
         hits.subagent_toggles.clear();
         hits.subagent_modes.clear();
         hits.subagent_folds.clear();
+        hits.shell_folds.clear();
         hits.endpoint_agents.clear();
         hits.tab_scroll_left = Rect::default();
         hits.tab_scroll_right = Rect::default();

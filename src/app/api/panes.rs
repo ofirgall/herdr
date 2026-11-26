@@ -1,13 +1,13 @@
 use bytes::Bytes;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, PaneClearAgentAuthorityParams, PaneCopyMotion,
-    PaneCopyMotionParams, PaneCopySearchDirection, PaneCopySearchParams, PaneCurrentParams,
-    PaneDirection, PaneEdgesParams, PaneEdgesResult, PaneFocusDirectionParams,
-    PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo, PaneInputSetParams,
-    PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot, PaneLayoutSplit,
-    PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason, PaneMoveResult,
-    PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
+    EventData, EventEnvelope, EventKind, PaneBackgroundShellsParams, PaneBackgroundShellsScope,
+    PaneClearAgentAuthorityParams, PaneCopyMotion, PaneCopyMotionParams, PaneCopySearchDirection,
+    PaneCopySearchParams, PaneCurrentParams, PaneDirection, PaneEdgesParams, PaneEdgesResult,
+    PaneFocusDirectionParams, PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo,
+    PaneInputSetParams, PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot,
+    PaneLayoutSplit, PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason,
+    PaneMoveResult, PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
     PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
@@ -606,6 +606,45 @@ impl App {
                 pane_id: public_pane_id,
                 scope: params.scope,
                 subagents,
+            },
+        )
+    }
+
+    pub(super) fn handle_pane_background_shells(
+        &mut self,
+        id: String,
+        params: PaneBackgroundShellsParams,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.resolve_optional_pane(params.pane_id.as_deref()) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some(terminal) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+        else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let list = match params.scope {
+            PaneBackgroundShellsScope::Current => terminal.background_shells(),
+            PaneBackgroundShellsScope::History => terminal.background_shell_history(),
+        };
+        let background_shells = list
+            .iter()
+            .map(crate::app::creation::pane_background_shell_info)
+            .collect();
+
+        encode_success(
+            id,
+            ResponseResult::PaneBackgroundShells {
+                pane_id: public_pane_id,
+                scope: params.scope,
+                background_shells,
             },
         )
     }

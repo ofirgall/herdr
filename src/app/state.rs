@@ -1012,6 +1012,8 @@ pub struct AppState {
     /// Terminals whose subagent list changed since the app last flushed this
     /// queue (see `App::flush_subagent_changes`).
     pub(crate) subagent_changed_terminals: Vec<crate::terminal::TerminalId>,
+    /// Terminals whose background-shell lists changed since the last flush.
+    pub(crate) background_shell_changed_terminals: Vec<crate::terminal::TerminalId>,
     /// Last reported focus state for the outer terminal hosting herdr.
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
@@ -1262,6 +1264,7 @@ impl AppState {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             subagent_changed_terminals: Vec::new(),
+            background_shell_changed_terminals: Vec::new(),
             outer_terminal_focus: None,
             prefix_keys: vec![(KeyCode::Char('b'), KeyModifiers::CONTROL)],
             headless_size: (

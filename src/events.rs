@@ -131,6 +131,14 @@ pub enum AppEvent {
         records: Vec<crate::subagents::SubagentRecord>,
         parents: std::collections::HashMap<String, Option<String>>,
     },
+    /// A background tail of an agent's session transcript finished; carries
+    /// every background shell parsed so far (design D10).
+    BackgroundShellsScanned {
+        terminal_id: crate::terminal::TerminalId,
+        /// Transcript the tail was made for; stale results are dropped.
+        transcript: std::path::PathBuf,
+        shells: Vec<crate::subagents::ShellRecord>,
+    },
     /// A reporter supplied the command that resumes its own session.
     AgentResumeReported {
         pane_id: PaneId,

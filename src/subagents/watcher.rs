@@ -14,16 +14,24 @@
 //! directory. The target is upgraded when the deeper directory appears.
 //! Only `.meta.json` changes (plus creation/removal of the directories on the
 //! path) trigger work; subagent `.jsonl` writes are dropped before debouncing.
+//!
+//! Background shells (design D10) are tailed from the session transcript on
+//! the same thread: the transcript's directory is watched too (ref counted),
+//! only events for that exact path trigger a debounced incremental read, and
+//! the safety-net pass tails as well.
 
 use std::collections::HashMap;
-use std::io;
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use super::{attribute_parents, ClaudeSubagentSource, SubagentRecord, SubagentSource};
+use super::{
+    attribute_parents, ClaudeSubagentSource, ShellLog, ShellRecord, SubagentRecord, SubagentSource,
+};
 use crate::terminal::TerminalId;
 
 /// Coalescing window between the first relevant event and the scan.
@@ -58,6 +66,23 @@ pub struct ScanResult {
     pub parents: HashMap<String, Option<String>>,
 }
 
+/// Result of tailing a tracked terminal's transcript for background shells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellsResult {
+    pub terminal_id: TerminalId,
+    /// The transcript path as given to [`SubagentWatcher::track`].
+    pub transcript: PathBuf,
+    /// Every shell parsed so far, in start order.
+    pub shells: Vec<ShellRecord>,
+}
+
+/// What the watcher delivers to its sink.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatcherOutput {
+    Subagents(ScanResult),
+    Shells(ShellsResult),
+}
+
 enum Cmd {
     Track {
         terminal_id: TerminalId,
@@ -77,7 +102,7 @@ impl SubagentWatcher {
     /// Start the worker. `sink` receives every scan result and returns `false`
     /// once the consumer is gone, which stops the worker.
     pub fn spawn(
-        sink: impl FnMut(ScanResult) -> bool + Send + 'static,
+        sink: impl FnMut(WatcherOutput) -> bool + Send + 'static,
         config: WatcherConfig,
     ) -> io::Result<Self> {
         Self::spawn_with_source(Box::new(ClaudeSubagentSource), sink, config)
@@ -85,7 +110,7 @@ impl SubagentWatcher {
 
     pub fn spawn_with_source(
         source: Box<dyn SubagentSource>,
-        sink: impl FnMut(ScanResult) -> bool + Send + 'static,
+        sink: impl FnMut(WatcherOutput) -> bool + Send + 'static,
         config: WatcherConfig,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
@@ -101,8 +126,10 @@ impl SubagentWatcher {
                                     return;
                                 }
                                 // Subagent transcripts are written constantly; drop
-                                // events that only touch `.jsonl` files up front.
-                                if event.paths.iter().all(|p| is_jsonl(p)) {
+                                // events that only touch their `.jsonl` files up
+                                // front. Other `.jsonl` events (session transcripts)
+                                // pass and are path-filtered by the worker.
+                                if event.paths.iter().all(|p| is_subagent_jsonl(p)) {
                                     return;
                                 }
                                 let _ = fs_tx.send(Cmd::Fs(event.paths));
@@ -150,8 +177,9 @@ impl Drop for SubagentWatcher {
     }
 }
 
-fn is_jsonl(path: &Path) -> bool {
+fn is_subagent_jsonl(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "jsonl")
+        && path.components().any(|c| c.as_os_str() == "subagents")
 }
 
 fn is_meta_file(path: &Path) -> bool {
@@ -185,8 +213,56 @@ fn canonicalize_lenient(path: &Path) -> PathBuf {
     }
 }
 
+/// Incremental tail state for one transcript.
+struct ShellTail {
+    /// Canonicalized transcript path events are matched against.
+    path: PathBuf,
+    log: ShellLog,
+    offset: u64,
+    due: Option<Instant>,
+    /// Directory watch registered for the transcript's parent.
+    watched: Option<PathBuf>,
+    /// Last list sent, to suppress no-op deliveries.
+    sent: Option<Vec<ShellRecord>>,
+}
+
+impl ShellTail {
+    /// Read appended bytes (the whole file on first call). Returns whether a
+    /// result should be delivered.
+    fn read(&mut self) -> bool {
+        let Ok(mut file) = File::open(&self.path) else {
+            return false;
+        };
+        let Ok(len) = file.metadata().map(|m| m.len()) else {
+            return false;
+        };
+        if len < self.offset {
+            self.log.reset();
+            self.offset = 0;
+        }
+        if len > self.offset && file.seek(SeekFrom::Start(self.offset)).is_ok() {
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match file.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        self.log.feed(&buf[..n]);
+                        self.offset += n as u64;
+                    }
+                    Err(err) => {
+                        tracing::debug!(%err, "failed to read transcript for background shells");
+                        break;
+                    }
+                }
+            }
+        }
+        self.sent.as_deref() != Some(self.log.records())
+    }
+}
+
 struct Tracked {
     transcript: PathBuf,
+    shells: ShellTail,
     sub_dir: PathBuf,
     session_dir: PathBuf,
     project_dir: PathBuf,
@@ -207,6 +283,10 @@ impl Tracked {
         path.starts_with(&self.sub_dir) && is_meta_file(path)
     }
 
+    fn is_shell_relevant(&self, path: &Path) -> bool {
+        path == self.shells.path || path == self.project_dir
+    }
+
     fn desired_target(&self) -> &Path {
         if self.sub_dir.is_dir() {
             &self.sub_dir
@@ -222,7 +302,7 @@ impl Tracked {
 
 struct Worker {
     source: Box<dyn SubagentSource>,
-    sink: Box<dyn FnMut(ScanResult) -> bool + Send>,
+    sink: Box<dyn FnMut(WatcherOutput) -> bool + Send>,
     config: WatcherConfig,
     watcher: Option<RecommendedWatcher>,
     watch_refs: HashMap<PathBuf, usize>,
@@ -236,7 +316,7 @@ impl Worker {
             let wake = self
                 .tracked
                 .values()
-                .flat_map(|t| [t.debounce_due, Some(t.next_safety)])
+                .flat_map(|t| [t.debounce_due, t.shells.due, Some(t.next_safety)])
                 .flatten()
                 .min();
             let first = match wake {
@@ -284,6 +364,7 @@ impl Worker {
             return;
         };
         let sub_dir = canonicalize_lenient(&sub_dir);
+        let transcript_canon = canonicalize_lenient(&transcript);
         let (Some(session_dir), Some(project_dir), Some(projects_dir)) = (
             sub_dir.parent().map(Path::to_path_buf),
             sub_dir
@@ -303,6 +384,14 @@ impl Worker {
             terminal_id,
             Tracked {
                 transcript,
+                shells: ShellTail {
+                    path: transcript_canon,
+                    log: ShellLog::new(),
+                    offset: 0,
+                    due: Some(now),
+                    watched: None,
+                    sent: None,
+                },
                 sub_dir,
                 session_dir,
                 project_dir,
@@ -322,6 +411,9 @@ impl Worker {
             if let Some(path) = tracked.watched {
                 self.unwatch(&path);
             }
+            if let Some(path) = tracked.shells.watched {
+                self.unwatch(&path);
+            }
         }
     }
 
@@ -330,6 +422,9 @@ impl Worker {
         for tracked in self.tracked.values_mut() {
             if tracked.debounce_due.is_none() && paths.iter().any(|p| tracked.is_relevant(p)) {
                 tracked.debounce_due = Some(due);
+            }
+            if tracked.shells.due.is_none() && paths.iter().any(|p| tracked.is_shell_relevant(p)) {
+                tracked.shells.due = Some(due);
             }
         }
     }
@@ -365,9 +460,30 @@ impl Worker {
     /// while the target keeps deepening: a directory created between the
     /// existence check and the watch registration would otherwise be missed.
     fn retarget(&mut self, terminal_id: &TerminalId) {
+        self.watch_transcript_dir(terminal_id);
         for _ in 0..4 {
             if !self.retarget_once(terminal_id) {
                 break;
+            }
+        }
+    }
+
+    /// Watch the transcript's directory (once it exists) for transcript events.
+    fn watch_transcript_dir(&mut self, terminal_id: &TerminalId) {
+        let Some(tracked) = self.tracked.get(terminal_id) else {
+            return;
+        };
+        if tracked.shells.watched.is_some() || !tracked.project_dir.is_dir() {
+            return;
+        }
+        let dir = tracked.project_dir.clone();
+        let result = self.watch(&dir);
+        if let Some(tracked) = self.tracked.get_mut(terminal_id) {
+            match result {
+                Ok(()) => tracked.shells.watched = Some(dir),
+                Err(err) => {
+                    tracing::debug!(%err, path = %dir.display(), "failed to watch transcript directory");
+                }
             }
         }
     }
@@ -414,7 +530,11 @@ impl Worker {
         let due: Vec<TerminalId> = self
             .tracked
             .iter()
-            .filter(|(_, t)| t.debounce_due.is_some_and(|d| d <= now) || t.next_safety <= now)
+            .filter(|(_, t)| {
+                t.debounce_due.is_some_and(|d| d <= now)
+                    || t.shells.due.is_some_and(|d| d <= now)
+                    || t.next_safety <= now
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in due {
@@ -422,8 +542,31 @@ impl Worker {
             let Some(tracked) = self.tracked.get_mut(&id) else {
                 continue;
             };
+            let safety = tracked.next_safety <= now;
+            let meta_due = safety || tracked.debounce_due.is_some_and(|d| d <= now);
+            let shells_due = safety || tracked.shells.due.is_some_and(|d| d <= now);
+            if safety {
+                tracked.next_safety = Instant::now() + self.config.safety_rescan;
+            }
+            if shells_due {
+                tracked.shells.due = None;
+                if tracked.shells.read() {
+                    let shells = tracked.shells.log.records().to_vec();
+                    tracked.shells.sent = Some(shells.clone());
+                    let result = ShellsResult {
+                        terminal_id: id.clone(),
+                        transcript: tracked.transcript.clone(),
+                        shells,
+                    };
+                    if !(self.sink)(WatcherOutput::Shells(result)) {
+                        return false;
+                    }
+                }
+            }
+            if !meta_due {
+                continue;
+            }
             tracked.debounce_due = None;
-            tracked.next_safety = Instant::now() + self.config.safety_rescan;
             let records = self.source.scan(&tracked.sub_dir);
             attribute_parents(&tracked.sub_dir, &records, &mut tracked.parents);
             tracked
@@ -436,7 +579,7 @@ impl Worker {
                 records,
                 parents,
             };
-            if !(self.sink)(result) {
+            if !(self.sink)(WatcherOutput::Subagents(result)) {
                 return false;
             }
         }
@@ -454,8 +597,14 @@ mod tests {
 
     fn start(config: WatcherConfig) -> (SubagentWatcher, Receiver<ScanResult>) {
         let (tx, rx) = mpsc::channel();
-        let watcher = SubagentWatcher::spawn(move |scan| tx.send(scan).is_ok(), config)
-            .expect("spawn watcher");
+        let watcher = SubagentWatcher::spawn(
+            move |out| match out {
+                WatcherOutput::Subagents(scan) => tx.send(scan).is_ok(),
+                WatcherOutput::Shells(_) => true,
+            },
+            config,
+        )
+        .expect("spawn watcher");
         (watcher, rx)
     }
 
@@ -653,6 +802,99 @@ mod tests {
         std::fs::rename(&tmp_file, sub_dir.join("agent-x.meta.json")).expect("rename");
         wait_for(&rx, "finished record after rename", |s| {
             s.records.len() == 1 && s.records[0].finished
+        });
+    }
+
+    fn start_shells(config: WatcherConfig) -> (SubagentWatcher, Receiver<ShellsResult>) {
+        let (tx, rx) = mpsc::channel();
+        let watcher = SubagentWatcher::spawn(
+            move |out| match out {
+                WatcherOutput::Shells(res) => tx.send(res).is_ok(),
+                WatcherOutput::Subagents(_) => true,
+            },
+            config,
+        )
+        .expect("spawn watcher");
+        (watcher, rx)
+    }
+
+    fn wait_shells(rx: &Receiver<ShellsResult>, what: &str, pred: impl Fn(&ShellsResult) -> bool) {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(res) if pred(&res) => return,
+                Ok(_) => {}
+                Err(_) => panic!("timed out waiting for shells: {what}"),
+            }
+        }
+    }
+
+    fn append(path: &Path, text: &str) {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("open transcript");
+        file.write_all(text.as_bytes()).expect("append");
+    }
+
+    #[test]
+    fn transcript_appends_are_tailed_into_shell_results() {
+        let tmp = TempDir::new();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(&project).expect("mkdir");
+        let transcript = project.join("sid7.jsonl");
+        std::fs::write(&transcript, "").expect("transcript");
+        // A sibling session's transcript must not trigger anything.
+        let other = project.join("other.jsonl");
+        let id = TerminalId::alloc();
+
+        let (watcher, rx) = start_shells(quiet_safety());
+        watcher.track(id.clone(), transcript.clone());
+        wait_shells(&rx, "initial empty", |r| {
+            r.terminal_id == id && r.transcript == transcript && r.shells.is_empty()
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        while rx.try_recv().is_ok() {}
+        append(&other, "{\"run_in_background\":1}\n");
+        assert!(rx.recv_timeout(Duration::from_millis(1000)).is_err());
+
+        let use_line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 5","description":"nap","run_in_background":true}}]}}"#;
+        let result_line = r#"{"type":"user","timestamp":"2026-11-26T12:00:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]},"toolUseResult":{"backgroundTaskId":"b1"}}"#;
+        append(&transcript, &format!("{use_line}\n{result_line}\n"));
+        wait_shells(&rx, "running shell", |r| {
+            r.shells.len() == 1
+                && r.shells[0].id == "b1"
+                && r.shells[0].status == crate::subagents::ShellStatus::Running
+        });
+
+        let note = r#"{"type":"queue-operation","timestamp":"2026-11-26T12:01:00Z","content":"<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>\n</task-notification>"}"#;
+        append(&transcript, &format!("{note}\n"));
+        wait_shells(&rx, "failed shell", |r| {
+            r.shells.len() == 1 && r.shells[0].status == crate::subagents::ShellStatus::Failed
+        });
+
+        // Rewrite shorter than the offset: parser resets.
+        std::fs::write(&transcript, "{}\n").expect("rewrite");
+        wait_shells(&rx, "reset after rewrite", |r| r.shells.is_empty());
+    }
+
+    #[test]
+    fn existing_transcript_is_read_whole_on_first_pass() {
+        let tmp = TempDir::new();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(&project).expect("mkdir");
+        let transcript = project.join("sid8.jsonl");
+        let use_line = r#"{"message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"x","run_in_background":true}}]}}"#;
+        let result_line = r#"{"timestamp":"2026-11-26T12:00:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]},"toolUseResult":{"backgroundTaskId":"b9"}}"#;
+        std::fs::write(&transcript, format!("{use_line}\n{result_line}\n")).expect("write");
+        let id = TerminalId::alloc();
+        let (watcher, rx) = start_shells(quiet_safety());
+        watcher.track(id, transcript);
+        wait_shells(&rx, "preexisting shell", |r| {
+            r.shells.len() == 1 && r.shells[0].id == "b9"
         });
     }
 

@@ -62,6 +62,17 @@ impl App {
                 self.flush_subagent_changes();
                 changed
             }
+            AppEvent::BackgroundShellsScanned {
+                terminal_id,
+                transcript,
+                shells,
+            } => {
+                let changed =
+                    self.state
+                        .apply_background_shells_scan(&terminal_id, &transcript, &shells);
+                self.flush_subagent_changes();
+                changed
+            }
             ev @ AppEvent::TerminalBell { .. } => {
                 self.handle_internal_event(ev);
                 false
@@ -1179,6 +1190,9 @@ impl App {
             Method::PaneProcessInfo(params) => {
                 return self.handle_pane_process_info(request.id, params);
             }
+            Method::PaneBackgroundShells(params) => {
+                return self.handle_pane_background_shells(request.id, params);
+            }
             Method::PaneSubagents(params) => {
                 return self.handle_pane_subagents(request.id, params);
             }
@@ -1914,6 +1928,126 @@ mod tests {
             serde_json::to_value(&info.subagents).unwrap(),
             default["result"]["subagents"]
         );
+    }
+
+    #[tokio::test]
+    async fn pane_background_shells_returns_current_and_history_scopes() {
+        use crate::api::schema::{
+            Method, PaneBackgroundShellsParams, PaneBackgroundShellsScope, Request,
+        };
+        use crate::subagents::{BackgroundShell, ShellState};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("shells")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let target = app.public_pane_id(0, pane_id).unwrap();
+        let shell = |id: &str, state| BackgroundShell {
+            id: id.into(),
+            command: format!("cmd {id}"),
+            description: format!("d {id}"),
+            state,
+            started_at: None,
+            ended_at: None,
+            done_at: None,
+        };
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_background_shells(
+                vec![shell("live", ShellState::Running)],
+                vec![
+                    shell("live", ShellState::Running),
+                    shell("bad", ShellState::Failed),
+                    shell("old", ShellState::Interrupted),
+                ],
+            );
+
+        let mut call = |scope: Option<PaneBackgroundShellsScope>| {
+            let params = match scope {
+                Some(scope) => serde_json::json!({"pane_id": target, "scope": scope}),
+                None => serde_json::json!({"pane_id": target}),
+            };
+            let params: PaneBackgroundShellsParams = serde_json::from_value(params).unwrap();
+            let response = app.handle_api_request(Request {
+                id: "s".into(),
+                method: Method::PaneBackgroundShells(params),
+            });
+            serde_json::from_str::<serde_json::Value>(&response).unwrap()
+        };
+        let default = call(None);
+        assert_eq!(default["result"]["type"], "pane_background_shells");
+        assert_eq!(default["result"]["pane_id"], target);
+        assert_eq!(default["result"]["scope"], "current");
+        assert_eq!(
+            default["result"]["background_shells"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(call(Some(PaneBackgroundShellsScope::Current)), default);
+
+        let history = call(Some(PaneBackgroundShellsScope::History));
+        assert_eq!(history["result"]["scope"], "history");
+        let states: Vec<_> = history["result"]["background_shells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                (
+                    s["id"].as_str().unwrap().to_string(),
+                    s["state"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("live".to_string(), "running".to_string()),
+                ("bad".to_string(), "failed".to_string()),
+                ("old".to_string(), "interrupted".to_string()),
+            ]
+        );
+
+        let info = app.pane_info(0, pane_id).unwrap();
+        assert_eq!(
+            serde_json::to_value(&info.background_shells).unwrap(),
+            default["result"]["background_shells"]
+        );
+    }
+
+    #[tokio::test]
+    async fn pane_background_shells_unknown_pane_errors() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "s".into(),
+            method: crate::api::schema::Method::PaneBackgroundShells(
+                crate::api::schema::PaneBackgroundShellsParams {
+                    pane_id: Some("nope".into()),
+                    scope: Default::default(),
+                },
+            ),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["error"]["code"], "pane_not_found");
     }
 
     #[tokio::test]

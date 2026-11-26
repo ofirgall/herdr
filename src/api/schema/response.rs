@@ -7,10 +7,10 @@ use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
 };
 use super::panes::{
-    LayoutDescription, PaneEdgesResult, PaneFocusDirectionResult, PaneInfo, PaneLayoutSnapshot,
-    PaneMoveResult, PaneNeighborResult, PaneProcessInfo, PaneReadResult, PaneResizeResult,
-    PaneSubagentInfo, PaneSubagentsScope, PaneSwapResult, PaneTextPoint, PaneTextRange,
-    PaneZoomResult,
+    LayoutDescription, PaneBackgroundShellInfo, PaneBackgroundShellsScope, PaneEdgesResult,
+    PaneFocusDirectionResult, PaneInfo, PaneLayoutSnapshot, PaneMoveResult, PaneNeighborResult,
+    PaneProcessInfo, PaneReadResult, PaneResizeResult, PaneSubagentInfo, PaneSubagentsScope,
+    PaneSwapResult, PaneTextPoint, PaneTextRange, PaneZoomResult,
 };
 use super::plugins::{
     InstalledPluginInfo, PluginActionInfo, PluginCommandLogInfo, PluginInvocationContext,
@@ -146,6 +146,11 @@ pub enum ResponseResult {
         pane_id: String,
         scope: PaneSubagentsScope,
         subagents: Vec<PaneSubagentInfo>,
+    },
+    PaneBackgroundShells {
+        pane_id: String,
+        scope: PaneBackgroundShellsScope,
+        background_shells: Vec<PaneBackgroundShellInfo>,
     },
     LayoutExport {
         layout: LayoutDescription,

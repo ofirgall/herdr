@@ -238,6 +238,7 @@ fn reply_to_probe(request: ApiRequestMessage) {
                 agent_session: None,
                 scroll: None,
                 subagents: Vec::new(),
+                background_shells: Vec::new(),
                 revision: 0,
             },
         },

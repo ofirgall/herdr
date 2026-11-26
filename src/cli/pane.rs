@@ -263,6 +263,31 @@ mod tests {
     }
 
     #[test]
+    fn pane_background_shells_args_parse_scope_and_pane() {
+        let params = |values: &[&str]| match request("background-shells", values) {
+            Ok(crate::api::schema::Request {
+                method: Method::PaneBackgroundShells(params),
+                ..
+            }) => Ok(params),
+            Ok(_) => panic!("unexpected method"),
+            Err(err) => Err(err),
+        };
+        let default = params(&[]).unwrap();
+        assert_eq!(
+            default.scope,
+            crate::api::schema::PaneBackgroundShellsScope::Current
+        );
+        let history = params(&["--scope", "history", "--pane", "w1-1"]).unwrap();
+        assert_eq!(
+            history.scope,
+            crate::api::schema::PaneBackgroundShellsScope::History
+        );
+        assert!(history.pane_id.is_some());
+        assert!(params(&["--scope", "x"]).is_err());
+        assert!(params(&["--scope"]).is_err());
+    }
+
+    #[test]
     fn pane_projection_all_leaf_request_values() {
         use serde_json::json;
         let cases = [
@@ -300,6 +325,13 @@ mod tests {
                 vec!["--pane", "pane", "--scope", "history"],
                 "cli:pane:subagents",
                 "pane.subagents",
+                json!({"pane_id": "pane", "scope": "history"}),
+            ),
+            (
+                "background-shells",
+                vec!["--pane", "pane", "--scope", "history"],
+                "cli:pane:background_shells",
+                "pane.background_shells",
                 json!({"pane_id": "pane", "scope": "history"}),
             ),
             (

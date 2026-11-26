@@ -541,6 +541,10 @@ pub struct PaneInfo {
     /// omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subagents: Vec<PaneSubagentInfo>,
+    /// Claude background shells currently tracked for this pane's agent.
+    /// Display-only; omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background_shells: Vec<PaneBackgroundShellInfo>,
     pub revision: u64,
 }
 
@@ -591,6 +595,55 @@ pub struct PaneSubagentInfo {
     pub started_at_ms: Option<u64>,
     /// Unix milliseconds when the subagent finished (done) or was last active
     /// (interrupted). Omitted while running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundShellStatus {
+    Running,
+    Done,
+    Failed,
+    Killed,
+    /// History scope only: unfinished shell of an earlier run of a resumed
+    /// session.
+    Interrupted,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneBackgroundShellsScope {
+    // Shells currently shown for the pane (matches `PaneInfo.background_shells`).
+    #[default]
+    Current,
+    // Every background shell of the watched session, including finished and
+    // interrupted ones.
+    History,
+}
+
+crate::cli::projection::cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+    pub struct PaneBackgroundShellsParams => PaneBackgroundShellsProjection {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub pane_id: Option<String> => binding::target(false),
+        #[serde(default)]
+        pub scope: PaneBackgroundShellsScope => Field::new(PaneBackgroundShellsScope::Current).input(binding::background_shells_scope()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneBackgroundShellInfo {
+    pub id: String,
+    pub command: String,
+    pub description: String,
+    pub state: BackgroundShellStatus,
+    /// Unix milliseconds when the shell started, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
+    /// Unix milliseconds when the shell ended. Omitted while running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<u64>,
 }

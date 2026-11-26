@@ -82,6 +82,8 @@ pub enum Subscription {
     },
     #[serde(rename = "pane.subagents_changed")]
     PaneSubagentsChanged {},
+    #[serde(rename = "pane.background_shells_changed")]
+    PaneBackgroundShellsChanged {},
     #[serde(rename = "pane.scroll_changed")]
     PaneScrollChanged { pane_id: String },
     #[serde(rename = "layout.updated")]
@@ -222,6 +224,7 @@ pub enum EventKind {
     PaneAgentDetected,
     PaneAgentStatusChanged,
     PaneSubagentsChanged,
+    PaneBackgroundShellsChanged,
     LayoutUpdated,
     PullRequestsUpdated,
 }
@@ -255,6 +258,7 @@ impl EventKind {
             EventKind::PaneAgentDetected => "pane.agent_detected",
             EventKind::PaneAgentStatusChanged => "pane.agent_status_changed",
             EventKind::PaneSubagentsChanged => "pane.subagents_changed",
+            EventKind::PaneBackgroundShellsChanged => "pane.background_shells_changed",
             EventKind::LayoutUpdated => "layout.updated",
             EventKind::PullRequestsUpdated => "pull_requests.updated",
         }
@@ -289,6 +293,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentDetected,
     EventKind::PaneAgentStatusChanged,
     EventKind::PaneSubagentsChanged,
+    EventKind::PaneBackgroundShellsChanged,
     EventKind::LayoutUpdated,
     EventKind::PullRequestsUpdated,
 ];
@@ -566,6 +571,11 @@ pub enum EventData {
         pane_id: String,
         workspace_id: String,
         subagents: Vec<super::panes::PaneSubagentInfo>,
+    },
+    PaneBackgroundShellsChanged {
+        pane_id: String,
+        workspace_id: String,
+        background_shells: Vec<super::panes::PaneBackgroundShellInfo>,
     },
     LayoutUpdated {
         layout: super::panes::PaneLayoutSnapshot,

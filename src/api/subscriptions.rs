@@ -164,6 +164,9 @@ impl ActiveSubscription {
             Subscription::PaneSubagentsChanged {} => {
                 Ok(event_subscription(EventKind::PaneSubagentsChanged))
             }
+            Subscription::PaneBackgroundShellsChanged {} => {
+                Ok(event_subscription(EventKind::PaneBackgroundShellsChanged))
+            }
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
             Subscription::PaneOutputMatched {
                 pane_id,
@@ -721,6 +724,7 @@ mod tests {
             agent_session: None,
             scroll,
             subagents: Vec::new(),
+            background_shells: Vec::new(),
             revision: 0,
         }
     }
@@ -885,6 +889,29 @@ mod tests {
             subscription,
             ActiveSubscription::Event(ActiveEventSubscription {
                 event_kind: EventKind::PaneSubagentsChanged,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn pane_background_shells_subscription_uses_dedicated_event_kind() {
+        let event_hub = EventHub::default();
+        let (api_tx, _api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let subscription = ActiveSubscription::new(
+            Subscription::PaneBackgroundShellsChanged {},
+            "test",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+        )
+        .expect("pane background shells subscription");
+
+        assert!(matches!(
+            subscription,
+            ActiveSubscription::Event(ActiveEventSubscription {
+                event_kind: EventKind::PaneBackgroundShellsChanged,
                 ..
             })
         ));
