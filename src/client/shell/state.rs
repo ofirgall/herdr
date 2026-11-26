@@ -112,6 +112,8 @@ pub(super) struct ShellHitMap {
     /// `+N earlier` / `show fewer` rows of the background shells group:
     /// `(rect, pane_id)`.
     pub(super) shell_folds: Vec<(Rect, String)>,
+    /// `shells` group headers of agent children: `(rect, pane_id)`.
+    pub(super) shell_toggles: Vec<(Rect, String)>,
     /// Visible linked sidebar tokens; empty in the collapsed and multi-machine sidebars.
     pub(super) token_links: Vec<TokenLinkHit>,
     /// Pull request check list toggles: `(rect, pull request URL)`.

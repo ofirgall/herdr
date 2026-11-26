@@ -146,7 +146,7 @@ A `toggle_subagents` key binding, bound by default, SHALL collapse or expand the
 
 ### Requirement: Background shells shown as a separate group
 
-An expanded agent row SHALL show its background shells (of the active list mode) as a separate group after its subagent rows: a `shells` header row followed by one row per shell with a state indicator, the description or command, and right-aligned timing. The chevron and history-mode icon SHALL appear when an agent has subagents or background shells, and the running count SHALL include running shells. Collapse, history mode, folding, and clicking SHALL behave as for subagent rows.
+An expanded agent row SHALL show its background shells (of the active list mode) as a separate group after its subagent rows: a `shells` header row followed by one row per shell with a state indicator, the description or command, and right-aligned timing. The chevron and history-mode icon SHALL appear when an agent has subagents or background shells, and the running count SHALL include running shells. Collapse, history mode, folding, and clicking shell rows SHALL behave as for subagent rows. The `shells` header SHALL show the running shell count and an expand/collapse chevron, and clicking it SHALL show or hide that agent's shell rows only, as presentation state that is expanded by default, not persisted, and discarded when the pane closes.
 
 #### Scenario: Running background shell
 - **WHEN** an expanded agent has a running background shell described as "herdr server"
@@ -155,3 +155,8 @@ An expanded agent row SHALL show its background shells (of the active list mode)
 #### Scenario: No background shells
 - **WHEN** an agent has no background shells in the active list
 - **THEN** no `shells` header row SHALL be shown
+
+#### Scenario: Collapse the shells group
+- **WHEN** the user clicks the `shells` header of an expanded agent
+- **THEN** its shell rows SHALL be hidden while the header and its subagent rows stay shown
+- **AND** clicking the header again SHALL show the shell rows

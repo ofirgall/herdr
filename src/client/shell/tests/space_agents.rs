@@ -2824,7 +2824,9 @@ fn shells_only_agent_shows_chevron_count_header_and_rows() {
         "{rows:#?}"
     );
     let header = &rows[agent + 1];
-    assert!(body(header).ends_with("shells"), "{rows:#?}");
+    // `shells` on the left, the running count and chevron on the right.
+    assert!(body(header).contains("shells"), "{rows:#?}");
+    assert!(body(header).ends_with("1 ▾"), "{rows:#?}");
     assert!(header.contains('└') || header.contains("╰"), "{rows:#?}");
     assert!(body(&rows[agent + 2]).contains("$ server"), "{rows:#?}");
     assert!(body(&rows[agent + 2]).ends_with("2m14s"), "{rows:#?}");
@@ -2835,15 +2837,7 @@ fn shells_only_agent_shows_chevron_count_header_and_rows() {
         3,
         "{rows:#?}"
     );
-    // Header and shell rows focus the parent pane.
-    let y = (agent + 1) as u16;
-    let click = left_click(&mut state, 12, y);
-    assert!(matches!(
-        &click.actions[..],
-        [ClientShellAction::Endpoint { request, .. }]
-            if matches!(&request.method,
-                crate::api::schema::Method::PaneFocus(t) if t.pane_id == "pane_a")
-    ));
+    // Shell rows focus the parent pane.
     let click = left_click(&mut state, 12, (agent + 2) as u16);
     assert!(matches!(
         &click.actions[..],
@@ -2874,7 +2868,8 @@ fn shells_follow_subagents_with_branch_connectors_and_count_both() {
     assert!(branch(&rows[agent + 2]) && body(&rows[agent + 2]).contains("outline"));
     // The subagent group's last row is a branch because shells follow.
     assert!(branch(&rows[agent + 3]) && body(&rows[agent + 3]).contains("run tests"));
-    assert!(last(&rows[agent + 4]) && body(&rows[agent + 4]).ends_with("shells"));
+    assert!(last(&rows[agent + 4]) && body(&rows[agent + 4]).contains("shells"));
+    assert!(body(&rows[agent + 4]).ends_with("1 ▾"), "{rows:#?}");
     assert!(body(&rows[agent + 5]).contains("$ dev"), "{rows:#?}");
     assert_eq!(
         col(&rows[agent + 3], "├"),
@@ -3086,4 +3081,68 @@ fn agents_without_subagents_or_shells_are_unchanged_by_the_shells_group() {
     assert!(!rows.iter().any(|r| r.contains("shells")));
     assert!(state.hits.subagent_toggles.is_empty());
     assert!(state.hits.shell_folds.is_empty());
+}
+
+#[test]
+fn shells_header_collapses_only_the_shell_rows() {
+    let mut snapshot = mixed_snapshot();
+    set_shells(
+        &mut snapshot,
+        "pane_a",
+        vec![
+            shell("a", Shell::Running, "dev", Some(1_000), None),
+            shell("b", Shell::Done, "build", Some(1_100), Some(1_112)),
+        ],
+        vec![],
+    );
+    let mut state = subagent_state(snapshot);
+    let rows = compose_rows(&mut state);
+    let header = row_index(&rows, "shells");
+    assert_eq!(state.hits.shell_toggles.len(), 1);
+    let before = state.hits.workspaces[0].child_rows;
+
+    // Clicking the header (label or chevron) collapses the shell rows only.
+    let toggle = state.hits.shell_toggles[0].0;
+    assert_eq!(usize::from(toggle.y), header);
+    let outcome = click_hit(&mut state, toggle);
+    assert!(outcome.repaint && outcome.actions.is_empty());
+    let rows = compose_rows(&mut state);
+    let header = row_index(&rows, "shells");
+    assert!(body(&rows[header]).ends_with("1 ▸"), "{rows:#?}");
+    assert!(!rows
+        .iter()
+        .any(|r| r.contains("$ dev") || r.contains("build")));
+    assert!(
+        rows.iter().any(|r| r.contains("find auth code")),
+        "{rows:#?}"
+    );
+    assert_eq!(state.hits.workspaces[0].child_rows, before - 2);
+    // The agent row keeps counting the running shell.
+    assert!(
+        body(&rows[row_index(&rows, "↺")]).contains("3 ↺ ▾"),
+        "{rows:#?}"
+    );
+
+    // The chevron end of the header expands them again.
+    let toggle = state.hits.shell_toggles[0].0;
+    click_hit(
+        &mut state,
+        Rect::new(toggle.x + toggle.width - 1, toggle.y, 1, 1),
+    );
+    let rows = compose_rows(&mut state);
+    assert!(rows.iter().any(|r| r.contains("$ dev")), "{rows:#?}");
+    assert_eq!(state.hits.workspaces[0].child_rows, before);
+}
+
+#[test]
+fn collapsed_shells_state_is_pruned_with_the_agent() {
+    let mut state = shells_only_state();
+    let endpoint = state.active_endpoint_id.clone();
+    state.toggle_shells_expanded(&endpoint, "pane_a");
+    let mut view = state.subagent_views[&endpoint].clone();
+    assert!(view.shells_collapsed.contains("pane_a") && !view.is_empty());
+    let mut snapshot = agents_snapshot();
+    snapshot.agents.retain(|agent| agent.pane_id != "pane_a");
+    view.prune(&snapshot);
+    assert!(view.is_empty());
 }

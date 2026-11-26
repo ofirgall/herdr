@@ -71,3 +71,4 @@
 - [x] 11.3 API: `PaneInfo.background_shells`, `pane.background_shells` (scope), CLI `herdr pane background-shells`, event `pane.background_shells_changed`; schema + `docs/next` socket API/CLI docs; verify API tests for both scopes and the event
 - [x] 11.4 Wire `ClientShellAgent.background_shells` / `background_shell_history` (optional serde) and client-shell projection, refreshing the snapshot on change; verify wire round-trip and projection tests
 - [x] 11.5 Spaces sidebar `shells` group (header + rows, icons, timing, fold, count, collapse/history/keybinding/context menu, click focuses parent); verify render/click tests and a live client check with a real background shell
+- [x] 11.6 Make the `shells` header a toggle (running count + chevron, click collapses only the shell rows; per-agent presentation state, pruned with the agent); verify render/click tests and a live client check

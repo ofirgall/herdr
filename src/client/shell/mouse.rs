@@ -2184,6 +2184,18 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                let shell_toggle = self
+                    .hits
+                    .shell_toggles
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, pane_id)| pane_id.clone());
+                if let Some(pane_id) = shell_toggle {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.toggle_shells_expanded(&endpoint_id, &pane_id);
+                    outcome.repaint = true;
+                    return;
+                }
                 let shell_fold = self
                     .hits
                     .shell_folds

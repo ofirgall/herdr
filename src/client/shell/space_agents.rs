@@ -81,6 +81,9 @@ pub(super) struct SubagentViewState {
     pub(super) show_all: HashSet<String>,
     /// Panes showing every background shell row instead of the newest.
     pub(super) show_all_shells: HashSet<String>,
+    /// Panes whose `shells` group is collapsed to its header (shown by
+    /// default).
+    pub(super) shells_collapsed: HashSet<String>,
 }
 
 impl SubagentViewState {
@@ -89,6 +92,7 @@ impl SubagentViewState {
             && self.history.is_empty()
             && self.show_all.is_empty()
             && self.show_all_shells.is_empty()
+            && self.shells_collapsed.is_empty()
     }
 
     fn toggle(set: &mut HashSet<String>, pane_id: &str) {
@@ -109,6 +113,7 @@ impl SubagentViewState {
         self.history.retain(present);
         self.show_all.retain(present);
         self.show_all_shells.retain(present);
+        self.shells_collapsed.retain(present);
     }
 }
 
@@ -150,6 +155,10 @@ pub(super) struct SubagentSection<'a> {
     pub(super) shells_hidden: usize,
     /// Whether a fold row leads the shell rows.
     pub(super) shells_fold_row: bool,
+    /// Whether the shell rows show under the `shells` header.
+    pub(super) shells_expanded: bool,
+    /// Running shells in the active list, shown on the `shells` header.
+    pub(super) shells_running: usize,
 }
 
 impl<'a> SubagentSection<'a> {
@@ -204,6 +213,15 @@ impl<'a> SubagentSection<'a> {
             Vec::new()
         };
         let shells_group = !shells.is_empty();
+        let shells_running = shells
+            .iter()
+            .filter(|shell| shell.state == crate::api::schema::BackgroundShellStatus::Running)
+            .count();
+        let shells_expanded =
+            !view.is_some_and(|view| view.shells_collapsed.contains(&agent.pane_id));
+        if !shells_expanded {
+            shells.clear();
+        }
         let shells_fold_row = shells.len() > SUBAGENT_ROWS_MAX;
         let shells_hidden = if shells_fold_row && !show_all_shells {
             shells.len() - SUBAGENT_ROWS_MAX
@@ -216,6 +234,8 @@ impl<'a> SubagentSection<'a> {
             shells,
             shells_hidden,
             shells_fold_row,
+            shells_expanded,
+            shells_running,
             running,
             expanded,
             history_mode,
@@ -876,8 +896,48 @@ fn render_subagent_rows(
     );
     let label_x = connector_x + SUBAGENT_LEVEL_WIDTH;
     if label_x < right {
-        let width = super::render::display_width(SHELLS_LABEL).min(right - label_x);
+        // `shells` on the left, `[count] ▾` on the right edge like the agent
+        // row's chevron; the whole header toggles the shell rows.
+        let glyph = if section.shells_expanded {
+            "▾"
+        } else {
+            "▸"
+        };
+        let count = (section.shells_running > 0).then(|| section.shells_running.to_string());
+        let tail = match &count {
+            Some(count) => format!("{count} {glyph}"),
+            None => glyph.to_owned(),
+        };
+        let tail_width = super::render::display_width(&tail);
+        let available = right - label_x;
+        let label_room = if tail_width < available {
+            available - tail_width - 1
+        } else {
+            available
+        };
+        let width = super::render::display_width(SHELLS_LABEL).min(label_room);
         super::render::put_text(buffer, label_x, top, width, SHELLS_LABEL, dim_style);
+        if tail_width < available {
+            let tail_x = right - tail_width;
+            if let Some(count) = &count {
+                let count_width = super::render::display_width(count);
+                let count_style = Style::default().fg(status_color(
+                    crate::api::schema::AgentStatus::Working,
+                    palette,
+                ));
+                super::render::put_text(buffer, tail_x, top, count_width, count, count_style);
+            }
+            super::render::put_text(
+                buffer,
+                right - 1,
+                top,
+                1,
+                glyph,
+                Style::default().fg(palette.accent),
+            );
+        }
+        hits.shell_toggles
+            .push((Rect::new(label_x, top, available, 1), child.pane_id.clone()));
     }
     top += 1;
 
@@ -1439,6 +1499,12 @@ impl ClientShellState {
     ) {
         let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
         SubagentViewState::toggle(&mut view.show_all, pane_id);
+    }
+
+    /// Flips the `shells` group of `pane_id` between expanded and collapsed.
+    pub(super) fn toggle_shells_expanded(&mut self, endpoint_id: &ClientEndpointId, pane_id: &str) {
+        let view = self.subagent_views.entry(endpoint_id.clone()).or_default();
+        SubagentViewState::toggle(&mut view.shells_collapsed, pane_id);
     }
 
     /// Flips `pane_id` between its newest background shell rows and every row.
